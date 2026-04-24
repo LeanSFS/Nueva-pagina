@@ -132,7 +132,8 @@ export default function App() {
   // Client data
   const [clientName, setClientName] = useState('');
   const [clientPhone, setClientPhone] = useState('');
-  const [clientAddress, setClientAddress] = useState('');
+  const [clientConfirmedLocation, setClientConfirmedLocation] = useState(false);
+  const clientAddress = "Venezuela 1659, Cipolletti";
 
   // Refs for auto-scroll
   const step1Ref = useRef<HTMLDivElement>(null);
@@ -274,7 +275,7 @@ export default function App() {
   }, [slotsData, isLoadingSlots]);
 
   const handleFinalBooking = async () => {
-    if (!selectedDateStr || !selectedTime || !vehicle || !selectedService || !clientName || !clientPhone || !clientAddress) return;
+    if (!selectedDateStr || !selectedTime || !vehicle || !selectedService || !clientName || !clientPhone || !clientConfirmedLocation) return;
 
     setIsSubmitting(true);
     const result = await createBooking({
@@ -284,7 +285,7 @@ export default function App() {
       servicio: `${selectedService} – $${currentPrice}`,
       nombre: clientName,
       telefono: clientPhone,
-      direccion: clientAddress
+      direccion: "Servicio en Taller"
     });
 
     if (result.ok) {
@@ -301,8 +302,8 @@ export default function App() {
         `*Hora:* ${selectedTime}hs%0A%0A` +
         `*Cliente:* ${clientName}%0A` +
         `*Teléfono:* ${clientPhone}%0A` +
-        `*Dirección:* ${clientAddress}%0A%0A` +
-        `_¿Podrían confirmarme la disponibilidad?_`;
+        `*Ubicación:* Servicio en Taller (Venezuela 1659)%0A%0A` +
+        `_¿Podrían confirmarme el turno?_`;
 
       window.open(`https://wa.me/2995760611?text=${text}`, '_blank');
       
@@ -354,11 +355,11 @@ export default function App() {
                   className="relative z-20"
                 >
                   <h1 className="text-5xl md:text-8xl font-display font-black leading-[0.9] tracking-tighter mb-8 bg-gradient-to-b from-white via-white to-zinc-500 bg-clip-text text-transparent">
-                    Limpieza <br /> <span className="text-emerald-500 italic">Detallada</span> <br /> a domicilio.
+                    Limpieza <br /> <span className="text-emerald-500 italic">Detallada</span> <br /> en mi domicilio.
                   </h1>
                   
                   <p className="text-zinc-400 text-sm md:text-xl leading-relaxed max-w-xl mb-10 text-balance font-medium">
-                    Limpieza profunda exterior e interior. Detallado artesanal de plásticos, rejillas y juntas para un <span className="text-white">acabado original</span> sin dejar sensación grasa.
+                    Limpieza profunda exterior e interior. Detallado artesanal en nuestra ubicación para un <span className="text-white">acabado original</span> sin dejar sensación grasa.
                   </p>
                   
                   <div className="flex flex-col sm:flex-row items-center gap-6 mb-12">
@@ -778,7 +779,7 @@ export default function App() {
                                      TUS DATOS
                                   </h3>
                                   <div className="w-32 md:w-48 h-2 bg-emerald-500 mt-6 rounded-full" />
-                                  <p className="text-zinc-500 text-xs md:text-sm font-bold uppercase tracking-[0.2em] mt-4 ml-1">Completa tus datos para confirmar el servicio a domicilio</p>
+                                  <p className="text-zinc-500 text-xs md:text-sm font-bold uppercase tracking-[0.2em] mt-4 ml-1">Confirma tu turno y nuestra ubicación para el servicio</p>
                                </div>
                             </div>
                             
@@ -798,7 +799,7 @@ export default function App() {
                               </div>
 
                               <div className="space-y-2">
-                                <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 ml-1">Teléfono</label>
+                                <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 ml-1">WhatsApp</label>
                                 <div className="relative group">
                                   <Smartphone className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-600 group-focus-within:text-emerald-500 transition-colors" />
                                   <input 
@@ -812,16 +813,66 @@ export default function App() {
                               </div>
 
                               <div className="space-y-2 md:col-span-2">
-                                <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 ml-1">Dirección</label>
-                                <div className="relative group">
-                                  <MapIcon className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-600 group-focus-within:text-emerald-500 transition-colors" />
-                                  <input 
-                                    type="text" 
-                                    value={clientAddress}
-                                    onChange={(e) => setClientAddress(e.target.value)}
-                                    placeholder="Calle y número, barrio"
-                                    className="w-full bg-zinc-900/50 border border-white/5 rounded-xl py-4 pl-12 pr-4 text-white focus:outline-none focus:border-emerald-500 transition-all font-medium"
-                                  />
+                                <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 ml-1">Nuestra Ubicación: Venezuela 1659</label>
+                                <div className="space-y-4">
+                                  <div className="aspect-video w-full rounded-2xl overflow-hidden border border-white/10 grayscale-[0.5] contrast-[1.1] hover:grayscale-0 transition-all">
+                                    <iframe 
+                                      src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3102.13456789!2d-68.010!3d-38.932!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x960a3162383c9b7f%3A0xc6cb1c986c757c4c!2sVenezuela%201659%2C%20Cipolletti%2C%20R%C3%ADo%20Negro!5e0!3m2!1ses!2sar!4v1713965211234!5m2!1ses!2sar" 
+                                      width="100%" 
+                                      height="100%" 
+                                      style={{ border: 0 }} 
+                                      allowFullScreen={false} 
+                                      loading="lazy" 
+                                      referrerPolicy="no-referrer-when-downgrade"
+                                    />
+                                  </div>
+                                  
+                                  <div 
+                                    onClick={() => setClientConfirmedLocation(!clientConfirmedLocation)}
+                                    className={`p-6 rounded-2xl border-2 transition-all cursor-pointer flex items-center gap-5 group relative overflow-hidden ${
+                                      clientConfirmedLocation 
+                                      ? 'bg-emerald-500/10 border-emerald-500/50 shadow-[0_0_30px_rgba(16,185,129,0.1)]' 
+                                      : 'bg-zinc-900 border-zinc-800 hover:border-zinc-700'
+                                    }`}
+                                  >
+                                    <div className={`shrink-0 w-10 h-10 rounded-xl border-2 flex items-center justify-center transition-all duration-300 ${
+                                      clientConfirmedLocation 
+                                      ? 'bg-emerald-500 border-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.5)] rotate-0 scale-110' 
+                                      : 'border-zinc-700 group-hover:border-zinc-500 rotate-[-10deg]'
+                                    }`}>
+                                      {clientConfirmedLocation ? (
+                                        <CheckCircle2 className="w-6 h-6 text-night" />
+                                      ) : (
+                                        <div className="w-2 h-2 rounded-full bg-zinc-700 animate-pulse" />
+                                      )}
+                                    </div>
+                                    
+                                    <div className="flex-1">
+                                      <p className={`text-lg font-display font-black italic tracking-tight leading-none mb-1 transition-colors ${
+                                        clientConfirmedLocation ? 'text-emerald-400' : 'text-zinc-400 group-hover:text-zinc-200'
+                                      }`}>
+                                        {clientConfirmedLocation ? 'Ubicación confirmada' : 'Confirmar ubicación'}
+                                      </p>
+                                      <p className="text-xs text-zinc-500 font-medium leading-tight">
+                                        Entiendo que el servicio es en <span className="text-white">Venezuela 1659</span>.
+                                      </p>
+                                    </div>
+
+                                    {!clientConfirmedLocation && (
+                                      <div className="absolute right-4 animate-bounce-horizontal">
+                                        <div className="w-2 h-2 rounded-full bg-emerald-500/50" />
+                                      </div>
+                                    )}
+                                  </div>
+
+                                  <div className="bg-red-500/5 border border-red-500/20 rounded-xl p-4 flex items-start gap-3">
+                                    <div className="w-5 h-5 rounded-full bg-red-500/20 flex items-center justify-center shrink-0 mt-0.5">
+                                      <span className="text-red-400 text-[10px] font-black italic">!</span>
+                                    </div>
+                                    <p className="text-[11px] text-zinc-400 font-medium leading-relaxed">
+                                      Debido a un inconveniente técnico con mi vehículo, por el momento <span className="text-red-400 font-bold uppercase tracking-tight">no realizo servicios a domicilio</span>. Los lavados se realizan en la entrada de mi domicilio.
+                                    </p>
+                                  </div>
                                 </div>
                               </div>
                             </div>
@@ -853,7 +904,7 @@ export default function App() {
               <div className="w-auto h-10 md:h-12 px-3 bg-emerald-500 rounded-2xl flex items-center justify-center font-display font-black text-night text-xl md:text-2xl shadow-xl shadow-emerald-500/20 group-hover:rotate-12 transition-transform">LyS</div>
               <span className="font-display font-black text-xl md:text-3xl uppercase tracking-tighter text-white">LyS Lavados</span>
             </div>
-            <p className="text-zinc-500 text-[10px] font-black uppercase tracking-widest max-w-[200px]">Estética Automotriz a Domicilio. Cipolletti, Río Negro.</p>
+            <p className="text-zinc-500 text-[10px] font-black uppercase tracking-widest max-w-[200px]">Estética Automotriz en Cipolletti. Venezuela 1659.</p>
           </div>
 
           <div className="flex flex-col gap-6">
@@ -882,7 +933,7 @@ export default function App() {
 
       {/* Floating Price Indicator */}
       <AnimatePresence>
-        {vehicle && selectedService && selectedDateStr && selectedTime && clientName && clientPhone && clientAddress && (
+        {vehicle && selectedService && selectedDateStr && selectedTime && clientName && clientPhone && clientConfirmedLocation && (
           <motion.div
             initial={{ y: 20, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
