@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   ShieldCheck, 
@@ -87,6 +87,15 @@ const Navigation = ({ setView, view }: { setView: (v: 'home' | 'booking') => voi
   </nav>
 );
 
+// --- Support Components ---
+
+const SummaryItem = ({ label, value }: { label: string, value: string | undefined }) => (
+  <div className="flex justify-between items-center py-1 group/row">
+    <span className="text-[10px] font-black uppercase tracking-widest opacity-50">{label}</span>
+    <span className="text-sm font-display font-black italic tracking-tighter text-right group-hover/row:scale-105 transition-transform origin-right">{value || '---'}</span>
+  </div>
+);
+
 // --- Main App ---
 
 export default function App() {
@@ -124,6 +133,58 @@ export default function App() {
   const [clientName, setClientName] = useState('');
   const [clientPhone, setClientPhone] = useState('');
   const [clientAddress, setClientAddress] = useState('');
+
+  // Refs for auto-scroll
+  const step1Ref = useRef<HTMLDivElement>(null);
+  const step2Ref = useRef<HTMLDivElement>(null);
+  const step3Ref = useRef<HTMLDivElement>(null);
+  const step4Ref = useRef<HTMLDivElement>(null);
+
+  const scrollToSection = (ref: React.RefObject<HTMLDivElement>) => {
+    if (ref.current) {
+      ref.current.scrollIntoView({ 
+        behavior: 'smooth', 
+        block: 'start'
+      });
+    }
+  };
+
+  useEffect(() => {
+    if (view === 'booking') {
+      setTimeout(() => scrollToSection(step1Ref), 600);
+    }
+  }, [view]);
+
+  // Handle selections with explicit scroll triggers
+  const handleVehicleSelect = (type: VehicleType) => {
+    setVehicle(type);
+    setSelectedService(null);
+    setSelectedDateStr(null);
+    setSelectedTime(null);
+    setTimeout(() => scrollToSection(step2Ref), 600);
+  };
+
+  const handleServiceSelect = (service: ServiceKey) => {
+    setSelectedService(service);
+    setSelectedDateStr(null);
+    setSelectedTime(null);
+    setTimeout(() => scrollToSection(step3Ref), 600);
+  };
+
+  const handleTimeSelect = (time: string) => {
+    setSelectedTime(time);
+    setTimeout(() => scrollToSection(step4Ref), 600);
+  };
+
+  // Navigation handles
+  const handleStartBooking = () => {
+    // Reset all selection state to ensure we start at Step 1
+    setVehicle(null);
+    setSelectedService(null);
+    setSelectedDateStr(null);
+    setSelectedTime(null);
+    setView('booking');
+  };
 
   // Confirmation state
   const [showConfirmation, setShowConfirmation] = useState(false);
@@ -236,7 +297,7 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen pt-10 md:pt-14 pb-24 overflow-x-hidden">
+    <div className="min-h-screen pt-24 md:pt-32 pb-24 overflow-x-hidden">
       <Navigation setView={setView} view={view} />
       
       <AnimatePresence mode="wait">
@@ -249,16 +310,28 @@ export default function App() {
             transition={{ duration: 0.5 }}
           >
             {/* Hero Section */}
-            <section className="relative px-6 md:px-12 pt-28 pb-12 md:py-48 overflow-hidden min-h-[90vh] flex items-center">
+            <section className="relative px-6 md:px-12 pt-16 md:pt-48 pb-12 overflow-hidden min-h-[90vh] flex items-center">
+              {/* Background Image for Mobile and Desktop Overlay */}
+              <div className="absolute inset-0 -z-10 overflow-hidden">
+                <img 
+                  src="https://images.unsplash.com/photo-1552519507-da3b142c6e3d?q=80&w=2000&auto=format&fit=crop" 
+                  alt="Background Car" 
+                  className="w-full h-full object-cover object-[center_10%] opacity-[0.18] md:hidden"
+                  referrerPolicy="no-referrer"
+                />
+                <div className="absolute inset-0 bg-gradient-to-b from-night via-transparent to-night md:hidden" />
+              </div>
+
               {/* Ambient Lights */}
-              <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] bg-emerald-500/10 blur-[150px] -z-10 rounded-full animate-pulse" />
-              <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-emerald-500/10 blur-[180px] -z-10 rounded-full animate-float" style={{ animationDelay: '-3s' }} />
+              <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] bg-emerald-500/10 blur-[150px] -z-10 rounded-full animate-pulse md:block hidden" />
+              <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-emerald-500/10 blur-[180px] -z-10 rounded-full animate-float md:block hidden" style={{ animationDelay: '-3s' }} />
               
-              <div className="max-w-7xl mx-auto grid md:grid-cols-2 gap-12 md:gap-16 items-center">
+              <div className="max-w-7xl mx-auto grid md:grid-cols-2 gap-12 md:gap-16 items-center relative z-10">
                 <motion.div
                   initial={{ opacity: 0, y: 30 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ duration: 0.8, ease: "easeOut" }}
+                  className="relative z-20"
                 >
                   <h1 className="text-5xl md:text-8xl font-display font-black leading-[0.9] tracking-tighter mb-8 bg-gradient-to-b from-white via-white to-zinc-500 bg-clip-text text-transparent">
                     Limpieza <br /> <span className="text-emerald-500 italic">Detallada</span> <br /> a domicilio.
@@ -270,7 +343,7 @@ export default function App() {
                   
                   <div className="flex flex-col sm:flex-row items-center gap-6 mb-12">
                     <button 
-                      onClick={() => setView('booking')}
+                      onClick={handleStartBooking}
                       className="w-full sm:w-auto bg-emerald-500 text-night px-12 py-5 rounded-2xl font-display font-black text-xl italic tracking-tighter hover:bg-emerald-400 hover:shadow-[0_0_50px_rgba(16,185,129,0.3)] hover:scale-[1.02] active:scale-95 transition-all shadow-2xl shadow-emerald-500/20 flex items-center justify-center gap-3 group"
                     >
                       COTIZAR Y RESERVAR <ChevronRight className="w-7 h-7 group-hover:translate-x-1 transition-transform" />
@@ -307,11 +380,12 @@ export default function App() {
                   transition={{ duration: 1.2, delay: 0.2, ease: "circOut" }}
                   className="relative hidden md:block"
                 >
-                  <div className="aspect-[4/5] glass-card overflow-hidden relative shadow-[0_0_120px_rgba(0,0,0,0.8)] border-white/[0.1] rounded-[3rem] group">
+                  <div className="w-full h-full md:aspect-[4/5] md:glass-card overflow-hidden relative md:shadow-[0_0_120px_rgba(0,0,0,0.8)] md:border-white/[0.1] md:rounded-[3rem] group">
                     <img 
                       src="https://images.unsplash.com/photo-1552519507-da3b142c6e3d?q=80&w=2000&auto=format&fit=crop" 
                       alt="Luxury Car Detail" 
-                      className="w-full h-full object-cover scale-110 opacity-40 group-hover:scale-100 transition-all duration-[5s] grayscale group-hover:grayscale-0"
+                      className="w-full h-full object-cover opacity-40 transition-all duration-[5s] grayscale group-hover:grayscale-0"
+                      referrerPolicy="no-referrer"
                     />
                     <div className="absolute inset-0 bg-gradient-to-t from-night via-night/60 to-transparent" />
                     
@@ -331,7 +405,7 @@ export default function App() {
                     </div>
 
                     {/* Decorative technical line */}
-                    <div className="absolute top-12 left-1/2 -translate-x-1/2 w-px h-12 bg-gradient-to-b from-emerald-500 to-transparent opacity-50" />
+                    <div className="absolute top-12 left-1/2 -translate-x-1/2 w-px h-12 bg-gradient-to-b from-emerald-500 to-transparent opacity-50 hidden md:block" />
                   </div>
                 </motion.div>
               </div>
@@ -340,7 +414,7 @@ export default function App() {
             {/* Availability Banner */}
             <div className="px-5 md:px-12 mb-12">
               <div 
-                onClick={() => setView('booking')}
+                onClick={handleStartBooking}
                 className="max-w-6xl mx-auto group relative p-6 md:p-10 rounded-[2rem] border border-white/[0.05] bg-zinc-900/40 backdrop-blur-3xl flex flex-col md:flex-row items-center justify-between cursor-pointer overflow-hidden transition-all hover:bg-zinc-800/60"
               >
                 <div className="flex flex-col md:flex-row items-center gap-6 text-center md:text-left mb-6 md:mb-0">
@@ -430,7 +504,7 @@ export default function App() {
                       <div className="text-[10px] font-black uppercase tracking-[0.4em] mb-4 opacity-70">Nuestro Compromiso</div>
                       <h4 className="text-3xl md:text-5xl font-display font-black italic leading-[0.9] mb-8 tracking-tighter">MÁXIMA LIMPIEZA SIN ENGAÑOS.</h4>
                       <button 
-                        onClick={() => setView('booking')}
+                        onClick={handleStartBooking}
                         className="group/btn w-full bg-night text-white py-6 rounded-2xl font-display font-black italic text-xl tracking-tighter hover:scale-[1.02] flex items-center justify-center gap-4 transition-all"
                       >
                         RESERVAR EL LAVADO FULL <ArrowRight className="w-6 h-6 group-hover/btn:translate-x-2 transition-transform" />
@@ -454,25 +528,33 @@ export default function App() {
               <div className="max-w-6xl mx-auto">
                 <button 
                   onClick={() => setView('home')}
-                  className="mb-8 flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-zinc-500 hover:text-emerald-500 transition-colors"
+                  className="group mb-12 flex items-center gap-3 text-xs font-black uppercase tracking-widest text-zinc-500 hover:text-emerald-500 transition-all active:scale-95 py-2"
                 >
-                  <ArrowRight className="w-4 h-4 rotate-180" /> Volver al Inicio
+                  <span className="w-8 h-8 rounded-full border border-zinc-800 flex items-center justify-center group-hover:border-emerald-500/50 group-hover:bg-emerald-500/10 transition-colors">
+                    <ArrowRight className="w-4 h-4 rotate-180 transition-transform group-hover:-translate-x-1" />
+                  </span>
+                  Volver al Inicio
                 </button>
                 
                 <SectionHeader kicker="Calculador" title="Personaliza tu <span class='text-emerald-500'>Cuidado</span>" number="01" />
 
-                {/* Stepper 1: Vehicle */}
-                <div className="mb-12 md:mb-14">
-                  <h3 className="text-[10px] md:text-xs font-black uppercase tracking-[0.3em] mb-4 md:mb-6 flex items-center gap-4 text-zinc-500">
-                    <div className="flex-1 h-px bg-white/[0.05]" />
-                    <span className="flex-shrink-0">1. Tipo de vehículo</span>
-                    <div className="flex-1 h-px bg-white/[0.05]" />
-                  </h3>
+                <div ref={step1Ref} className="mb-20 md:mb-32 scroll-mt-32">
+                  <div className="flex flex-col mb-10 md:mb-16 relative">
+                     <span className="text-emerald-500 font-display font-black italic text-6xl md:text-[10rem] leading-none mb-2 select-none opacity-[0.07] absolute -top-10 md:-top-20 -left-4 md:-left-12">01</span>
+                     <div className="relative z-10">
+                        <h3 className="text-2xl md:text-5xl font-display font-black uppercase tracking-tighter flex items-center gap-4 text-white">
+                           <span className="bg-emerald-500 text-night px-5 py-2 rounded-2xl italic tracking-tighter shadow-[0_0_30px_rgba(16,185,129,0.3)]">1.</span>
+                           SELECCIONA TU VEHÍCULO
+                        </h3>
+                        <div className="w-32 md:w-48 h-2 bg-emerald-500 mt-6 rounded-full" />
+                        <p className="text-zinc-500 text-xs md:text-sm font-bold uppercase tracking-[0.2em] mt-4 ml-1">Elegí la categoría que mejor describa tu auto</p>
+                     </div>
+                  </div>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-6">
                     {VEHICLES.map((v) => (
                       <button
                         key={v.id}
-                        onClick={() => setVehicle(v.id as VehicleType)}
+                        onClick={() => handleVehicleSelect(v.id as VehicleType)}
                         className={`p-6 md:p-10 rounded-2xl md:rounded-3xl text-left transition-all relative overflow-hidden group ${
                           vehicle === v.id 
                           ? 'bg-emerald-500 text-night shadow-[0_15px_40px_rgba(16,185,129,0.2)]' 
@@ -502,23 +584,30 @@ export default function App() {
                 <AnimatePresence>
                   {vehicle && (
                     <motion.div
+                      ref={step2Ref}
                       initial={{ opacity: 0, height: 0, marginTop: 0 }}
-                      animate={{ opacity: 1, height: 'auto', marginTop: 40 }}
+                      animate={{ opacity: 1, height: 'auto', marginTop: 80 }}
                       exit={{ opacity: 0, height: 0, marginTop: 0 }}
-                      className="overflow-hidden"
+                      className="overflow-hidden scroll-mt-32 pb-20"
                     >
-                      <h3 className="text-[10px] md:text-xs font-black uppercase tracking-[0.3em] mb-4 md:mb-6 flex items-center gap-4 text-zinc-500">
-                        <div className="flex-1 h-px bg-white/[0.05]" />
-                        <span className="flex-shrink-0">2. Nivel de Servicio</span>
-                        <div className="flex-1 h-px bg-white/[0.05]" />
-                      </h3>
+                      <div className="flex flex-col mb-10 md:mb-16 relative">
+                         <span className="text-emerald-500 font-display font-black italic text-6xl md:text-[10rem] leading-none mb-2 select-none opacity-[0.07] absolute -top-10 md:-top-20 -left-4 md:-left-12">02</span>
+                         <div className="relative z-10">
+                            <h3 className="text-2xl md:text-5xl font-display font-black uppercase tracking-tighter flex items-center gap-4 text-white">
+                               <span className="bg-emerald-500 text-night px-5 py-2 rounded-2xl italic tracking-tighter shadow-[0_0_30px_rgba(16,185,129,0.3)]">2.</span>
+                               ELIGE TU SERVICIO
+                            </h3>
+                            <div className="w-32 md:w-48 h-2 bg-emerald-500 mt-6 rounded-full" />
+                            <p className="text-zinc-500 text-xs md:text-sm font-bold uppercase tracking-[0.2em] mt-4 ml-1">Selecciona el nivel de detalle que buscas</p>
+                         </div>
+                      </div>
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-2 md:gap-4 lg:gap-6">
                         {SERVICES.map((s) => (
                           <motion.div
                             key={s.id}
                             initial={{ opacity: 0, y: 10 }}
                             animate={{ opacity: 1, y: 0 }}
-                            onClick={() => setSelectedService(s.id)}
+                            onClick={() => handleServiceSelect(s.id)}
                             className={`p-6 md:p-8 rounded-3xl cursor-pointer border-2 transition-all relative group flex flex-col h-full ${
                               selectedService === s.id 
                               ? 'bg-emerald-500/[0.03] border-emerald-500 shadow-[0_0_40px_rgba(16,185,129,0.1)] ring-1 ring-emerald-500/10' 
@@ -561,16 +650,23 @@ export default function App() {
                 <AnimatePresence>
                   {selectedService && (
                     <motion.div 
+                      ref={step3Ref}
                       initial={{ opacity: 0, height: 0, marginTop: 0 }}
-                      animate={{ opacity: 1, height: 'auto', marginTop: 56 }}
+                      animate={{ opacity: 1, height: 'auto', marginTop: 80 }}
                       exit={{ opacity: 0, height: 0, marginTop: 0 }}
-                      className="overflow-hidden"
+                      className="overflow-hidden scroll-mt-32 pb-20"
                     >
-                      <h3 className="text-[10px] md:text-xs font-black uppercase tracking-[0.3em] mb-4 md:mb-6 flex items-center gap-4 text-zinc-500">
-                        <div className="flex-1 h-px bg-white/[0.05]" />
-                        <span className="flex-shrink-0">3. Fecha y Hora</span>
-                        <div className="flex-1 h-px bg-white/[0.05]" />
-                      </h3>
+                      <div className="flex flex-col mb-10 md:mb-16 relative">
+                         <span className="text-emerald-500 font-display font-black italic text-6xl md:text-[10rem] leading-none mb-2 select-none opacity-[0.07] absolute -top-10 md:-top-20 -left-4 md:-left-12">03</span>
+                         <div className="relative z-10">
+                            <h3 className="text-2xl md:text-5xl font-display font-black uppercase tracking-tighter flex items-center gap-4 text-white">
+                               <span className="bg-emerald-500 text-night px-5 py-2 rounded-2xl italic tracking-tighter shadow-[0_0_30px_rgba(16,185,129,0.3)]">3.</span>
+                               FECHA Y HORARIO
+                            </h3>
+                            <div className="w-32 md:w-48 h-2 bg-emerald-500 mt-6 rounded-full" />
+                            <p className="text-zinc-500 text-xs md:text-sm font-bold uppercase tracking-[0.2em] mt-4 ml-1">Encontrá el momento perfecto para el cuidado de tu auto</p>
+                         </div>
+                      </div>
                       
                       <div className="flex flex-col gap-8">
                         {/* Horizontal Date Picker */}
@@ -623,7 +719,7 @@ export default function App() {
                                 return (
                                   <button
                                     key={time}
-                                    onClick={() => setSelectedTime(time)}
+                                    onClick={() => handleTimeSelect(time)}
                                     className={`p-4 md:p-6 rounded-2xl border font-display font-black text-sm md:text-xl flex items-center justify-center gap-2 transition-all ${
                                       isSelected 
                                       ? 'bg-emerald-500 border-emerald-400 text-night' 
@@ -649,15 +745,22 @@ export default function App() {
                       <AnimatePresence>
                         {selectedTime && (
                           <motion.div
+                            ref={step4Ref}
                             initial={{ opacity: 0, height: 0, marginTop: 0 }}
-                            animate={{ opacity: 1, height: 'auto', marginTop: 56 }}
-                            className="overflow-hidden"
+                            animate={{ opacity: 1, height: 'auto', marginTop: 80 }}
+                            className="overflow-hidden scroll-mt-32 pb-20"
                           >
-                            <h3 className="text-[10px] md:text-xs font-black uppercase tracking-[0.3em] mb-4 md:mb-6 flex items-center gap-4 text-zinc-500">
-                              <div className="flex-1 h-px bg-white/[0.05]" />
-                              <span className="flex-shrink-0">4. Tus Datos</span>
-                              <div className="flex-1 h-px bg-white/[0.05]" />
-                            </h3>
+                            <div className="flex flex-col mb-10 md:mb-16 relative">
+                               <span className="text-emerald-500 font-display font-black italic text-6xl md:text-[10rem] leading-none mb-2 select-none opacity-[0.07] absolute -top-10 md:-top-20 -left-4 md:-left-12">04</span>
+                               <div className="relative z-10">
+                                  <h3 className="text-2xl md:text-5xl font-display font-black uppercase tracking-tighter flex items-center gap-4 text-white">
+                                     <span className="bg-emerald-500 text-night px-5 py-2 rounded-2xl italic tracking-tighter shadow-[0_0_30px_rgba(16,185,129,0.3)]">4.</span>
+                                     TUS DATOS
+                                  </h3>
+                                  <div className="w-32 md:w-48 h-2 bg-emerald-500 mt-6 rounded-full" />
+                                  <p className="text-zinc-500 text-xs md:text-sm font-bold uppercase tracking-[0.2em] mt-4 ml-1">Completa tus datos para confirmar el servicio a domicilio</p>
+                               </div>
+                            </div>
                             
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                               <div className="space-y-2">
@@ -727,7 +830,7 @@ export default function App() {
         <div className="max-w-7xl mx-auto grid md:grid-cols-3 gap-12 items-center text-center md:text-left">
           <div className="flex flex-col items-center md:items-start gap-4">
             <div className="flex items-center gap-3 group cursor-pointer">
-              <div className="w-10 h-10 md:w-12 md:h-12 bg-emerald-500 rounded-2xl flex items-center justify-center font-display font-black text-night text-xl md:text-2xl shadow-xl shadow-emerald-500/20 group-hover:rotate-12 transition-transform">L</div>
+              <div className="w-auto h-10 md:h-12 px-3 bg-emerald-500 rounded-2xl flex items-center justify-center font-display font-black text-night text-xl md:text-2xl shadow-xl shadow-emerald-500/20 group-hover:rotate-12 transition-transform">LyS</div>
               <span className="font-display font-black text-xl md:text-3xl uppercase tracking-tighter text-white">LyS Lavados</span>
             </div>
             <p className="text-zinc-500 text-[10px] font-black uppercase tracking-widest max-w-[200px]">Estética Automotriz a Domicilio. Cipolletti, Río Negro.</p>
