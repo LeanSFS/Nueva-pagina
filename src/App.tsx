@@ -229,7 +229,8 @@ export default function App() {
   const currentPrice = useMemo(() => {
     if (!vehicle || !selectedService) return null;
     const base = BASE_PRICES[selectedService] || 0;
-    const extra = TYPE_EXTRA[vehicle] || 0;
+    // Interior doesn't have extra for vehicle type per user request
+    const extra = selectedService === 'Interior' ? 0 : (TYPE_EXTRA[vehicle] || 0);
     return base + extra;
   }, [vehicle, selectedService]);
 
@@ -633,7 +634,7 @@ export default function App() {
                             </div>
 
                             <div className="mt-4 text-lg md:text-2xl font-display font-black text-white self-end">
-                              ${(BASE_PRICES[s.id] + (TYPE_EXTRA[vehicle!] || 0)).toLocaleString('es-AR')}
+                              ${((BASE_PRICES[s.id] || 0) + (s.id === 'Interior' ? 0 : (TYPE_EXTRA[vehicle!] || 0))).toLocaleString('es-AR')}
                             </div>
 
                             {s.isFeatured && (
