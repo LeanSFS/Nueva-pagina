@@ -120,19 +120,21 @@ export default function App() {
   }, []);
 
   const availableDates = useMemo(() => {
-    return slotsData.map(s => {
-      const [y, m, d] = s.fecha.split('-').map(Number);
-      return {
-        str: s.fecha,
-        date: new Date(y, m - 1, d)
-      };
-    });
+    return slotsData
+      .filter(s => s && s.fecha && s.fecha.includes('-'))
+      .map(s => {
+        const [y, m, d] = s.fecha.split('-').map(Number);
+        return {
+          str: s.fecha,
+          date: new Date(y, m - 1, d)
+        };
+      });
   }, [slotsData]);
 
   const availableTimes = useMemo(() => {
     if (!selectedDateStr) return [];
-    const dayData = slotsData.find(s => s.fecha === selectedDateStr);
-    return dayData ? dayData.slots : [];
+    const dayData = slotsData.find(s => s && s.fecha === selectedDateStr);
+    return dayData ? (dayData.slots || []) : [];
   }, [selectedDateStr, slotsData]);
 
   const currentPrice = useMemo(() => {
@@ -143,16 +145,20 @@ export default function App() {
   }, [vehicle, selectedService]);
 
   const firstAvailableInfo = useMemo(() => {
-    const firstDay = slotsData.find(s => (s.count || 0) > 0 || (s.slots && s.slots.length > 0));
+    const firstDay = slotsData.find(s => s && s.fecha && ((s.count || 0) > 0 || (s.slots && s.slots.length > 0)));
     if (firstDay) {
-      const [y, m, d] = firstDay.fecha.split('-').map(Number);
-      const date = new Date(y, m - 1, d);
-      const options: Intl.DateTimeFormatOptions = { weekday: 'long', day: 'numeric', month: 'long' };
-      const formatted = date.toLocaleDateString('es-AR', options);
-      return {
-        day: formatted.charAt(0).toUpperCase() + formatted.slice(1),
-        times: (firstDay.slots || []).join(' / ')
-      };
+      try {
+        const [y, m, d] = firstDay.fecha.split('-').map(Number);
+        const date = new Date(y, m - 1, d);
+        const options: Intl.DateTimeFormatOptions = { weekday: 'long', day: 'numeric', month: 'long' };
+        const formatted = date.toLocaleDateString('es-AR', options);
+        return {
+          day: formatted.charAt(0).toUpperCase() + formatted.slice(1),
+          times: (firstDay.slots || []).join(' / ')
+        };
+      } catch (e) {
+        console.error('Error formatting date:', e);
+      }
     }
     return { day: 'Próximamente', times: '' };
   }, [slotsData]);
