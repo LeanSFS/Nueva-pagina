@@ -49,7 +49,7 @@ export const SERVICES: Service[] = [
 ];
 
 export const VEHICLES = [
-  { id: 'auto', name: 'Auto Chico/Med.', icon: '🚗', examples: 'Clio, Gol, 208, Cronos, Corolla' },
+  { id: 'auto', name: 'Auto Chico/Mediano', icon: '🚗', examples: 'Clio, Gol, 208, Cronos, Corolla' },
   { id: 'suv', name: 'SUV / Utilitario', icon: '🚙', examples: 'Duster, Tracker, Strada, Kangoo' },
   { id: 'pickup', name: 'Pickup / Grande', icon: '🛻', examples: 'Hilux, Amarok, Ranger, Toro' }
 ];

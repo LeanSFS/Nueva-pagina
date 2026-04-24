@@ -226,12 +226,31 @@ export default function App() {
     return dayData ? (dayData.slots || []) : [];
   }, [selectedDateStr, slotsData]);
 
-  const currentPrice = useMemo(() => {
-    if (!vehicle || !selectedService) return null;
-    const base = BASE_PRICES[selectedService] || 0;
-    // Interior doesn't have extra for vehicle type per user request
-    const extra = selectedService === 'Interior' ? 0 : (TYPE_EXTRA[vehicle] || 0);
+  // --- Support Components ---
+  
+  const calculatePrice = (service: ServiceKey | null, vType: VehicleType | null) => {
+    if (!service || !vType) return 0;
+    
+    // Exact overrides per user request
+    if (vType === 'pickup') {
+      if (service === 'Exterior') return 25000;
+      if (service === 'Interior') return 25000;
+      if (service === 'Full') return 50000;
+    }
+    
+    if (vType === 'suv') {
+      if (service === 'Interior') return 20000;
+      // Exterior SUV is 15000 + 5000 = 20000 based on constants
+      // Full SUV is 35000 + 5000 = 40000 based on constants
+    }
+
+    const base = BASE_PRICES[service] || 0;
+    const extra = TYPE_EXTRA[vType] || 0;
     return base + extra;
+  };
+  
+  const currentPrice = useMemo(() => {
+    return calculatePrice(selectedService, vehicle);
   }, [vehicle, selectedService]);
 
   const firstAvailableInfo = useMemo(() => {
@@ -634,7 +653,7 @@ export default function App() {
                             </div>
 
                             <div className="mt-4 text-lg md:text-2xl font-display font-black text-white self-end">
-                              ${((BASE_PRICES[s.id] || 0) + (s.id === 'Interior' ? 0 : (TYPE_EXTRA[vehicle!] || 0))).toLocaleString('es-AR')}
+                              ${calculatePrice(s.id, vehicle).toLocaleString('es-AR')}
                             </div>
 
                             {s.isFeatured && (
