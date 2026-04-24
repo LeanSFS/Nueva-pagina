@@ -1,0 +1,54 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Outfit:wght@300;400;500;600;700;800&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Outfit", sans-serif;
+  
+  --color-emerald-custom: #10b981;
+  --color-night: #060606;
+  --color-ink: #111111;
+  
+  --radius-xl: 1rem;
+  --radius-2xl: 1.5rem;
+  --radius-3xl: 2rem;
+}
+
+@layer base {
+  body {
+    @apply bg-night text-zinc-100 font-sans antialiased selection:bg-emerald-500/30 selection:text-emerald-200 overflow-x-hidden;
+  }
+}
+
+@layer components {
+  .glass-card {
+    @apply bg-zinc-900/40 backdrop-blur-xl border border-white/[0.04] rounded-2xl md:rounded-3xl shadow-2xl shadow-black/50;
+  }
+  
+  .glow-button {
+    @apply relative overflow-hidden transition-all duration-500 active:scale-95;
+  }
+  
+  .glow-button::after {
+    @apply content-[''] absolute inset-0 bg-emerald-500/10 opacity-0 transition-opacity duration-500;
+  }
+  
+  .glow-button:hover::after {
+    @apply opacity-100;
+  }
+
+  .text-balance {
+    text-wrap: balance;
+  }
+}
+
+@keyframes float {
+  0% { transform: translateY(0px) rotate(0deg); }
+  50% { transform: translateY(-10px) rotate(2deg); }
+  100% { transform: translateY(0px) rotate(0deg); }
+}
+
+.animate-float {
+  animation: float 6s ease-in-out infinite;
+}
+
