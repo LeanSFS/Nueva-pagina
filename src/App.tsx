@@ -95,10 +95,30 @@ export default function App() {
   const [selectedService, setSelectedService] = useState<ServiceKey | null>(null);
   
   // Availability state
-  const [slotsData, setSlotsData] = useState<TimeSlot[]>([]);
+  const [slotsData, setSlotsData] = useState<TimeSlot[]>(() => {
+    try {
+      const cached = sessionStorage.getItem('lys_slots_cache');
+      if (cached) {
+        const { data, timestamp } = JSON.parse(cached);
+        if (Date.now() - timestamp < 120000) return data;
+      }
+    } catch (e) {
+      console.error('Error reading initial cache:', e);
+    }
+    return [];
+  });
   const [selectedDateStr, setSelectedDateStr] = useState<string | null>(null); // YYYY-MM-DD
   const [selectedTime, setSelectedTime] = useState<string | null>(null);
-  const [isLoadingSlots, setIsLoadingSlots] = useState(true);
+  const [isLoadingSlots, setIsLoadingSlots] = useState(() => {
+    try {
+      const cached = sessionStorage.getItem('lys_slots_cache');
+      if (cached) {
+        const { timestamp } = JSON.parse(cached);
+        return (Date.now() - timestamp > 120000);
+      }
+    } catch (e) {}
+    return true;
+  });
 
   // Client data
   const [clientName, setClientName] = useState('');
@@ -111,9 +131,17 @@ export default function App() {
 
   useEffect(() => {
     async function load() {
-      setIsLoadingSlots(true);
-      const data = await fetchSlots();
-      setSlotsData(data);
+      // If we don't have data yet, show loading
+      if (slotsData.length === 0) {
+        setIsLoadingSlots(true);
+      }
+      
+      // Always fetch fresh data in background
+      const data = await fetchSlots(true);
+      
+      if (data && data.length > 0) {
+        setSlotsData(data);
+      }
       setIsLoadingSlots(false);
     }
     load();
@@ -145,6 +173,7 @@ export default function App() {
   }, [vehicle, selectedService]);
 
   const firstAvailableInfo = useMemo(() => {
+    if (isLoadingSlots) return { day: 'Cargando...', times: 'Buscando horarios disponibles...' };
     const firstDay = slotsData.find(s => s && s.fecha && ((s.count || 0) > 0 || (s.slots && s.slots.length > 0)));
     if (firstDay) {
       try {
@@ -161,7 +190,7 @@ export default function App() {
       }
     }
     return { day: 'Próximamente', times: '' };
-  }, [slotsData]);
+  }, [slotsData, isLoadingSlots]);
 
   const handleFinalBooking = async () => {
     if (!selectedDateStr || !selectedTime || !vehicle || !selectedService || !clientName || !clientPhone || !clientAddress) return;
@@ -319,10 +348,14 @@ export default function App() {
                     <CalendarDays className="w-8 h-8" />
                   </div>
                   <div>
-                    <div className="inline-block px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-500 text-[8px] font-black uppercase tracking-[0.2em] mb-2">Próxima Disponibilidad</div>
-                    <h3 className="text-2xl md:text-4xl font-display font-black italic tracking-tighter text-white">{firstAvailableInfo.day}</h3>
-                    <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest mt-1">
-                      {firstAvailableInfo.times ? `Horarios: ${firstAvailableInfo.times}` : 'Consultar disponibilidad por WhatsApp'}
+                    <div className="inline-block px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-500 text-[8px] font-black uppercase tracking-[0.2em] mb-2">
+                      {isLoadingSlots ? 'Verificando Agenda...' : 'Próxima Disponibilidad'}
+                    </div>
+                    <h3 className={`text-2xl md:text-4xl font-display font-black italic tracking-tighter text-white ${isLoadingSlots ? 'animate-pulse' : ''}`}>
+                      {firstAvailableInfo.day}
+                    </h3>
+                    <p className={`text-[10px] font-bold text-zinc-500 uppercase tracking-widest mt-1 ${isLoadingSlots ? 'animate-pulse' : ''}`}>
+                      {firstAvailableInfo.times ? `Horarios: ${firstAvailableInfo.times}` : (isLoadingSlots ? 'Por favor aguarde...' : 'Consultar disponibilidad por WhatsApp')}
                     </p>
                   </div>
                 </div>
@@ -543,32 +576,48 @@ export default function App() {
                         {/* Horizontal Date Picker */}
                         <div className="overflow-x-auto pb-4 -mx-5 px-5 md:mx-0 md:px-0 no-scrollbar">
                           <div className="flex gap-3">
-                            {availableDates.map(({ str, date }, i) => {
-                              const isSelected = selectedDateStr === str;
-                              return (
-                                <button
-                                  key={i}
-                                  onClick={() => { setSelectedDateStr(str); setSelectedTime(null); }}
-                                  className={`flex-shrink-0 w-16 md:w-20 p-4 md:p-5 rounded-2xl border transition-all flex flex-col items-center gap-1 ${
-                                    isSelected 
-                                    ? 'bg-emerald-500 border-emerald-400 text-night shadow-lg' 
-                                    : 'bg-zinc-900 border-white/[0.05] text-zinc-500 hover:border-white/10'
-                                  }`}
+                            {isLoadingSlots ? (
+                              Array.from({ length: 6 }).map((_, i) => (
+                                <div 
+                                  key={i} 
+                                  className="flex-shrink-0 w-16 md:w-20 p-4 md:p-5 rounded-2xl border border-white/[0.05] bg-zinc-900/50 animate-pulse flex flex-col items-center gap-2"
                                 >
-                                  <span className="text-[8px] md:text-[9px] font-black uppercase tracking-widest opacity-60">
-                                    {date.toLocaleDateString('es-AR', { weekday: 'short' }).replace('.', '')}
-                                  </span>
-                                  <span className="text-lg md:text-xl font-display font-black">{date.getDate()}</span>
-                                </button>
-                              );
-                            })}
+                                  <div className="w-8 h-2 bg-white/10 rounded" />
+                                  <div className="w-6 h-6 bg-white/10 rounded" />
+                                </div>
+                              ))
+                            ) : (
+                              availableDates.map(({ str, date }, i) => {
+                                const isSelected = selectedDateStr === str;
+                                return (
+                                  <button
+                                    key={i}
+                                    onClick={() => { setSelectedDateStr(str); setSelectedTime(null); }}
+                                    className={`flex-shrink-0 w-16 md:w-20 p-4 md:p-5 rounded-2xl border transition-all flex flex-col items-center gap-1 ${
+                                      isSelected 
+                                      ? 'bg-emerald-500 border-emerald-400 text-night shadow-lg' 
+                                      : 'bg-zinc-900 border-white/[0.05] text-zinc-500 hover:border-white/10'
+                                    }`}
+                                  >
+                                    <span className="text-[8px] md:text-[9px] font-black uppercase tracking-widest opacity-60">
+                                      {date.toLocaleDateString('es-AR', { weekday: 'short' }).replace('.', '')}
+                                    </span>
+                                    <span className="text-lg md:text-xl font-display font-black">{date.getDate()}</span>
+                                  </button>
+                                );
+                              })
+                            )}
                           </div>
                         </div>
 
                         {/* Time Slots */}
                         {selectedDateStr && (
                           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                            {availableTimes.length > 0 ? (
+                            {isLoadingSlots ? (
+                              Array.from({ length: 4 }).map((_, i) => (
+                                <div key={i} className="p-4 md:p-6 rounded-2xl border border-white/[0.05] bg-zinc-900/50 animate-pulse h-16 md:h-20" />
+                              ))
+                            ) : availableTimes.length > 0 ? (
                               availableTimes.map((time) => {
                                 const isSelected = selectedTime === time;
                                 return (
