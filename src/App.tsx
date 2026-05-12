@@ -358,9 +358,9 @@ export default function App() {
                     El detalle <br /> <span className="text-emerald-500 italic">marca</span> <br /> la diferencia.
                     </h1>
                   
-                  <p className="text-zinc-400 text-sm md:text-xl leading-relaxed max-w-xl mb-10 text-balance font-medium">
-                    Limpieza profunda exterior e interior. Detallado artesanal en nuestra ubicación para un <span className="text-white">acabado original</span> sin dejar sensación grasa.
-                  </p>
+                <p className="text-zinc-400 text-sm md:text-xl leading-relaxed max-w-xl mb-10 text-balance font-medium">
+                      Limpieza profunda interior y exterior con terminaciones naturales, atención al detalle y una <span className="text-white">experiencia premium</span>.
+                </p>
                   
                   <div className="flex flex-col sm:flex-row items-center gap-6 mb-12">
                     <button 
