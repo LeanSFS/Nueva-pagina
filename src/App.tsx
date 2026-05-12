@@ -28,6 +28,8 @@ import { VehicleType, ServiceKey } from './types.ts';
 import { fetchSlots, createBooking, TimeSlot } from './services/availabilityService.ts';
 import AdminCaja from './components/AdminCaja.tsx';
 
+import FacebookFeed from './components/FacebookFeed.tsx';
+
 // --- Internal Components ---
 
 const SectionHeader = ({ kicker, title, number }: { kicker: string, title: string, number: string }) => (
@@ -564,28 +566,18 @@ export default function App() {
                       </div>
                       <div className="w-px h-10 bg-white/10" />
                       <div className="flex flex-col">
-                        <span className="text-2xl font-display font-black text-white">+500</span>
+                        <span className="text-2xl font-display font-black text-white">+100</span>
                         <span className="text-[8px] font-black uppercase tracking-widest text-zinc-500">Autos Lavados</span>
                       </div>
                     </div>
                   </div>
                   <div className="lg:col-span-8">
-                    <div className="bg-zinc-900 shadow-2xl border border-white/5 rounded-[2.5rem] p-4 md:p-8 relative overflow-hidden group">
+                    <div className="bg-zinc-900 shadow-2xl border border-white/5 rounded-[2.5rem] p-4 md:p-10 relative overflow-hidden group">
                       <div className="absolute -top-20 -right-20 w-64 h-64 bg-emerald-500/10 blur-[100px] rounded-full pointer-events-none" />
                       
                       <div className="flex flex-col items-center">
-                        <div className="w-full max-w-[500px] rounded-2xl overflow-hidden bg-white/5 shadow-inner">
-                          <iframe 
-                            src="https://www.facebook.com/plugins/page.php?href=https%3A%2F%2Fwww.facebook.com%2Flys.lavados%2F&tabs=timeline&width=500&height=500&small_header=false&adapt_container_width=true&hide_cover=false&show_facepile=true&appId" 
-                            width="500" 
-                            height="500" 
-                            style={{ border: 'none', overflow: 'hidden', maxWidth: '100%', margin: '0 auto', display: 'block' }} 
-                            scrolling="no" 
-                            frameBorder="0" 
-                            allowFullScreen={true} 
-                            allow="autoplay; clipboard-write; encrypted-media; picture-in-picture; web-share"
-                            title="Facebook Feed"
-                          />
+                        <div className="w-full max-w-[500px] rounded-2xl overflow-hidden bg-[#f0f2f5] shadow-[0_0_50px_rgba(0,0,0,0.3)] min-h-[500px]">
+                          <FacebookFeed />
                         </div>
                         
                         <div className="mt-8">
