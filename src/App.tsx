@@ -354,9 +354,9 @@ export default function App() {
                   transition={{ duration: 0.8, ease: "easeOut" }}
                   className="relative z-20"
                 >
-                  <h1 className="text-5xl md:text-8xl font-display font-black leading-[0.9] tracking-tighter mb-8 bg-gradient-to-b from-white via-white to-zinc-500 bg-clip-text text-transparent">
-                    Limpieza <br /> <span className="text-emerald-500 italic">Detallada</span> <br /> en mi domicilio.
-                  </h1>
+                 <h1 className="text-5xl md:text-8xl font-display font-black leading-[0.9] tracking-tighter mb-8 bg-gradient-to-b from-white via-white to-zinc-500 bg-clip-text text-transparent">
+                    El detalle <br /> <span className="text-emerald-500 italic">marca</span> <br /> la diferencia.
+                    </h1>
                   
                   <p className="text-zinc-400 text-sm md:text-xl leading-relaxed max-w-xl mb-10 text-balance font-medium">
                     Limpieza profunda exterior e interior. Detallado artesanal en nuestra ubicación para un <span className="text-white">acabado original</span> sin dejar sensación grasa.
