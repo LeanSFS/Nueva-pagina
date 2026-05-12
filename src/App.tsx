@@ -224,7 +224,8 @@ export default function App() {
         const [y, m, d] = s.fecha.split('-').map(Number);
         return {
           str: s.fecha,
-          date: new Date(y, m - 1, d)
+          date: new Date(y, m - 1, d),
+          slotsCount: s.slots ? s.slots.length : (s.count || 0)
         };
       })
       .filter(item => item.date.getDay() !== 0); // 0 is Sunday
@@ -687,8 +688,12 @@ export default function App() {
                           <span className="text-3xl md:text-5xl group-hover:scale-110 transition-transform">{v.icon}</span>
                           <div>
                             <div className="font-display font-black text-sm md:text-xl md:mb-1">{v.name}</div>
-                            <div className={`text-[9px] md:text-[11px] font-black uppercase tracking-tighter opacity-60`}>
-                              {v.examples.split(',').slice(0, 2).join(', ')}
+                            <div className={`text-[9px] md:text-[11px] font-black uppercase tracking-tighter opacity-60 leading-tight`}>
+                              {v.examples.split(',')
+                                .map(ex => ex.trim())
+                                .sort(() => 0.5 - Math.random())
+                                .slice(0, 8)
+                                .join(', ')}...
                             </div>
                           </div>
                         </div>
@@ -805,29 +810,45 @@ export default function App() {
                                 </div>
                               ))
                             ) : (
-                              availableDates.map(({ str, date }, i) => {
+                              availableDates.map(({ str, date, slotsCount }, i) => {
                                 const isSelected = selectedDateStr === str;
+                                const isFull = slotsCount === 0;
+                                const isLow = slotsCount === 1;
+
                                 return (
                                   <button
                                     key={i}
+                                    disabled={isFull}
                                     onClick={() => { setSelectedDateStr(str); setSelectedTime(null); }}
-                                    className={`flex-shrink-0 w-16 md:w-20 p-4 md:p-5 rounded-2xl border transition-all flex flex-col items-center gap-1 ${
+                                    className={`flex-shrink-0 w-16 md:w-20 p-4 md:p-5 rounded-2xl border transition-all flex flex-col items-center gap-1 relative overflow-hidden ${
                                       isSelected 
                                       ? 'bg-emerald-500 border-emerald-400 text-night shadow-lg' 
-                                      : 'bg-zinc-900 border-white/[0.05] text-zinc-500 hover:border-white/10'
+                                      : isFull
+                                        ? 'bg-zinc-900 border-white/[0.03] text-zinc-600 cursor-not-allowed'
+                                        : 'bg-zinc-900 border-white/[0.05] text-zinc-500 hover:border-white/10'
                                     }`}
                                   >
                                     <div className="flex flex-col items-center gap-0.5">
-                                      <span className="text-[8px] md:text-[9px] font-black uppercase tracking-widest opacity-60">
+                                      <span className={`text-[8px] md:text-[9px] font-black uppercase tracking-widest ${isSelected ? 'opacity-70' : 'opacity-40'}`}>
                                         {date.toLocaleDateString('es-AR', { weekday: 'short' }).replace('.', '')}
                                       </span>
                                       {(() => {
                                         const weather = weatherData[str];
                                         if (!weather || !weather.isRainy) return null;
-                                        return <CloudRain className="w-3 h-3 text-blue-400 animate-pulse" />;
+                                        return <CloudRain className={`w-3 h-3 ${isSelected ? 'text-night/60' : 'text-blue-400'} animate-pulse`} />;
                                       })()}
                                     </div>
-                                    <span className="text-lg md:text-xl font-display font-black">{date.getDate()}</span>
+                                    <span className="text-lg md:text-xl font-display font-black leading-none">{date.getDate()}</span>
+                                    
+                                    {!isSelected && (
+                                      <div className={`absolute bottom-2 w-1 h-1 rounded-full ${
+                                        isFull 
+                                          ? 'bg-rose-500' 
+                                          : isLow 
+                                            ? 'bg-amber-500 animate-pulse' 
+                                            : 'bg-emerald-500'
+                                      }`} />
+                                    )}
                                   </button>
                                 );
                               })

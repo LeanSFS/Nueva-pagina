@@ -49,9 +49,9 @@ export const SERVICES: Service[] = [
 ];
 
 export const VEHICLES = [
-  { id: 'auto', name: 'Auto Chico/Mediano', icon: '🚗', examples: 'Clio, Gol, 208, Cronos, Corolla' },
-  { id: 'suv', name: 'SUV / Utilitario', icon: '🚙', examples: 'Duster, Tracker, Strada, Kangoo' },
-  { id: 'pickup', name: 'Pickup / Grande', icon: '🛻', examples: 'Hilux, Amarok, Ranger, Toro' }
+  { id: 'auto', name: 'Auto Chico/Mediano', icon: '🚗', examples: 'Clio, Gol, 208, Cronos, Corolla, Cruze, Golf, Etios, Sandero, Focus, Fiesta, Ka, Mobi, Argo, Polo, Virtus, Vento, Bora' },
+  { id: 'suv', name: 'SUV / Camioneta Chica', icon: '🚙', examples: 'Duster, Tracker, Strada, Saveiro, Compass, Kuga, Tucson, Creta, Cross, Renegade, HR-V, T-Cross, Nivus, Pulse, Territory' },
+  { id: 'pickup', name: 'Pickup / Grande', icon: '🛻', examples: 'Hilux, Amarok, Ranger, Toro, S10, Frontier, Ram, SW4, Trailblazer, F-150, Alaska, Oroch' }
 ];
 
 export const BASE_PRICES: Record<string, number> = {
