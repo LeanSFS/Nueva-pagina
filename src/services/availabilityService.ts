@@ -14,24 +14,27 @@ const WEBAPP_URL = 'https://script.google.com/macros/s/AKfycbyDd--FDaQPnqG_LQ4Mz
 let memoryCache: TimeSlot[] | null = null;
 
 export async function fetchSlots(forceRefresh = false): Promise<TimeSlot[]> {
+  if (forceRefresh) {
+    memoryCache = null;
+    sessionStorage.removeItem('lys_slots_cache');
+  }
+
   // Check memory cache first
-  if (memoryCache && !forceRefresh) return memoryCache;
+  if (memoryCache) return memoryCache;
 
   // Check session storage
-  if (!forceRefresh) {
-    try {
-      const cached = sessionStorage.getItem('lys_slots_cache');
-      if (cached) {
-        const { data, timestamp } = JSON.parse(cached);
-        // Cache valid for 2 minutes
-        if (Date.now() - timestamp < 120000) {
-          memoryCache = data;
-          return data;
-        }
+  try {
+    const cached = sessionStorage.getItem('lys_slots_cache');
+    if (cached) {
+      const { data, timestamp } = JSON.parse(cached);
+      // Cache valid for 2 minutes
+      if (Date.now() - timestamp < 120000) {
+        memoryCache = data;
+        return data;
       }
-    } catch (e) {
-      console.error('Error reading cache:', e);
     }
+  } catch (e) {
+    console.error('Error reading cache:', e);
   }
 
   try {
@@ -53,6 +56,11 @@ export async function fetchSlots(forceRefresh = false): Promise<TimeSlot[]> {
     console.error('Error fetching slots:', error);
     return memoryCache || [];
   }
+}
+
+export function clearCache() {
+  memoryCache = null;
+  sessionStorage.removeItem('lys_slots_cache');
 }
 
 export interface BookingData {

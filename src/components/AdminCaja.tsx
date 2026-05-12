@@ -15,12 +15,29 @@ import {
   FileText,
   AlertCircle,
   CheckCircle2,
-  X
+  X,
+  LayoutDashboard,
+  Wallet,
+  BarChart3 as BarChartIcon
 } from 'lucide-react';
+import AdminAgenda from './AdminAgenda.tsx';
+import AdminRendimientos from './AdminRendimientos.tsx';
 
 const WEBAPP_URL = 'https://script.google.com/macros/s/AKfycbyDd--FDaQPnqG_LQ4MzLuRmIQc99Y0WK1Axpwh3Tc4GX1DLCHn77XTr2-wBZUVCuVO/exec';
 const CATS_INGRESO = ['Lavado', 'Extra', 'Propina', 'Otros'];
 const CATS_GASTO = ['Insumos', 'Herramientas', 'Mantenimiento', 'Publicidad', 'Impuestos', 'Otros'];
+
+interface Booking {
+  id: string;
+  fecha: string;
+  hora: string;
+  nombre: string;
+  telefono: string;
+  tipo: string;
+  servicio: string;
+  estado?: string;
+  direccion?: string;
+}
 
 interface Movement {
   id: string;
@@ -37,7 +54,9 @@ interface Movement {
 }
 
 export default function AdminCaja({ onBack }: { onBack: () => void }) {
-  const [rows, setRows] = useState<Movement[]>([]);
+  const [activeTab, setActiveTab] = useState<'agenda' | 'caja' | 'stats'>('agenda');
+  const [allMovements, setAllMovements] = useState<Movement[]>([]);
+  const [bookings, setBookings] = useState<Booking[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -58,9 +77,22 @@ export default function AdminCaja({ onBack }: { onBack: () => void }) {
   const [filterMedio, setFilterMedio] = useState('');
   const [filterCategoria, setFilterCategoria] = useState('');
 
-  // Totals
+  // Filtrado local para la tabla de Caja
+  const filteredRows = useMemo(() => {
+    return allMovements.filter(m => {
+      if (filterFrom && m.fecha < filterFrom) return false;
+      if (filterTo && m.fecha > filterTo) return false;
+      if (filterTipo && m.tipo?.toLowerCase() !== filterTipo.toLowerCase()) return false;
+      if (filterEstado && m.estado?.toLowerCase() !== filterEstado.toLowerCase()) return false;
+      if (filterMedio && m.medio?.toLowerCase() !== filterMedio.toLowerCase()) return false;
+      if (filterCategoria && m.categoria !== filterCategoria) return false;
+      return true;
+    });
+  }, [allMovements, filterFrom, filterTo, filterTipo, filterEstado, filterMedio, filterCategoria]);
+
+  // Totals - Ahora basados en las filas filtradas para la vista de Caja
   const totals = useMemo(() => {
-    return rows.reduce((acc, row) => {
+    return filteredRows.reduce((acc, row) => {
       const monto = Number(row.monto_ars) || 0;
       if (row.tipo?.toLowerCase() === 'ingreso') {
         acc.ingresos += monto;
@@ -69,7 +101,7 @@ export default function AdminCaja({ onBack }: { onBack: () => void }) {
       }
       return acc;
     }, { ingresos: 0, gastos: 0 });
-  }, [rows]);
+  }, [filteredRows]);
 
   const netTotal = totals.ingresos - totals.gastos;
 
@@ -100,23 +132,12 @@ export default function AdminCaja({ onBack }: { onBack: () => void }) {
     setLoading(true);
     setError(null);
     try {
-      const params = new URLSearchParams({ 
-        action: 'caja_list',
-        t: Date.now().toString()
-      });
-      if (filterFrom) params.append('from', filterFrom);
-      if (filterTo) params.append('to', filterTo);
-      if (filterTipo) params.append('tipo', filterTipo.toLowerCase());
-      if (filterEstado) params.append('estado', filterEstado.toLowerCase());
-      if (filterMedio) params.append('medio', filterMedio.toLowerCase());
-      if (filterCategoria) params.append('categoria', filterCategoria);
-
-      const response = await fetch(`${WEBAPP_URL}?${params.toString()}`);
+      const response = await fetch(`${WEBAPP_URL}?action=caja_list&t=${Date.now()}`);
       const data = await response.json();
       if (!data.ok) throw new Error(data.error || 'Error al cargar datos');
       
       const sorted = (data.rows || []).sort((a: any, b: any) => (b.fecha || '').localeCompare(a.fecha || ''));
-      setRows(sorted);
+      setAllMovements(sorted);
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -124,8 +145,19 @@ export default function AdminCaja({ onBack }: { onBack: () => void }) {
     }
   };
 
+  const fetchBookings = async () => {
+    try {
+      const response = await fetch(`${WEBAPP_URL}?action=list&t=${Date.now()}`);
+      const data = await response.json();
+      if (data.ok) setBookings(data.rows || []);
+    } catch (e) {
+      console.error('Error fetching bookings:', e);
+    }
+  };
+
   useEffect(() => {
     fetchRows();
+    fetchBookings();
   }, []);
 
   const handleAdd = async () => {
@@ -206,11 +238,11 @@ export default function AdminCaja({ onBack }: { onBack: () => void }) {
   };
 
   const exportCSV = () => {
-    if (!rows.length) return;
+    if (!filteredRows.length) return;
     const header = ['Fecha', 'Tipo', 'Categoría', 'Concepto', 'Monto', 'Medio', 'Estado', 'Factura', 'Cliente', 'Notas'];
     const csvContent = [
       header.join(','),
-      ...rows.map(r => [
+      ...filteredRows.map(r => [
         r.fecha,
         r.tipo,
         r.categoria,
@@ -261,19 +293,58 @@ export default function AdminCaja({ onBack }: { onBack: () => void }) {
     }
   };
 
+  const customersMap = useMemo(() => {
+    const map: Record<string, number> = {};
+    bookings.forEach(b => {
+      const tel = b.telefono.replace(/\D/g, '');
+      if (tel) map[tel] = (map[tel] || 0) + 1;
+    });
+    return map;
+  }, [bookings]);
+
   return (
     <div className="min-h-screen bg-slate-950 text-white p-4 md:p-8 font-sans">
       <div className="max-w-6xl mx-auto">
-        <div className="flex items-center justify-between mb-8">
-          <button onClick={onBack} className="flex items-center gap-2 text-zinc-400 hover:text-white transition-colors">
+        <div className="flex flex-col md:flex-row items-center justify-between gap-6 mb-12">
+          <button onClick={onBack} className="flex items-center gap-2 text-zinc-500 hover:text-white transition-colors">
             <ArrowLeft className="w-5 h-5" />
-            <span>Volver</span>
+            <span>Salir del Panel</span>
           </button>
-          <h1 className="text-xl md:text-2xl font-display font-black italic tracking-tighter">Administración de Caja</h1>
+          
+          <div className="flex bg-zinc-900/50 p-1 rounded-2xl border border-white/5">
+            <button 
+              onClick={() => setActiveTab('agenda')}
+              className={`flex items-center gap-2 px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${activeTab === 'agenda' ? 'bg-emerald-500 text-night shadow-lg' : 'text-zinc-500 hover:text-white'}`}
+            >
+              <LayoutDashboard className="w-4 h-4" /> Agenda
+            </button>
+            <button 
+              onClick={() => setActiveTab('caja')}
+              className={`flex items-center gap-2 px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${activeTab === 'caja' ? 'bg-emerald-500 text-night shadow-lg' : 'text-zinc-500 hover:text-white'}`}
+            >
+              <Wallet className="w-4 h-4" /> Caja
+            </button>
+            <button 
+              onClick={() => setActiveTab('stats')}
+              className={`flex items-center gap-2 px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${activeTab === 'stats' ? 'bg-emerald-500 text-night shadow-lg' : 'text-zinc-500 hover:text-white'}`}
+            >
+              <BarChartIcon className="w-4 h-4" /> Rendimientos
+            </button>
+          </div>
+          
+          <h1 className="text-xl md:text-2xl font-display font-black italic tracking-tighter hidden md:block">LyS Lavados <span className="text-emerald-500">Admin</span></h1>
         </div>
 
-        {/* Stats Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+        {activeTab === 'agenda' ? (
+          <AdminAgenda 
+            customerVisits={customersMap}
+          />
+        ) : activeTab === 'stats' ? (
+          <AdminRendimientos bookings={bookings} movements={allMovements} />
+        ) : (
+          <>
+            {/* Stats Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
           <div className="bg-zinc-900 border border-white/5 p-6 rounded-2xl">
             <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500 mb-1">Ingresos</p>
             <p className="text-2xl font-display font-black text-emerald-500">{fmt(totals.ingresos)}</p>
@@ -419,7 +490,7 @@ export default function AdminCaja({ onBack }: { onBack: () => void }) {
                 </tr>
               </thead>
               <tbody>
-                {rows.map(r => (
+                {filteredRows.map(r => (
                   <React.Fragment key={r.id}>
                     <tr className="border-b border-white/[0.02] hover:bg-white/[0.02] transition-colors">
                       <td className="px-6 py-4 font-medium">{r.fecha}</td>
@@ -490,7 +561,7 @@ export default function AdminCaja({ onBack }: { onBack: () => void }) {
                     )}
                   </React.Fragment>
                 ))}
-                {!rows.length && !loading && (
+                {!filteredRows.length && !loading && (
                   <tr>
                     <td colSpan={8} className="px-6 py-12 text-center text-zinc-500 italic">No se encontraron movimientos para este periodo</td>
                   </tr>
@@ -504,6 +575,8 @@ export default function AdminCaja({ onBack }: { onBack: () => void }) {
             </table>
           </div>
         </div>
+      </>
+    )}
       </div>
 
       {/* Delete Modal */}

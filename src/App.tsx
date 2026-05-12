@@ -21,14 +21,16 @@ import {
   Navigation as MapIcon,
   X,
   Loader2,
-  Clock
+  Clock,
+  Sun,
+  Cloud,
+  CloudRain,
+  CloudLightning
 } from 'lucide-react';
 import { SERVICES, VEHICLES, BASE_PRICES, TYPE_EXTRA } from './constants.ts';
 import { VehicleType, ServiceKey } from './types.ts';
 import { fetchSlots, createBooking, TimeSlot } from './services/availabilityService.ts';
 import AdminCaja from './components/AdminCaja.tsx';
-
-import FacebookFeed from './components/FacebookFeed.tsx';
 
 // --- Internal Components ---
 
@@ -224,7 +226,8 @@ export default function App() {
           str: s.fecha,
           date: new Date(y, m - 1, d)
         };
-      });
+      })
+      .filter(item => item.date.getDay() !== 0); // 0 is Sunday
   }, [slotsData]);
 
   const availableTimes = useMemo(() => {
@@ -232,6 +235,33 @@ export default function App() {
     const dayData = slotsData.find(s => s && s.fecha === selectedDateStr);
     return dayData ? (dayData.slots || []) : [];
   }, [selectedDateStr, slotsData]);
+
+  // --- Weather Logic ---
+  const [weatherData, setWeatherData] = useState<Record<string, { isRainy: boolean, code: number }>>({});
+  
+  useEffect(() => {
+    async function fetchWeather() {
+      try {
+        const res = await fetch('https://api.open-meteo.com/v1/forecast?latitude=-38.9333&longitude=-67.9833&daily=weather_code&timezone=auto');
+        const data = await res.json();
+        if (data.daily) {
+          const map: Record<string, { isRainy: boolean, code: number }> = {};
+          data.daily.time.forEach((time: string, i: number) => {
+            const code = data.daily.weather_code[i];
+            // Codes for rain/showers/drizzle: 51, 53, 55, 61, 63, 65, 80, 81, 82
+            const isRainy = [51, 53, 55, 61, 63, 65, 80, 81, 82].includes(code);
+            map[time] = { isRainy, code };
+          });
+          setWeatherData(map);
+        }
+      } catch (e) {
+        console.error('Weather error:', e);
+      }
+    }
+    fetchWeather();
+  }, []);
+
+  const weatherForSelected = selectedDateStr ? weatherData[selectedDateStr] : null;
 
   // --- Support Components ---
   
@@ -551,48 +581,55 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Social Media Feed Section */}
-              <div className="mt-20">
-                <SectionHeader kicker="Trabajos Recientes" title="Nuestro <span class='text-emerald-500'>Muro</span> en Vivo" number="03" />
-                <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 items-center">
-                  <div className="lg:col-span-4">
-                    <p className="text-zinc-400 font-medium mb-6 leading-relaxed">
-                      Echa un vistazo a nuestras <span className="text-white">últimas entregas</span> directamente desde Facebook. Fotos reales de trabajos realizados en mi domicilio.
-                    </p>
-                    <div className="flex gap-4">
-                      <div className="flex flex-col">
-                        <span className="text-2xl font-display font-black text-white">4.9/5</span>
-                        <span className="text-[8px] font-black uppercase tracking-widest text-zinc-500">Valoración Media</span>
-                      </div>
-                      <div className="w-px h-10 bg-white/10" />
-                      <div className="flex flex-col">
-                        <span className="text-2xl font-display font-black text-white">+100</span>
-                        <span className="text-[8px] font-black uppercase tracking-widest text-zinc-500">Autos Lavados</span>
+              {/* Social Media CTA Section */}
+              <div className="mt-20 pb-20">
+                <SectionHeader kicker="Galería" title="Nuestros <span class='text-emerald-500'>Resultados</span>" number="03" />
+                <div className="bg-zinc-900 shadow-2xl border border-white/5 rounded-[3rem] p-8 md:p-16 relative overflow-hidden">
+                  <div className="absolute -top-24 -right-24 w-96 h-96 bg-emerald-500/10 blur-[120px] rounded-full pointer-events-none" />
+                  
+                  <div className="relative z-10 grid md:grid-cols-2 gap-12 items-center">
+                    <div>
+                      <p className="text-zinc-400 text-lg md:text-xl font-medium mb-10 leading-relaxed">
+                        No usamos fotos de catálogo. Te invitamos a ver nuestros <span className="text-white">trabajos reales</span>, videos del proceso y resultados finales en nuestras redes oficiales.
+                      </p>
+                      <div className="flex gap-12 mb-10">
+                        <div className="flex flex-col">
+                          <span className="text-4xl md:text-5xl font-display font-black text-white italic tracking-tighter">4.9/5</span>
+                          <span className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-600 mt-2">Satisfacción</span>
+                        </div>
+                        <div className="w-px h-16 bg-white/10" />
+                        <div className="flex flex-col">
+                          <span className="text-4xl md:text-5xl font-display font-black text-emerald-500 italic tracking-tighter">+100</span>
+                          <span className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-600 mt-2">Autos Entregados</span>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                  <div className="lg:col-span-8">
-                    <div className="bg-zinc-900 shadow-2xl border border-white/5 rounded-[2.5rem] p-4 md:p-10 relative overflow-hidden group">
-                      <div className="absolute -top-20 -right-20 w-64 h-64 bg-emerald-500/10 blur-[100px] rounded-full pointer-events-none" />
-                      
-                      <div className="flex flex-col items-center">
-                        <div className="w-full max-w-[500px] rounded-2xl overflow-hidden bg-[#f0f2f5] shadow-[0_0_50px_rgba(0,0,0,0.3)] min-h-[500px]">
-                          <FacebookFeed />
+
+                    <div className="flex flex-col gap-4">
+                      <a 
+                        href="https://instagram.com/lys.lavados" 
+                        target="_blank" 
+                        rel="noreferrer"
+                        className="w-full flex items-center justify-between p-6 bg-white/[0.03] hover:bg-emerald-500 hover:text-night border border-white/5 rounded-2xl transition-all group"
+                      >
+                        <div className="flex items-center gap-4">
+                          <Instagram className="w-8 h-8" />
+                          <span className="font-display font-black italic text-xl">INSTAGRAM</span>
                         </div>
-                        
-                        <div className="mt-8">
-                          <a 
-                            href="https://www.facebook.com/lys.lavados/" 
-                            target="_blank" 
-                            rel="noreferrer"
-                            className="inline-flex items-center gap-3 px-8 py-4 bg-white/5 hover:bg-white/10 border border-white/10 rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] text-zinc-400 hover:text-white transition-all group"
-                          >
-                            <Facebook className="w-4 h-4 text-emerald-500" />
-                            Ver en Facebook Oficial
-                            <ArrowRight className="w-4 h-4 opacity-0 -translate-x-2 group-hover:opacity-100 group-hover:translate-x-0 transition-all" />
-                          </a>
+                        <ArrowRight className="w-6 h-6 group-hover:translate-x-1 transition-transform" />
+                      </a>
+                      <a 
+                        href="https://facebook.com/lys.lavados" 
+                        target="_blank" 
+                        rel="noreferrer"
+                        className="w-full flex items-center justify-between p-6 bg-white/[0.03] hover:bg-emerald-500 hover:text-night border border-white/5 rounded-2xl transition-all group"
+                      >
+                        <div className="flex items-center gap-4">
+                          <Facebook className="w-8 h-8" />
+                          <span className="font-display font-black italic text-xl">FACEBOOK</span>
                         </div>
-                      </div>
+                        <ArrowRight className="w-6 h-6 group-hover:translate-x-1 transition-transform" />
+                      </a>
                     </div>
                   </div>
                 </div>
@@ -780,9 +817,16 @@ export default function App() {
                                       : 'bg-zinc-900 border-white/[0.05] text-zinc-500 hover:border-white/10'
                                     }`}
                                   >
-                                    <span className="text-[8px] md:text-[9px] font-black uppercase tracking-widest opacity-60">
-                                      {date.toLocaleDateString('es-AR', { weekday: 'short' }).replace('.', '')}
-                                    </span>
+                                    <div className="flex flex-col items-center gap-0.5">
+                                      <span className="text-[8px] md:text-[9px] font-black uppercase tracking-widest opacity-60">
+                                        {date.toLocaleDateString('es-AR', { weekday: 'short' }).replace('.', '')}
+                                      </span>
+                                      {(() => {
+                                        const weather = weatherData[str];
+                                        if (!weather || !weather.isRainy) return null;
+                                        return <CloudRain className="w-3 h-3 text-blue-400 animate-pulse" />;
+                                      })()}
+                                    </div>
                                     <span className="text-lg md:text-xl font-display font-black">{date.getDate()}</span>
                                   </button>
                                 );
@@ -793,7 +837,26 @@ export default function App() {
 
                         {/* Time Slots */}
                         {selectedDateStr && (
-                          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                          <div className="space-y-6">
+                            {weatherForSelected && weatherForSelected.isRainy && (
+                              <motion.div 
+                                initial={{ opacity: 0, y: -10 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                className="bg-amber-500/10 border border-amber-500/20 p-6 rounded-2xl flex items-start gap-4 mb-4"
+                              >
+                                <div className="w-12 h-12 rounded-xl bg-amber-500 text-night flex items-center justify-center flex-shrink-0 animate-pulse">
+                                  <Droplets className="w-6 h-6" />
+                                </div>
+                                <div>
+                                  <h4 className="text-amber-500 font-display font-black italic text-lg uppercase tracking-tight">¡Ojo con el clima!</h4>
+                                  <p className="text-zinc-400 text-xs font-medium leading-relaxed mt-1">
+                                    Hay <span className="text-amber-400">probabilidad de lluvia</span> para este día. Si lavás el auto y llueve, recordá que no podemos garantizar que se mantenga limpio. ¡Te recomendamos chequear bien o elegir otro día!
+                                  </p>
+                                </div>
+                              </motion.div>
+                            )}
+
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                             {isLoadingSlots ? (
                               Array.from({ length: 4 }).map((_, i) => (
                                 <div key={i} className="p-4 md:p-6 rounded-2xl border border-white/[0.05] bg-zinc-900/50 animate-pulse h-16 md:h-20" />
@@ -823,7 +886,8 @@ export default function App() {
                               </div>
                             )}
                           </div>
-                        )}
+                        </div>
+                      )}
                       </div>
 
                       {/* Stepper 4: Client Data */}
