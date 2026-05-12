@@ -26,6 +26,7 @@ import {
 import { SERVICES, VEHICLES, BASE_PRICES, TYPE_EXTRA } from './constants.ts';
 import { VehicleType, ServiceKey } from './types.ts';
 import { fetchSlots, createBooking, TimeSlot } from './services/availabilityService.ts';
+import AdminCaja from './components/AdminCaja.tsx';
 
 // --- Internal Components ---
 
@@ -44,13 +45,13 @@ const SectionHeader = ({ kicker, title, number }: { kicker: string, title: strin
 
 const Navigation = ({ setView, view }: { setView: (v: 'home' | 'booking') => void, view: string }) => (
   <nav className="absolute top-0 left-0 right-0 z-50 py-8 md:py-12 px-6 md:px-12 flex justify-between items-center transition-all duration-300">
-    <div 
-      onClick={() => {
-        setView('home');
-        window.scrollTo({ top: 0, behavior: 'smooth' });
-      }}
-      className="flex items-center gap-3 md:gap-4 group cursor-pointer"
-    >
+      <div 
+        onClick={() => {
+          setView('home');
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        }}
+        className="flex items-center gap-3 md:gap-4 group cursor-pointer"
+      >
       <div className="w-auto h-9 md:h-11 px-2.5 md:px-3 bg-emerald-500 rounded-xl md:rounded-2xl flex items-center justify-center font-display font-black text-night text-base md:text-xl shadow-[0_0_24px_rgba(16,185,129,0.2)] group-hover:rotate-3 transition-transform">LyS</div>
       <div className="relative">
         <span className="font-display font-black text-base md:text-2xl uppercase tracking-[0.05em] text-white leading-none block">Lavados</span>
@@ -99,7 +100,10 @@ const SummaryItem = ({ label, value }: { label: string, value: string | undefine
 // --- Main App ---
 
 export default function App() {
-  const [view, setView] = useState<'home' | 'booking'>('home');
+  const [view, setView] = useState<'home' | 'booking' | 'admin'>('home');
+  const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false);
+  const [adminPassword, setAdminPassword] = useState('');
+  const [showPasswordPrompt, setShowPasswordPrompt] = useState(false);
   const [vehicle, setVehicle] = useState<VehicleType | null>(null);
   const [selectedService, setSelectedService] = useState<ServiceKey | null>(null);
   
@@ -285,7 +289,7 @@ export default function App() {
       servicio: `${selectedService} – $${currentPrice}`,
       nombre: clientName,
       telefono: clientPhone,
-      direccion: "Servicio en Taller"
+      direccion: "Venezuela 1659 (Domicilio)"
     });
 
     if (result.ok) {
@@ -302,7 +306,7 @@ export default function App() {
         `*Hora:* ${selectedTime}hs%0A%0A` +
         `*Cliente:* ${clientName}%0A` +
         `*Teléfono:* ${clientPhone}%0A` +
-        `*Ubicación:* Servicio en Taller (Venezuela 1659)%0A%0A` +
+        `*Ubicación:* Venezuela 1659 (Domicilio)%0A%0A` +
         `_¿Podrían confirmarme el turno?_`;
 
       window.open(`https://wa.me/2995760611?text=${text}`, '_blank');
@@ -322,7 +326,17 @@ export default function App() {
       <Navigation setView={setView} view={view} />
       
       <AnimatePresence mode="wait">
-        {view === 'home' ? (
+        {view === 'admin' ? (
+          <motion.div
+            key="admin"
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 1.05 }}
+            transition={{ duration: 0.4 }}
+          >
+            <AdminCaja onBack={() => setView('home')} />
+          </motion.div>
+        ) : view === 'home' ? (
           <motion.div
             key="home"
             initial={{ opacity: 0, x: -20 }}
@@ -354,13 +368,13 @@ export default function App() {
                   transition={{ duration: 0.8, ease: "easeOut" }}
                   className="relative z-20"
                 >
-                 <h1 className="text-5xl md:text-8xl font-display font-black leading-[0.9] tracking-tighter mb-8 bg-gradient-to-b from-white via-white to-zinc-500 bg-clip-text text-transparent">
-                    El detalle <br /> <span className="text-emerald-500 italic">marca</span> <br /> la diferencia.
-                    </h1>
+                  <h1 className="text-5xl md:text-8xl font-display font-black leading-[0.9] tracking-tighter mb-8 bg-gradient-to-b from-white via-white to-zinc-500 bg-clip-text text-transparent">
+                    Estética <br /> <span className="text-emerald-500 italic">Vehicular</span> <br /> de Autor.
+                  </h1>
                   
-                <p className="text-zinc-400 text-sm md:text-xl leading-relaxed max-w-xl mb-10 text-balance font-medium">
-                      Limpieza profunda interior y exterior con terminaciones naturales, atención al detalle y una <span className="text-white">experiencia premium</span>.
-                </p>
+                  <p className="text-zinc-400 text-sm md:text-xl leading-relaxed max-w-xl mb-10 text-balance font-medium">
+                    Tratamientos de detailing con enfoque artesanal. Cuidado meticuloso y terminaciones de exhibición, ahora exclusivamente en mi domicilio particular en Cipolletti.
+                  </p>
                   
                   <div className="flex flex-col sm:flex-row items-center gap-6 mb-12">
                     <button 
@@ -464,7 +478,7 @@ export default function App() {
             <section id="services" className="px-5 md:px-12 py-16 max-w-6xl mx-auto">
               <SectionHeader kicker="Servicios" title="Lavado <span class='text-emerald-500'>Full</span>" number="02" />
               
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mt-12">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mt-12 pb-24">
                 <div className="space-y-6">
                   <div className="p-8 rounded-[2.5rem] bg-zinc-900 shadow-2xl border border-white/[0.05] relative overflow-hidden group">
                     <div className="absolute top-0 right-0 p-8 opacity-5 group-hover:opacity-10 transition-opacity">
@@ -534,8 +548,66 @@ export default function App() {
                   </div>
                 </div>
               </div>
+
+              {/* Social Media Feed Section */}
+              <div className="mt-20">
+                <SectionHeader kicker="Trabajos Recientes" title="Nuestro <span class='text-emerald-500'>Muro</span> en Vivo" number="03" />
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 items-center">
+                  <div className="lg:col-span-4">
+                    <p className="text-zinc-400 font-medium mb-6 leading-relaxed">
+                      Echa un vistazo a nuestras <span className="text-white">últimas entregas</span> directamente desde Facebook. Fotos reales de trabajos realizados en mi domicilio.
+                    </p>
+                    <div className="flex gap-4">
+                      <div className="flex flex-col">
+                        <span className="text-2xl font-display font-black text-white">4.9/5</span>
+                        <span className="text-[8px] font-black uppercase tracking-widest text-zinc-500">Valoración Media</span>
+                      </div>
+                      <div className="w-px h-10 bg-white/10" />
+                      <div className="flex flex-col">
+                        <span className="text-2xl font-display font-black text-white">+500</span>
+                        <span className="text-[8px] font-black uppercase tracking-widest text-zinc-500">Autos Lavados</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="lg:col-span-8">
+                    <div className="bg-zinc-900 shadow-2xl border border-white/5 rounded-[2.5rem] p-4 md:p-8 relative overflow-hidden group">
+                      <div className="absolute -top-20 -right-20 w-64 h-64 bg-emerald-500/10 blur-[100px] rounded-full pointer-events-none" />
+                      
+                      <div className="flex flex-col items-center">
+                        <div className="w-full max-w-[500px] rounded-2xl overflow-hidden bg-white/5 shadow-inner">
+                          <iframe 
+                            src="https://www.facebook.com/plugins/page.php?href=https%3A%2F%2Fwww.facebook.com%2Flys.lavados%2F&tabs=timeline&width=500&height=500&small_header=false&adapt_container_width=true&hide_cover=false&show_facepile=true&appId" 
+                            width="500" 
+                            height="500" 
+                            style={{ border: 'none', overflow: 'hidden', maxWidth: '100%', margin: '0 auto', display: 'block' }} 
+                            scrolling="no" 
+                            frameBorder="0" 
+                            allowFullScreen={true} 
+                            allow="autoplay; clipboard-write; encrypted-media; picture-in-picture; web-share"
+                            title="Facebook Feed"
+                          />
+                        </div>
+                        
+                        <div className="mt-8">
+                          <a 
+                            href="https://www.facebook.com/lys.lavados/" 
+                            target="_blank" 
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-3 px-8 py-4 bg-white/5 hover:bg-white/10 border border-white/10 rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] text-zinc-400 hover:text-white transition-all group"
+                          >
+                            <Facebook className="w-4 h-4 text-emerald-500" />
+                            Ver en Facebook Oficial
+                            <ArrowRight className="w-4 h-4 opacity-0 -translate-x-2 group-hover:opacity-100 group-hover:translate-x-0 transition-all" />
+                          </a>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </section>
           </motion.div>
+
         ) : (
           <motion.div
             key="booking"
@@ -832,35 +904,35 @@ export default function App() {
                                     className={`p-6 rounded-2xl border-2 transition-all cursor-pointer flex items-center gap-5 group relative overflow-hidden ${
                                       clientConfirmedLocation 
                                       ? 'bg-emerald-500/10 border-emerald-500/50 shadow-[0_0_30px_rgba(16,185,129,0.1)]' 
-                                      : 'bg-zinc-900 border-zinc-800 hover:border-zinc-700'
+                                      : 'bg-zinc-900 border-white/5 hover:border-emerald-500/50 hover:bg-zinc-800/80 shadow-[0_0_20px_rgba(16,185,129,0.05)]'
                                     }`}
                                   >
-                                    <div className={`shrink-0 w-10 h-10 rounded-xl border-2 flex items-center justify-center transition-all duration-300 ${
+                                    <div className={`shrink-0 w-12 h-12 rounded-xl border-2 flex items-center justify-center transition-all duration-300 ${
                                       clientConfirmedLocation 
                                       ? 'bg-emerald-500 border-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.5)] rotate-0 scale-110' 
-                                      : 'border-zinc-700 group-hover:border-zinc-500 rotate-[-10deg]'
+                                      : 'border-emerald-500/30 group-hover:border-emerald-500 animate-pulse rotate-[-5deg]'
                                     }`}>
                                       {clientConfirmedLocation ? (
-                                        <CheckCircle2 className="w-6 h-6 text-night" />
+                                        <CheckCircle2 className="w-7 h-7 text-night" />
                                       ) : (
-                                        <div className="w-2 h-2 rounded-full bg-zinc-700 animate-pulse" />
+                                        <div className="w-3 h-3 rounded-full bg-emerald-500 animate-ping" />
                                       )}
                                     </div>
                                     
                                     <div className="flex-1">
                                       <p className={`text-lg font-display font-black italic tracking-tight leading-none mb-1 transition-colors ${
-                                        clientConfirmedLocation ? 'text-emerald-400' : 'text-zinc-400 group-hover:text-zinc-200'
+                                        clientConfirmedLocation ? 'text-emerald-400' : 'text-zinc-200 group-hover:text-emerald-400'
                                       }`}>
-                                        {clientConfirmedLocation ? 'Ubicación confirmada' : 'Confirmar ubicación'}
+                                        {clientConfirmedLocation ? 'Ubicación confirmada' : 'Haz clic para confirmar ubicación'}
                                       </p>
-                                      <p className="text-xs text-zinc-500 font-medium leading-tight">
-                                        Entiendo que el servicio es en <span className="text-white">Venezuela 1659</span>.
+                                      <p className="text-[11px] text-zinc-500 font-medium leading-tight">
+                                        Entiendo que el servicio es en <span className="text-white">Venezuela 1659</span> (Mi domicilio).
                                       </p>
                                     </div>
 
                                     {!clientConfirmedLocation && (
                                       <div className="absolute right-4 animate-bounce-horizontal">
-                                        <div className="w-2 h-2 rounded-full bg-emerald-500/50" />
+                                        <ArrowRight className="w-5 h-5 text-emerald-500/50 group-hover:text-emerald-500" />
                                       </div>
                                     )}
                                   </div>
@@ -924,12 +996,63 @@ export default function App() {
           <div className="flex flex-col items-center md:items-end gap-6 text-zinc-600">
              <div className="text-[9px] font-black uppercase tracking-[0.4em] text-zinc-700">© 2026 LyS Premium Services</div>
              <div className="flex gap-4 text-[8px] font-black uppercase tracking-widest">
+               <span 
+                 onClick={() => {
+                   if (isAdminAuthenticated) {
+                     setView('admin');
+                   } else {
+                     setShowPasswordPrompt(true);
+                   }
+                 }}
+                 className="hover:text-emerald-500/50 cursor-pointer transition-colors opacity-30 hover:opacity-100"
+               >
+                 Admin
+               </span>
                <span className="hover:text-emerald-500/50 cursor-pointer transition-colors">Privacidad</span>
                <span className="hover:text-emerald-500/50 cursor-pointer transition-colors">Términos</span>
              </div>
           </div>
         </div>
       </footer>
+
+      {/* Admin Password Prompt */}
+      <AnimatePresence>
+        {showPasswordPrompt && (
+          <div className="fixed inset-0 z-[300] flex items-center justify-center p-6 bg-night/90 backdrop-blur-3xl">
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-zinc-900 border border-white/10 p-8 rounded-3xl w-full max-w-xs shadow-2xl"
+            >
+              <h3 className="text-xl font-display font-black italic text-white mb-6">Acceso Admin</h3>
+              <input 
+                autoFocus
+                type="password" 
+                value={adminPassword}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setAdminPassword(val);
+                  if (val.toLowerCase() === 'lys') {
+                    setIsAdminAuthenticated(true);
+                    setShowPasswordPrompt(false);
+                    setView('admin');
+                    setAdminPassword('');
+                  }
+                }}
+                placeholder="Contraseña"
+                className="w-full bg-black/50 border border-white/10 rounded-xl py-4 text-center text-xl tracking-[0.2em] text-white focus:border-emerald-500 outline-none transition-all"
+              />
+              <button 
+                onClick={() => setShowPasswordPrompt(false)}
+                className="w-full mt-4 text-[10px] font-black uppercase tracking-widest text-zinc-500 hover:text-white"
+              >
+                Cancelar
+              </button>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       {/* Floating Price Indicator */}
       <AnimatePresence>
