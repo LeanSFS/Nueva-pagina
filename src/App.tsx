@@ -1079,25 +1079,41 @@ export default function App() {
                             initial={{ opacity: 0, y: 10 }}
                             animate={{ opacity: 1, y: 0 }}
                             onClick={() => handleServiceSelect(s.id)}
-                            className={`p-6 md:p-8 rounded-3xl cursor-pointer border-2 transition-all relative group flex flex-col h-full ${
+                            className={`p-6 md:p-8 rounded-3xl cursor-pointer border-2 transition-all duration-300 relative group flex flex-col h-full ${
                               selectedService === s.id 
-                              ? 'bg-emerald-500/[0.03] border-emerald-500 shadow-[0_0_40px_rgba(16,185,129,0.1)] ring-1 ring-emerald-500/10' 
-                              : 'bg-zinc-900/40 border-white/[0.05] hover:border-white/10'
+                              ? 'bg-zinc-950 border-emerald-500 shadow-[0_0_50px_rgba(16,185,129,0.25)] ring-2 ring-emerald-500/20 scale-[1.02] md:scale-[1.03]' 
+                              : s.id === 'Full'
+                                ? 'bg-zinc-900/90 border-emerald-500/30 hover:border-emerald-500/60 shadow-[0_4px_30px_rgba(16,185,129,0.06)] hover:scale-[1.01]'
+                                : 'bg-zinc-900/40 border-white/[0.05] hover:border-white/10 hover:scale-[1.01]'
                             }`}
                           >
                             <div className="flex justify-between items-start mb-6">
-                              <div className="flex flex-col gap-1">
-                                 <div className={`text-[8px] md:text-[9px] font-black uppercase tracking-[0.4em] ${selectedService === s.id ? 'text-emerald-500' : 'text-zinc-600'}`}>{s.label}</div>
-                                 <h4 className={`font-display font-black italic text-xl md:text-3xl ${selectedService === s.id ? 'text-emerald-500' : 'text-white'}`}>{s.name}</h4>
+                              <div className="flex flex-col gap-1 w-[calc(100%-32px)]">
+                                 <div className={`text-[8px] md:text-[9px] font-black uppercase tracking-[0.4em] ${selectedService === s.id ? 'text-emerald-500' : s.id === 'Full' ? 'text-emerald-500/70' : 'text-zinc-600'}`}>{s.label}</div>
+                                 <h4 className={`font-display font-black italic text-xl md:text-3xl ${selectedService === s.id ? 'text-emerald-400' : s.id === 'Full' ? 'text-emerald-400/90' : 'text-white'}`}>{s.name}</h4>
+                              </div>
+                              {/* Visual Radio/Checkmark Indicator */}
+                              <div className={`w-6 h-6 rounded-full flex items-center justify-center border-2 transition-all duration-300 shrink-0 ${
+                                selectedService === s.id 
+                                  ? 'bg-emerald-500 border-emerald-500 text-night' 
+                                  : s.id === 'Full'
+                                    ? 'border-emerald-500/40 bg-zinc-950/50 group-hover:border-emerald-500/60'
+                                    : 'border-white/10 bg-zinc-950/20 group-hover:border-white/20'
+                              }`}>
+                                {selectedService === s.id && (
+                                  <svg className="w-3.5 h-3.5 stroke-[3]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                                  </svg>
+                                )}
                               </div>
                             </div>
                             
                             <p className="text-[11px] md:text-sm text-zinc-400 leading-relaxed mb-6 font-medium">{s.description}</p>
                             
                             <div className="mt-auto flex flex-wrap gap-x-3 gap-y-2 pt-5 border-t border-white/[0.04]">
-                              {s.features.slice(0, 4).map((f, i) => (
-                                <div key={i} className="flex items-center gap-1 text-[8px] md:text-[10px] text-zinc-500 font-bold uppercase tracking-widest">
-                                  <div className="w-1 h-1 rounded-full bg-emerald-500/50" />
+                              {s.features.map((f, i) => (
+                                <div key={i} className="flex items-center gap-1 text-[8px] md:text-[10px] text-zinc-400 font-bold uppercase tracking-widest bg-white/[0.02] px-2 py-0.5 rounded-md border border-white/[0.02]">
+                                  <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
                                   {f}
                                 </div>
                               ))}
@@ -1108,7 +1124,9 @@ export default function App() {
                             </div>
 
                             {s.isFeatured && (
-                              <div className="absolute -top-3 left-6 bg-emerald-500 text-night px-2.5 py-1 rounded-full text-[8px] font-black uppercase tracking-tighter shadow-xl">Recomendado</div>
+                              <div className="absolute -top-3.5 left-6 bg-gradient-to-r from-emerald-500 to-teal-500 text-night px-3 py-1 rounded-full text-[8.5px] font-black uppercase tracking-[0.05em] shadow-[0_10px_20px_rgba(16,185,129,0.35)] flex items-center gap-1">
+                                <span>✨</span> EL MÁS ELEGIDO • 93% DE CLIENTES
+                              </div>
                             )}
                           </motion.div>
                         ))}

@@ -9,42 +9,42 @@ export const SERVICES: Service[] = [
   {
     id: 'Exterior',
     name: 'Lavado Exterior',
-    label: 'Cuidado Superficial',
-    description: 'Limpieza profunda de ruedas, llantas y pasaruedas. Lavado de contacto con PH neutro Koch Chemie Gentle Snow Foam, aplicación de sellador hidrofóbico Koch Chemie Protector Wax (efecto de repelencia al agua) y acondicionado con PSS Plast Star sin siliconas.',
+    label: 'Opción 1 • Brillo Básico',
+    description: 'Limpieza profunda de carrocería, ruedas, llantas y pasaruedas. Lavado manual de contacto con PH neutro Koch Chemie Gentle Snow Foam, secado técnico libre de rayas y acondicionado de cubiertas con PSS Plast Star sin siliconas.',
     features: [
       'Llantas y Pasaruedas',
       'Gentle Snow Foam neutro',
-      'Protector Wax (Efecto Lotus)',
-      'Acondicionador PSS Plast Star',
-      'Secado Técnico Microfibra'
+      'Acondicionador PSS de Cubiertas',
+      'Secado Técnico Seguro'
     ]
   },
   {
     id: 'Interior',
     name: 'Detallado Interior',
-    label: 'Limpieza de Cabina',
-    description: 'Aspirado profundo, detallado de plásticos de consola, puertas, rejillas y grietas. Acondicionado premium con Koch Chemie Top Star: protección UV, acabado 100% mate natural original y efecto antiestático permanente que repele el polvo de las superficies.',
+    label: 'Opción 2 • Cabina Premium',
+    description: 'Aspirado profundo completo, detallado de plásticos de consola, paneles de puertas, rejillas de ventilación y grietas. Acondicionado de plásticos internos con Koch Chemie Top Star (protección UV y efecto antiestático).',
     features: [
-      'Aspirado de Cabina',
-      'Plásticos e Intersticios',
-      'Acondicionador Top Star UV',
-      'Acabado Mate Antiestático',
+      'Aspirado Detallado',
+      'Limpieza de Consola y Paneles',
+      'Koch Chemie Top Star UV',
+      'Repelente de Polvo',
       'Vidrios sin Vetas'
     ]
   },
   {
     id: 'Full',
     name: 'Lavado Full',
-    label: 'Recomendado',
+    label: 'Opción 3 • Máxima Protección',
     isFeatured: true,
-    description: 'La máxima protección y limpieza. Combina el Detallado Interior con Koch Chemie Top Star y el Lavado Exterior Profundo que incluye sellador hidrofóbico Koch Chemie Protector Wax con hasta 3 meses de protección y acondicionador de plásticos externos PSS Plast Star.',
+    description: 'El tratamiento definitivo que combina el Detallado de Cabina premium (con Top Star) con un Lavado de Carrocería de la más alta gama. Incluye la aplicación del sellador hidrofóbico Koch Chemie Protector Wax que brinda protección de hasta 3 meses, brillo extremo "efecto lotus" de autolimpieza y acondicionado exterior PSS Plast Star.',
     features: [
-      'Interior Detallado Top Star',
-      'Exterior Profundo Protector Wax',
-      'Protector UV Plásticos',
-      'Sellado Hidrofóbico (3 meses)',
-      'Acondicionado PSS Plast Star',
-      'Acabado Original Mate'
+      'Detallado Interior Premium',
+      'Lavado de Carrocería Completo',
+      'Sellador Hydro Protector Wax',
+      'Efecto Lotus Autolimpiante',
+      'Protección de Pintura (3 Meses)',
+      'Acondicionador PSS Plast Star',
+      'Vidrios Internos y Externos'
     ]
   }
 ];
