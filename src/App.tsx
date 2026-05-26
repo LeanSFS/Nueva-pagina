@@ -150,6 +150,8 @@ export default function App() {
   const step2Ref = useRef<HTMLDivElement>(null);
   const step3Ref = useRef<HTMLDivElement>(null);
   const step4Ref = useRef<HTMLDivElement>(null);
+  const nameInputRef = useRef<HTMLInputElement>(null);
+  const phoneInputRef = useRef<HTMLInputElement>(null);
 
   const scrollToSection = (ref: React.RefObject<HTMLDivElement>) => {
     if (ref.current) {
@@ -1294,39 +1296,122 @@ export default function App() {
                                </div>
                             </div>
                             
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                              <div className="space-y-2">
-                                <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 ml-1">Nombre y Apellido</label>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                              <div className="space-y-3">
+                                <label className="text-xs md:text-sm font-extrabold uppercase tracking-wider text-zinc-200 ml-1 flex items-center gap-2">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                                  Tu Nombre y Apellido
+                                </label>
                                 <div className="relative group">
-                                  <User className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-600 group-focus-within:text-emerald-500 transition-colors" />
+                                  <User className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-zinc-400 group-focus-within:text-emerald-500 transition-colors" />
                                   <input 
+                                    ref={nameInputRef}
                                     type="text" 
                                     value={clientName}
                                     onChange={(e) => setClientName(e.target.value)}
-                                    placeholder="Juan Pérez"
-                                    className="w-full bg-zinc-900/50 border border-white/5 rounded-xl py-4 pl-12 pr-4 text-white focus:outline-none focus:border-emerald-500 transition-all font-medium"
+                                    placeholder="Ej: Juan Pérez"
+                                    enterKeyHint="next"
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') {
+                                        e.preventDefault();
+                                        phoneInputRef.current?.focus();
+                                      }
+                                    }}
+                                    className="w-full bg-zinc-900 border border-white/20 rounded-xl py-4.5 pl-12 pr-4 text-white placeholder-zinc-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 transition-all font-semibold text-base md:text-lg shadow-inner"
                                   />
                                 </div>
                               </div>
 
-                              <div className="space-y-2">
-                                <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 ml-1">WhatsApp</label>
+                              <div className="space-y-3">
+                                <label className="text-xs md:text-sm font-extrabold uppercase tracking-wider text-zinc-200 ml-1 flex items-center gap-2">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                                  Tu WhatsApp / Celular
+                                </label>
                                 <div className="relative group">
-                                  <Smartphone className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-600 group-focus-within:text-emerald-500 transition-colors" />
+                                  <Smartphone className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-zinc-400 group-focus-within:text-emerald-500 transition-colors" />
                                   <input 
+                                    ref={phoneInputRef}
                                     type="tel" 
                                     value={clientPhone}
                                     onChange={(e) => setClientPhone(e.target.value)}
-                                    placeholder="299..."
-                                    className="w-full bg-zinc-900/50 border border-white/5 rounded-xl py-4 pl-12 pr-4 text-white focus:outline-none focus:border-emerald-500 transition-all font-medium"
+                                    placeholder="Ej: 2995123456"
+                                    enterKeyHint="done"
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') {
+                                        e.preventDefault();
+                                        phoneInputRef.current?.blur();
+                                        // Scroll to location checkbox smoothly so they can see and tap it easily
+                                        setTimeout(() => {
+                                          const element = document.getElementById('location-confirm-box');
+                                          if (element) {
+                                            element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                          }
+                                        }, 150);
+                                      }
+                                    }}
+                                    className="w-full bg-zinc-900 border border-white/20 rounded-xl py-4.5 pl-12 pr-4 text-white placeholder-zinc-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 transition-all font-semibold text-base md:text-lg shadow-inner"
                                   />
                                 </div>
                               </div>
 
-                              <div className="space-y-2 md:col-span-2">
-                                <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 ml-1">Nuestra Ubicación: Venezuela 1659</label>
+                              <div className="space-y-4 md:col-span-2">
+                                <label className="text-xs md:text-sm font-extrabold uppercase tracking-wider text-zinc-200 ml-1 flex items-center gap-2">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                                  Confirmar la Ubicación de entrega
+                                </label>
                                 <div className="space-y-4">
-                                  <div className="aspect-video w-full rounded-2xl overflow-hidden border border-white/10 grayscale-[0.5] contrast-[1.1] hover:grayscale-0 transition-all">
+                                  {/* Location confirmation button placed ABOVE the map */}
+                                  <div 
+                                    id="location-confirm-box"
+                                    onClick={() => setClientConfirmedLocation(!clientConfirmedLocation)}
+                                    className={`p-6 rounded-2xl border-3 transition-all cursor-pointer flex items-center gap-5 group relative overflow-hidden ${
+                                      clientConfirmedLocation 
+                                      ? 'bg-emerald-500/15 border-emerald-500 shadow-[0_0_30px_rgba(16,185,129,0.2)] scale-[1.01]' 
+                                      : 'bg-zinc-900 border-zinc-700 hover:border-emerald-500 hover:bg-zinc-800/80 shadow-[0_0_20px_rgba(16,185,129,0.05)]'
+                                    }`}
+                                  >
+                                    <div className={`shrink-0 w-12 h-12 rounded-xl border-2 flex items-center justify-center transition-all duration-300 ${
+                                      clientConfirmedLocation 
+                                      ? 'bg-emerald-500 border-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.5)] rotate-0 scale-110' 
+                                      : 'border-emerald-500/50 bg-zinc-950 group-hover:border-emerald-500 animate-pulse rotate-[-3deg]'
+                                    }`}>
+                                      {clientConfirmedLocation ? (
+                                        <CheckCircle2 className="w-7 h-7 text-night" />
+                                      ) : (
+                                        <div className="w-4 h-4 rounded-full bg-emerald-500 animate-ping" />
+                                      )}
+                                    </div>
+                                    
+                                    <div className="flex-1">
+                                      <p className={`text-lg md:text-xl font-display font-black italic tracking-tight leading-none mb-1 transition-colors ${
+                                        clientConfirmedLocation ? 'text-emerald-400' : 'text-zinc-100 group-hover:text-emerald-400'
+                                      }`}>
+                                        {clientConfirmedLocation ? 'Ubicación confirmada ✓' : 'Haz clic AQUÍ para confirmar ubicación'}
+                                      </p>
+                                      <p className={`text-xs font-semibold leading-tight transition-colors ${
+                                        clientConfirmedLocation ? 'text-zinc-300' : 'text-zinc-400'
+                                      }`}>
+                                        Entiendo que debo traer mi vehículo a <span className="text-white underline decoration-emerald-500 decoration-2 font-bold">Venezuela 1659</span> (Cipolletti).
+                                      </p>
+                                    </div>
+
+                                    {!clientConfirmedLocation && (
+                                      <div className="absolute right-4 animate-bounce-horizontal hidden md:block">
+                                        <ArrowRight className="w-6 h-6 text-emerald-500" />
+                                      </div>
+                                    )}
+                                  </div>
+
+                                  <div className="bg-red-500/10 border border-red-500/35 rounded-xl p-4 flex items-start gap-3">
+                                    <div className="w-6 h-6 rounded-full bg-red-500/20 flex items-center justify-center shrink-0 mt-0.5">
+                                      <span className="text-red-400 text-xs font-black italic">!</span>
+                                    </div>
+                                    <p className="text-xs text-zinc-300 font-semibold leading-relaxed">
+                                      Por favor ten en cuenta: <span className="text-red-400 font-black uppercase tracking-tight">no realizo servicios a domicilio</span>. Los lavados se realizan únicamente trayendo el auto a la dirección indicada arriba.
+                                    </p>
+                                  </div>
+
+                                  <div className="aspect-video w-full rounded-2xl overflow-hidden border border-white/10 grayscale-[0.2] contrast-[1.05] hover:grayscale-0 transition-all">
                                     <iframe 
                                       src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3102.13456789!2d-68.010!3d-38.932!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x960a3162383c9b7f%3A0xc6cb1c986c757c4c!2sVenezuela%201659%2C%20Cipolletti%2C%20R%C3%ADo%20Negro!5e0!3m2!1ses!2sar!4v1713965211234!5m2!1ses!2sar" 
                                       width="100%" 
@@ -1336,53 +1421,6 @@ export default function App() {
                                       loading="lazy" 
                                       referrerPolicy="no-referrer-when-downgrade"
                                     />
-                                  </div>
-                                  
-                                  <div 
-                                    onClick={() => setClientConfirmedLocation(!clientConfirmedLocation)}
-                                    className={`p-6 rounded-2xl border-2 transition-all cursor-pointer flex items-center gap-5 group relative overflow-hidden ${
-                                      clientConfirmedLocation 
-                                      ? 'bg-emerald-500/10 border-emerald-500/50 shadow-[0_0_30px_rgba(16,185,129,0.1)]' 
-                                      : 'bg-zinc-900 border-white/5 hover:border-emerald-500/50 hover:bg-zinc-800/80 shadow-[0_0_20px_rgba(16,185,129,0.05)]'
-                                    }`}
-                                  >
-                                    <div className={`shrink-0 w-12 h-12 rounded-xl border-2 flex items-center justify-center transition-all duration-300 ${
-                                      clientConfirmedLocation 
-                                      ? 'bg-emerald-500 border-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.5)] rotate-0 scale-110' 
-                                      : 'border-emerald-500/30 group-hover:border-emerald-500 animate-pulse rotate-[-5deg]'
-                                    }`}>
-                                      {clientConfirmedLocation ? (
-                                        <CheckCircle2 className="w-7 h-7 text-night" />
-                                      ) : (
-                                        <div className="w-3 h-3 rounded-full bg-emerald-500 animate-ping" />
-                                      )}
-                                    </div>
-                                    
-                                    <div className="flex-1">
-                                      <p className={`text-lg font-display font-black italic tracking-tight leading-none mb-1 transition-colors ${
-                                        clientConfirmedLocation ? 'text-emerald-400' : 'text-zinc-200 group-hover:text-emerald-400'
-                                      }`}>
-                                        {clientConfirmedLocation ? 'Ubicación confirmada' : 'Haz clic para confirmar ubicación'}
-                                      </p>
-                                      <p className="text-[11px] text-zinc-500 font-medium leading-tight">
-                                        Entiendo que el servicio es en <span className="text-white">Venezuela 1659</span> (Mi domicilio).
-                                      </p>
-                                    </div>
-
-                                    {!clientConfirmedLocation && (
-                                      <div className="absolute right-4 animate-bounce-horizontal">
-                                        <ArrowRight className="w-5 h-5 text-emerald-500/50 group-hover:text-emerald-500" />
-                                      </div>
-                                    )}
-                                  </div>
-
-                                  <div className="bg-red-500/5 border border-red-500/20 rounded-xl p-4 flex items-start gap-3">
-                                    <div className="w-5 h-5 rounded-full bg-red-500/20 flex items-center justify-center shrink-0 mt-0.5">
-                                      <span className="text-red-400 text-[10px] font-black italic">!</span>
-                                    </div>
-                                    <p className="text-[11px] text-zinc-400 font-medium leading-relaxed">
-                                      Debido a un inconveniente técnico con mi vehículo, por el momento <span className="text-red-400 font-bold uppercase tracking-tight">no realizo servicios a domicilio</span>. Los lavados se realizan en la entrada de mi domicilio.
-                                    </p>
                                   </div>
                                 </div>
                               </div>
