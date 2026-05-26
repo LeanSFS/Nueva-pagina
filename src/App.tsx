@@ -25,7 +25,8 @@ import {
   Sun,
   Cloud,
   CloudRain,
-  CloudLightning
+  CloudLightning,
+  Star
 } from 'lucide-react';
 import { SERVICES, VEHICLES, BASE_PRICES, TYPE_EXTRA } from './constants.ts';
 import { VehicleType, ServiceKey } from './types.ts';
@@ -54,14 +55,15 @@ const Navigation = ({ setView, view }: { setView: (v: 'home' | 'booking') => voi
           setView('home');
           window.scrollTo({ top: 0, behavior: 'smooth' });
         }}
-        className="flex items-center gap-3 md:gap-4 group cursor-pointer"
+        className="flex items-center group cursor-pointer"
       >
-      <div className="w-auto h-9 md:h-11 px-2.5 md:px-3 bg-emerald-500 rounded-xl md:rounded-2xl flex items-center justify-center font-display font-black text-night text-base md:text-xl shadow-[0_0_24px_rgba(16,185,129,0.2)] group-hover:rotate-3 transition-transform">LyS</div>
-      <div className="relative">
-        <span className="font-display font-black text-base md:text-2xl uppercase tracking-[0.05em] text-white leading-none block">Lavados</span>
-        <span className="absolute left-0 -bottom-2.5 md:-bottom-3 text-[6px] md:text-[8px] font-black uppercase tracking-[.4em] text-zinc-700 transition-colors group-hover:text-emerald-500/60 whitespace-nowrap">Premium Detailing</span>
+        <img 
+          src="./logo.png" 
+          className="h-10 md:h-14 w-auto object-contain transition-transform group-hover:scale-105 duration-300" 
+          alt="LyS Premium Detailing Logo" 
+          referrerPolicy="no-referrer"
+        />
       </div>
-    </div>
 
     <div className="flex items-center gap-4 md:gap-16">
       <div className="flex items-center gap-6 md:gap-12 text-[10px] md:text-[11px] font-black uppercase tracking-[0.2em] md:tracking-[0.3em] text-zinc-500">
@@ -217,8 +219,87 @@ export default function App() {
     load();
   }, []);
 
+  // Helper to get current Date/Time in Argentina time (UTC-3)
+  const getArgentinaDateTime = () => {
+    try {
+      const options = {
+        timeZone: 'America/Argentina/Buenos_Aires',
+        year: 'numeric',
+        month: 'numeric',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: 'numeric',
+        hour12: false
+      } as const;
+      const formatter = new Intl.DateTimeFormat('en-US', options);
+      const parts = formatter.formatToParts(new Date());
+      const partMap: Record<string, string> = {};
+      for (const part of parts) {
+        partMap[part.type] = part.value;
+      }
+      
+      const year = parseInt(partMap.year, 10);
+      const month = parseInt(partMap.month, 10);
+      const day = parseInt(partMap.day, 10);
+      const hour = parseInt(partMap.hour, 10);
+      const minute = parseInt(partMap.minute, 10);
+      
+      if (!isNaN(year) && !isNaN(month) && !isNaN(day) && !isNaN(hour) && !isNaN(minute)) {
+        return { year, month, day, hour, minute };
+      }
+    } catch (e) {
+      console.error('Error getting Argentina timezone date, falling back to local browser time:', e);
+    }
+    
+    // Fallback to local system time
+    const now = new Date();
+    return {
+      year: now.getFullYear(),
+      month: now.getMonth() + 1,
+      day: now.getDate(),
+      hour: now.getHours(),
+      minute: now.getMinutes()
+    };
+  };
+
+  const isSlotInPast = (fechaStr: string, slotTimeStr: string) => {
+    const { year, month, day, hour, minute } = getArgentinaDateTime();
+    const [slotYear, slotMonth, slotDay] = fechaStr.split('-').map(Number);
+    
+    if (slotYear < year) return true;
+    if (slotYear > year) return false;
+    
+    if (slotMonth < month) return true;
+    if (slotMonth > month) return false;
+    
+    if (slotDay < day) return true;
+    if (slotDay > day) return false;
+    
+    // Same day, check hour and minutes
+    const [slotHour, slotMinute] = slotTimeStr.split(':').map(Number);
+    if (slotHour < hour) return true;
+    if (slotHour === hour && slotMinute <= minute) return true;
+    
+    return false;
+  };
+
+  const filteredSlotsData = useMemo(() => {
+    return slotsData.map(s => {
+      if (!s) return null;
+      const originalSlots = s.slots || [];
+      const futureSlots = originalSlots.filter(slotTime => {
+        return !isSlotInPast(s.fecha, slotTime);
+      });
+      return {
+        ...s,
+        slots: futureSlots,
+        count: futureSlots.length
+      };
+    }).filter(Boolean) as typeof slotsData;
+  }, [slotsData]);
+
   const availableDates = useMemo(() => {
-    return slotsData
+    return filteredSlotsData
       .filter(s => s && s.fecha && s.fecha.includes('-'))
       .map(s => {
         const [y, m, d] = s.fecha.split('-').map(Number);
@@ -229,13 +310,13 @@ export default function App() {
         };
       })
       .filter(item => item.date.getDay() !== 0); // 0 is Sunday
-  }, [slotsData]);
+  }, [filteredSlotsData]);
 
   const availableTimes = useMemo(() => {
     if (!selectedDateStr) return [];
-    const dayData = slotsData.find(s => s && s.fecha === selectedDateStr);
+    const dayData = filteredSlotsData.find(s => s && s.fecha === selectedDateStr);
     return dayData ? (dayData.slots || []) : [];
-  }, [selectedDateStr, slotsData]);
+  }, [selectedDateStr, filteredSlotsData]);
 
   // --- Weather Logic ---
   const [weatherData, setWeatherData] = useState<Record<string, { isRainy: boolean, code: number }>>({});
@@ -293,7 +374,7 @@ export default function App() {
 
   const firstAvailableInfo = useMemo(() => {
     if (isLoadingSlots) return { day: 'Cargando...', times: 'Buscando horarios disponibles...' };
-    const firstDay = slotsData.find(s => s && s.fecha && ((s.count || 0) > 0 || (s.slots && s.slots.length > 0)));
+    const firstDay = filteredSlotsData.find(s => s && s.fecha && ((s.count || 0) > 0 || (s.slots && s.slots.length > 0)));
     if (firstDay) {
       try {
         const [y, m, d] = firstDay.fecha.split('-').map(Number);
@@ -309,7 +390,7 @@ export default function App() {
       }
     }
     return { day: 'Próximamente', times: '' };
-  }, [slotsData, isLoadingSlots]);
+  }, [filteredSlotsData, isLoadingSlots]);
 
   const handleFinalBooking = async () => {
     if (!selectedDateStr || !selectedTime || !vehicle || !selectedService || !clientName || !clientPhone || !clientConfirmedLocation) return;
@@ -539,7 +620,7 @@ export default function App() {
                       <h3 className="text-2xl font-display font-black italic text-white tracking-tight">Exterior Profundo</h3>
                     </div>
                     <p className="text-zinc-400 leading-relaxed font-medium text-lg">
-                      Limpieza profunda de ruedas, llantas y pasaruedas, más lavado completo de carrocería. Se aplica cera rápida para dar brillo y protección ligera, y revividor en cubiertas.
+                      Limpieza profunda de ruedas, llantas y pasaruedas, más lavado completo de carrocería. Se aplica sellante hidrofóbico Koch Chemie Protector Wax con protección de hasta 3 meses para dar brillo y protección ligera, y acondicionador profesional sin silicona Koch Chemie PSS Plast Star en cubiertas.
                     </p>
                   </div>
                 </div>
@@ -582,9 +663,110 @@ export default function App() {
                 </div>
               </div>
 
+              {/* Products We Use Section */}
+              <div className="mt-24 pb-12">
+                <SectionHeader kicker="Detailing" title="Productos que <span class='text-emerald-500'>usamos</span>" number="03" />
+                <div className="space-y-10 mt-12">
+                  
+                  {/* Brand 1: Koch Chemie */}
+                  <div className="bg-zinc-900 shadow-2xl border border-white/5 rounded-[3rem] p-8 md:p-12 relative overflow-hidden group hover:border-emerald-500/10 transition-all duration-300">
+                    <div className="absolute top-0 right-0 p-8 opacity-[0.02] pointer-events-none select-none text-[8rem] font-sans font-black italic tracking-tighter text-white">
+                      KC
+                    </div>
+                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-8 border-b border-white/5 pb-8">
+                      <div>
+                        <div className="flex items-center gap-3.5 mb-2 flex-wrap">
+                          <h3 className="text-3xl md:text-4xl font-display font-black text-white tracking-tight uppercase italic">Koch Chemie</h3>
+                          <div className="flex items-center gap-2 px-3 py-1 bg-white/5 border border-white/10 rounded-full">
+                            <div className="flex flex-col w-5 h-3.5 rounded-sm overflow-hidden shadow-sm border border-white/10 select-none">
+                              <div className="bg-black h-1/3 w-full"></div>
+                              <div className="bg-red-600 h-1/3 w-full"></div>
+                              <div className="bg-amber-500 h-1/3 w-full"></div>
+                            </div>
+                            <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400">Alemania 🇩🇪</span>
+                          </div>
+                        </div>
+                        <p className="text-zinc-400 font-medium text-base md:text-lg max-w-4xl leading-relaxed">
+                          Marca alemana con más de 50 años de historia, homologada y utilizada como proveedor oficial por Mercedes-Benz, BMW, Volkswagen y Audi.
+                        </p>
+                      </div>
+                    </div>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      {[
+                        {
+                          name: 'Gentle Snow Foam',
+                          desc: 'Shampoo de pH neutro para lavado de contacto. Limpia en profundidad sin dañar la pintura ni los tratamientos previos.'
+                        },
+                        {
+                          name: 'PSS Plast Star',
+                          desc: 'Acondicionador profesional sin silicona para neumáticos y plásticos exteriores. Renueva el aspecto, protege contra los rayos UV y no atrae tierra ni polvo.'
+                        },
+                        {
+                          name: 'Top Star',
+                          desc: 'Acondicionador de plásticos interiores con efecto antiestático que repele el polvo y protección UV de larga duración.'
+                        },
+                        {
+                          name: 'Protector Wax',
+                          desc: 'Sellante hidrofóbico para carrocería con efecto lotus. Protege hasta 3 meses, repele el agua y facilita la limpieza futura.'
+                        }
+                      ].map((prod, idx) => (
+                        <div key={idx} className="p-6 rounded-[2rem] bg-white/[0.015] border border-white/[0.04] hover:border-emerald-500/20 hover:bg-white/[0.03] transition-all duration-300">
+                          <h4 className="font-display font-black text-emerald-400 italic text-lg md:text-xl mb-2 tracking-tight">{prod.name}</h4>
+                          <p className="text-zinc-400 text-sm leading-relaxed">{prod.desc}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Brand 2: Vonixx */}
+                  <div className="bg-zinc-900 shadow-2xl border border-white/5 rounded-[3rem] p-8 md:p-12 relative overflow-hidden group hover:border-emerald-500/10 transition-all duration-300">
+                    <div className="absolute top-0 right-0 p-8 opacity-[0.02] pointer-events-none select-none text-[8rem] font-sans font-black italic tracking-tighter text-white">
+                      VX
+                    </div>
+                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-8 border-b border-white/5 pb-8">
+                      <div>
+                        <div className="flex items-center gap-3.5 mb-2 flex-wrap">
+                          <h3 className="text-3xl md:text-4xl font-display font-black text-white tracking-tight uppercase italic">Vonixx</h3>
+                          <div className="flex items-center gap-2 px-3 py-1 bg-white/5 border border-white/10 rounded-full">
+                            <div className="relative w-5 h-3.5 bg-emerald-600 rounded-sm overflow-hidden shadow-sm border border-white/10 select-none flex items-center justify-center">
+                              <div className="absolute w-3 h-3 bg-yellow-400 rotate-45"></div>
+                              <div className="absolute w-1.5 h-1.5 bg-blue-600 rounded-full"></div>
+                            </div>
+                            <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400">Brasil 🇧🇷</span>
+                          </div>
+                        </div>
+                        <p className="text-zinc-400 font-medium text-base md:text-lg max-w-4xl leading-relaxed">
+                          Referente profesional en detailing en Brasil y América Latina.
+                        </p>
+                      </div>
+                    </div>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      {[
+                        {
+                          name: 'Sintra Pro',
+                          desc: 'Limpiador concentrado bactericida para interiores. Elimina gérmenes, bacterias and malos olores. Apto para plásticos, alfombras, cuero y tela.'
+                        },
+                        {
+                          name: 'Impact',
+                          desc: 'Limpiador profesional de alta eficacia para llantas, pasaruedas y surfaces con suciedad extrema.'
+                        }
+                      ].map((prod, idx) => (
+                        <div key={idx} className="p-6 rounded-[2rem] bg-white/[0.015] border border-white/[0.04] hover:border-emerald-500/20 hover:bg-white/[0.03] transition-all duration-300">
+                          <h4 className="font-display font-black text-emerald-400 italic text-lg md:text-xl mb-2 tracking-tight">{prod.name}</h4>
+                          <p className="text-zinc-400 text-sm leading-relaxed">{prod.desc}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                </div>
+              </div>
+
               {/* Social Media CTA Section */}
               <div className="mt-20 pb-20">
-                <SectionHeader kicker="Galería" title="Nuestros <span class='text-emerald-500'>Resultados</span>" number="03" />
+                <SectionHeader kicker="Galería" title="Nuestros <span class='text-emerald-500'>Resultados</span>" number="04" />
                 <div className="bg-zinc-900 shadow-2xl border border-white/5 rounded-[3rem] p-8 md:p-16 relative overflow-hidden">
                   <div className="absolute -top-24 -right-24 w-96 h-96 bg-emerald-500/10 blur-[120px] rounded-full pointer-events-none" />
                   
@@ -594,11 +776,6 @@ export default function App() {
                         No usamos fotos de catálogo. Te invitamos a ver nuestros <span className="text-white">trabajos reales</span>, videos del proceso y resultados finales en nuestras redes oficiales.
                       </p>
                       <div className="flex gap-12 mb-10">
-                        <div className="flex flex-col">
-                          <span className="text-4xl md:text-5xl font-display font-black text-white italic tracking-tighter">4.9/5</span>
-                          <span className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-600 mt-2">Satisfacción</span>
-                        </div>
-                        <div className="w-px h-16 bg-white/10" />
                         <div className="flex flex-col">
                           <span className="text-4xl md:text-5xl font-display font-black text-emerald-500 italic tracking-tighter">+100</span>
                           <span className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-600 mt-2">Autos Entregados</span>
@@ -633,6 +810,173 @@ export default function App() {
                       </a>
                     </div>
                   </div>
+                </div>
+              </div>
+
+              {/* Google Reviews Section */}
+              <div className="mt-20 pb-20">
+                <SectionHeader kicker="Reseñas" title="Opiniones en <span class='text-emerald-500'>Google</span>" number="05" />
+                
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
+                  
+                  {/* Summary / Rating Badge */}
+                  <div className="bg-zinc-900 border border-white/5 rounded-[3rem] p-8 md:p-10 lg:sticky lg:top-24 flex flex-col items-center text-center relative overflow-hidden group hover:border-emerald-500/10 transition-all duration-300">
+                    <div className="absolute -top-12 -left-12 w-32 h-32 bg-emerald-500/5 blur-3xl rounded-full" />
+                    
+                    {/* Google Icon Badge Custom SVG */}
+                    <div className="w-16 h-16 bg-white/5 border border-white/10 rounded-2xl flex items-center justify-center mb-6 shadow-xl relative group-hover:scale-105 transition-transform">
+                      <svg className="w-8 h-8" viewBox="0 0 24 24">
+                        <path
+                          fill="#EA4335"
+                          d="M12.24 10.285V13.4h6.887c-.275 1.565-1.88 4.604-6.887 4.604-4.33 0-7.859-3.578-7.859-8s3.53-8 7.859-8c2.46 0 4.105 1.025 5.047 1.926l2.427-2.334C18.155 1.583 15.435 1 12.24 1 5.485 1 0 6.485 0 13.2s5.485 12.2 12.24 12.2c7.055 0 11.75-4.96 11.75-11.95 0-.805-.085-1.415-.19-1.965H12.24z"
+                        />
+                      </svg>
+                    </div>
+
+                    <h3 className="font-display font-black text-2.5xl text-white mb-2 italic tracking-tight">LyS Lavados</h3>
+                    
+                    {/* Stars */}
+                    <div className="flex items-center gap-1 mb-3">
+                      {[1, 2, 3, 4, 5].map((star) => (
+                        <Star key={star} className="w-5 h-5 fill-amber-400 text-amber-400" />
+                      ))}
+                    </div>
+
+                    <div className="flex items-baseline gap-2 mb-8">
+                      <span className="text-4xl font-display font-black text-white italic">5.0</span>
+                    </div>
+
+                    <div className="flex flex-col gap-3 w-full">
+                      <a 
+                        href="https://maps.google.com/?q=LyS+Lavados+Cipolletti,+Venezuela+1659" 
+                        target="_blank" 
+                        rel="noreferrer"
+                        className="w-full flex items-center justify-center gap-2 py-4 bg-emerald-500 hover:bg-emerald-400 text-night font-display font-black italic rounded-2xl transition-all shadow-lg shadow-emerald-500/10 active:scale-[0.98]"
+                      >
+                        DEJAR RESEÑA
+                        <ArrowRight className="w-4 h-4 translate-y-[-0.5px]" />
+                      </a>
+                      
+                      <a 
+                        href="https://maps.google.com/?q=LyS+Lavados+Cipolletti,+Venezuela+1659" 
+                        target="_blank" 
+                        rel="noreferrer"
+                        className="w-full py-4 bg-white/5 hover:bg-white/10 text-white font-display font-black italic rounded-2xl border border-white/10 transition-all active:scale-[0.98] text-sm"
+                      >
+                        VER TODAS EN GOOGLE
+                      </a>
+                    </div>
+                  </div>
+
+                  {/* Individual Reviews List */}
+                  <div className="lg:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {[
+                      {
+                        name: 'Maria Rosa SANSEVERINO',
+                        avatar: 'MS',
+                        role: 'Cliente verificado',
+                        time: 'Hace 1 hora',
+                        text: 'Siempre excelente servicio y atención. Soy cliente. Le llevo el auto en pésimas condiciones y lo deja como salido de la concesionaria. Muy recomendable',
+                        highlight: 'lo deja como salido de la concesionaria'
+                      },
+                      {
+                        name: 'romina riquelme',
+                        avatar: 'RR',
+                        role: 'Local Guide',
+                        time: 'Hace 2 días',
+                        text: 'Excelente trabajo, muy detallista y responsable. El auto estaba en muy malas condiciones y quedo como nuevo! Se noto la dedicación y compromiso con lo que hace....',
+                        highlight: 'quedo como nuevo!'
+                      },
+                      {
+                        name: 'miguel montenegro',
+                        avatar: 'MM',
+                        role: 'Cliente verificado',
+                        time: 'Hace 3 días',
+                        text: 'Excelente atención. Cordialidad, seriedad y compromiso. Recomendable...',
+                        highlight: 'Excelente atención'
+                      },
+                      {
+                        name: 'Mariela Retamal',
+                        avatar: 'MR',
+                        role: 'Local Guide',
+                        time: 'Hace 4 días',
+                        text: 'Impecable labor!! Lo súper recomiendo Excelentes productos, te cuidan el auto, al lavadero al cual lo llevaba antes calle Naciones Unidas frente al cementerio un desastre siempre algo me rompían del auto y los productos que utilizaban un desastre de muy mala calidad',
+                        highlight: 'Impecable labor!! Lo súper recomiendo'
+                      },
+                      {
+                        name: 'Monica Cifuentes',
+                        avatar: 'MC',
+                        role: 'Cliente verificado',
+                        time: 'Hace 3 días',
+                        text: 'Excelente trabajo!!! Prolijo, responsable LyS lLavados... Re lindo quedó mí auto... Es por ahí!!! Éxitos... 👍 👏 😍 ...',
+                        highlight: 'Re lindo quedó mí auto'
+                      },
+                      {
+                        name: 'Gabriela Figueroa',
+                        avatar: 'GF',
+                        role: 'Local Guide',
+                        time: 'Hace 1 mes',
+                        text: 'Excelente servicio, los autos quedaron impecables, muy buen trabajo Leandro. Gracias',
+                        highlight: 'los autos quedaron impecables'
+                      }
+                    ].map((review, index) => (
+                      <div 
+                        key={index} 
+                        className="bg-zinc-900 border border-white/5 rounded-3xl p-6 relative overflow-hidden group hover:border-emerald-500/20 transition-all duration-300 flex flex-col justify-between"
+                      >
+                        <div>
+                          {/* User details */}
+                          <div className="flex items-center justify-between mb-4">
+                            <div className="flex items-center gap-3">
+                              <div className="w-10 h-10 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center font-display font-black text-emerald-400 text-sm">
+                                {review.avatar}
+                              </div>
+                              <div>
+                                <h4 className="font-display font-bold text-white text-sm">{review.name}</h4>
+                                <p className="text-[10px] font-semibold text-zinc-500 flex items-center gap-1.5 uppercase tracking-wider">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                                  {review.role}
+                                </p>
+                              </div>
+                            </div>
+                            
+                            {/* Star Badge */}
+                            <div className="flex items-center gap-0.5">
+                              {[1,2,3,4,5].map((s) => (
+                                <Star key={s} className="w-3 h-3 fill-amber-400 text-amber-400" />
+                              ))}
+                            </div>
+                          </div>
+
+                          <p className="text-zinc-400 text-sm leading-relaxed mb-4">
+                            "{review.text.split(review.highlight)[0]}
+                            <span className="text-white font-medium bg-emerald-500/5 px-1 py-0.5 rounded border border-emerald-500/10">
+                              {review.highlight}
+                            </span>
+                            {review.text.split(review.highlight)[1]}"
+                          </p>
+                        </div>
+
+                        <div className="flex items-center justify-between mt-2 pt-4 border-t border-white/[0.03]">
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-600">
+                            {review.time}
+                          </span>
+                          
+                          {/* Mini Google Logo G */}
+                          <div className="opacity-35 group-hover:opacity-75 transition-opacity">
+                            <svg className="w-4 h-4" viewBox="0 0 24 24">
+                              <path
+                                fill="#fff"
+                                d="M12.24 10.285V13.4h6.887c-.275 1.565-1.88 4.604-6.887 4.604-4.33 0-7.859-3.578-7.859-8s3.53-8 7.859-8c2.46 0 4.105 1.025 5.047 1.926l2.427-2.334C18.155 1.583 15.435 1 12.24 1 5.485 1 0 6.485 0 13.2s5.485 12.2 12.24 12.2c7.055 0 11.75-4.96 11.75-11.95 0-.805-.085-1.415-.19-1.965H12.24z"
+                              />
+                            </svg>
+                          </div>
+                        </div>
+
+                      </div>
+                    ))}
+                  </div>
+
                 </div>
               </div>
             </section>
@@ -1049,9 +1393,19 @@ export default function App() {
       <footer className="mt-20 border-t border-white/[0.05] bg-zinc-900/20 backdrop-blur-3xl px-6 md:px-12 py-12 md:py-20">
         <div className="max-w-7xl mx-auto grid md:grid-cols-3 gap-12 items-center text-center md:text-left">
           <div className="flex flex-col items-center md:items-start gap-4">
-            <div className="flex items-center gap-3 group cursor-pointer">
-              <div className="w-auto h-10 md:h-12 px-3 bg-emerald-500 rounded-2xl flex items-center justify-center font-display font-black text-night text-xl md:text-2xl shadow-xl shadow-emerald-500/20 group-hover:rotate-12 transition-transform">LyS</div>
-              <span className="font-display font-black text-xl md:text-3xl uppercase tracking-tighter text-white">LyS Lavados</span>
+            <div 
+              onClick={() => {
+                setView('home');
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
+              className="flex items-center group cursor-pointer"
+            >
+              <img 
+                src="./logo.png" 
+                className="h-16 md:h-20 w-auto object-contain transition-transform group-hover:scale-105 duration-300" 
+                alt="LyS Premium Detailing Logo" 
+                referrerPolicy="no-referrer"
+              />
             </div>
             <p className="text-zinc-500 text-[10px] font-black uppercase tracking-widest max-w-[200px]">Estética Automotriz en Cipolletti. Venezuela 1659.</p>
           </div>
