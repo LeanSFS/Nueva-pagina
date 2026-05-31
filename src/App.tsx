@@ -26,7 +26,9 @@ import {
   Cloud,
   CloudRain,
   CloudLightning,
-  Star
+  Star,
+  ChevronDown,
+  HelpCircle
 } from 'lucide-react';
 import { SERVICES, VEHICLES, BASE_PRICES, TYPE_EXTRA } from './constants.ts';
 import { VehicleType, ServiceKey } from './types.ts';
@@ -34,6 +36,34 @@ import { fetchSlots, createBooking, TimeSlot } from './services/availabilityServ
 import AdminCaja from './components/AdminCaja.tsx';
 
 // --- Internal Components ---
+
+const FAQ_ITEMS = [
+  {
+    id: 1,
+    question: "📍 ¿Dónde realizan el servicio? ¿Hacen a domicilio?",
+    answer: "No realizo servicios a domicilio. Todos los trabajos los hago de forma profesional en mi domicilio particular en Venezuela 1659, Cipolletti. Al tener todas mis herramientas acá, puedo asegurarte un nivel de detalle y acabado que sería imposible lograr de otra manera."
+  },
+  {
+    id: 2,
+    question: "⏱️ ¿Cuánto tiempo demora el servicio?",
+    answer: "El tiempo de trabajo varía según la opción que elijas para cuidar tu vehículo: el Lavado Exterior (Opción 1) demora aproximadamente 1 hora; la limpieza de Cabina Premium (Opción 2) tiene un tiempo estimado de 1 hora y media; y el tratamiento Completo Full (Opción 3) requiere entre 2.5 y 3 horas para una dedicación total. Te avisamos ni bien el vehículo esté listo para que lo retires impecable."
+  },
+  {
+    id: 3,
+    question: "🌧️ ¿Qué pasa si llueve el día de mi turno?",
+    answer: "¡No te preocupes por el clima! Si el pronóstico anuncia tormenta o llueve durante el día de tu turno, nos comunicamos con vos para reprogramar el servicio para el día de sol o asfalto seco más cercano disponible, asegurando que tu auto ruede impecable y no se arruine el lavado."
+  },
+  {
+    id: 4,
+    question: "💳 ¿Cuáles son los medios de pago disponibles?",
+    answer: "Para tu total comodidad aceptamos efectivo, transferencias bancarias y Mercado Pago. El pago se efectúa únicamente al momento de retirar tu vehículo una vez que lo revisas y quedas 100% conforme con el resultado final."
+  },
+  {
+    id: 5,
+    question: "📅 ¿Cómo cancelo o modifico mi reserva?",
+    answer: "Si te surge un imprevisto, te pedimos que nos avises con al menos 24 horas de anticipación a través de WhatsApp. Así nos das la oportunidad de liberar ese horario para otro cliente que lo necesite y reprogramar tu turno con calma para otro momento oportuno."
+  }
+];
 
 const SectionHeader = ({ kicker, title, number }: { kicker: string, title: string, number: string }) => (
   <div className="flex items-end justify-between gap-6 mb-6 md:mb-16">
@@ -143,6 +173,7 @@ export default function App() {
   const [clientName, setClientName] = useState('');
   const [clientPhone, setClientPhone] = useState('');
   const [clientConfirmedLocation, setClientConfirmedLocation] = useState(false);
+  const [openFaq, setOpenFaq] = useState<number | null>(null);
   const clientAddress = "Venezuela 1659, Cipolletti";
 
   // Refs for auto-scroll
@@ -376,23 +407,26 @@ export default function App() {
 
   const firstAvailableInfo = useMemo(() => {
     if (isLoadingSlots) return { day: 'Cargando...', times: 'Buscando horarios disponibles...' };
-    const firstDay = filteredSlotsData.find(s => s && s.fecha && ((s.count || 0) > 0 || (s.slots && s.slots.length > 0)));
+    const firstDay = availableDates.find(d => d.slotsCount > 0);
     if (firstDay) {
       try {
-        const [y, m, d] = firstDay.fecha.split('-').map(Number);
-        const date = new Date(y, m - 1, d);
         const options: Intl.DateTimeFormatOptions = { weekday: 'long', day: 'numeric', month: 'long' };
-        const formatted = date.toLocaleDateString('es-AR', options);
+        const formatted = firstDay.date.toLocaleDateString('es-AR', options);
+        
+        // Find slot times for this date from filteredSlotsData
+        const dayData = filteredSlotsData.find(s => s && s.fecha === firstDay.str);
+        const times = dayData && dayData.slots ? dayData.slots.join(' / ') : '';
+        
         return {
           day: formatted.charAt(0).toUpperCase() + formatted.slice(1),
-          times: (firstDay.slots || []).join(' / ')
+          times: times
         };
       } catch (e) {
         console.error('Error formatting date:', e);
       }
     }
     return { day: 'Próximamente', times: '' };
-  }, [filteredSlotsData, isLoadingSlots]);
+  }, [availableDates, filteredSlotsData, isLoadingSlots]);
 
   const handleFinalBooking = async () => {
     if (!selectedDateStr || !selectedTime || !vehicle || !selectedService || !clientName || !clientPhone || !clientConfirmedLocation) return;
@@ -766,9 +800,65 @@ export default function App() {
                 </div>
               </div>
 
+              {/* FAQ Section */}
+              <div id="faq" className="mt-20 pb-20 border-t border-white/[0.03] pt-16">
+                <div className="max-w-4xl mx-auto">
+                  <SectionHeader kicker="Dudas" title="Preguntas <span class='text-emerald-500'>Frecuentes</span>" number="04" />
+                  
+                  <div className="mt-8 space-y-4">
+                    {FAQ_ITEMS.map((faq, index) => {
+                      const isOpen = openFaq === index;
+                      return (
+                        <div 
+                          key={faq.id}
+                          className={`rounded-2xl border-2 transition-all duration-300 overflow-hidden bg-zinc-900/60 ${
+                            isOpen 
+                              ? 'border-emerald-500 bg-zinc-900/90 shadow-[0_4px_25px_rgba(16,185,129,0.08)]' 
+                              : 'border-white/10 hover:border-white/20'
+                          }`}
+                        >
+                          <button
+                            onClick={() => setOpenFaq(isOpen ? null : index)}
+                            className="w-full text-left p-5 md:p-6 flex justify-between items-center gap-4 focus:outline-none focus:ring-1 focus:ring-emerald-500/30 font-display"
+                          >
+                            <span className={`text-base md:text-lg font-black tracking-tight transition-colors duration-300 ${
+                              isOpen ? 'text-emerald-400' : 'text-white'
+                            }`}>
+                              {faq.question}
+                            </span>
+                            <span className={`shrink-0 w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300 ${
+                              isOpen ? 'bg-emerald-500 text-night rotate-180 font-black' : 'bg-zinc-800 text-zinc-400'
+                            }`}>
+                              <ChevronDown className="w-5 h-5 stroke-[2.5]" />
+                            </span>
+                          </button>
+                          
+                          <AnimatePresence initial={false}>
+                            {isOpen && (
+                              <motion.div
+                                initial={{ height: 0, opacity: 0 }}
+                                animate={{ height: "auto", opacity: 1 }}
+                                exit={{ height: 0, opacity: 0 }}
+                                transition={{ duration: 0.25, ease: "easeInOut" }}
+                              >
+                                <div className="px-5 md:px-6 pb-6 pt-1 border-t border-white/[0.04] bg-black/15">
+                                  <p className="text-zinc-100 font-bold text-sm md:text-base leading-relaxed">
+                                    {faq.answer}
+                                  </p>
+                                </div>
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+
               {/* Social Media CTA Section */}
-              <div className="mt-20 pb-20">
-                <SectionHeader kicker="Galería" title="Nuestros <span class='text-emerald-500'>Resultados</span>" number="04" />
+              <div className="mt-20 pb-20 border-t border-white/[0.03] pt-16">
+                <SectionHeader kicker="Galería" title="Nuestros <span class='text-emerald-500'>Resultados</span>" number="05" />
                 <div className="bg-zinc-900 shadow-2xl border border-white/5 rounded-[3rem] p-8 md:p-16 relative overflow-hidden">
                   <div className="absolute -top-24 -right-24 w-96 h-96 bg-emerald-500/10 blur-[120px] rounded-full pointer-events-none" />
                   
@@ -817,7 +907,7 @@ export default function App() {
 
               {/* Google Reviews Section */}
               <div className="mt-20 pb-20">
-                <SectionHeader kicker="Reseñas" title="Opiniones en <span class='text-emerald-500'>Google</span>" number="05" />
+                <SectionHeader kicker="Reseñas" title="Opiniones en <span class='text-emerald-500'>Google</span>" number="06" />
                 
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
                   
@@ -982,6 +1072,8 @@ export default function App() {
                 </div>
               </div>
             </section>
+
+
           </motion.div>
 
         ) : (
