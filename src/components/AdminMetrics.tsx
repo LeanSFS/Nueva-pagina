@@ -34,6 +34,9 @@ import {
 import { signInWithPopup, signInWithRedirect, getRedirectResult, GoogleAuthProvider, signOut, User } from 'firebase/auth';
 import { auth } from '../services/firebase.ts';
 import { metricsService, SectionTrace } from '../services/metricsService.ts';
+import { telegramService } from '../services/telegramService.ts';
+import firebaseConfig from '../../firebase-applet-config.json';
+import { Send } from 'lucide-react';
 
 export default function AdminMetrics() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -45,6 +48,75 @@ export default function AdminMetrics() {
   const [authError, setAuthError] = useState<string | null>(null);
   const [isIframe, setIsIframe] = useState(false);
   const [preferredMethod, setPreferredMethod] = useState<'popup' | 'redirect'>('popup');
+
+  const [telegramEnabled, setTelegramEnabled] = useState(false);
+  const [telegramToken, setTelegramToken] = useState('');
+  const [telegramChatId, setTelegramChatId] = useState('');
+  const [savingTelegram, setSavingTelegram] = useState(false);
+  const [testStatus, setTestStatus] = useState<{ type: 'idle' | 'success' | 'error', message?: string }>({ type: 'idle' });
+
+  useEffect(() => {
+    async function loadTelegramSettings() {
+      try {
+        const settings = await telegramService.getSettings();
+        setTelegramEnabled(settings.enabled);
+        setTelegramToken(settings.botToken || '');
+        setTelegramChatId(settings.chatId || '');
+      } catch (e) {
+        console.error('Error loading Telegram settings in component:', e);
+      }
+    }
+    loadTelegramSettings();
+  }, []);
+
+  const handleSaveTelegram = async () => {
+    setSavingTelegram(true);
+    try {
+      await telegramService.saveSettings({
+        enabled: telegramEnabled,
+        botToken: telegramToken.trim(),
+        chatId: telegramChatId.trim()
+      });
+      alert('¡Configuración de Telegram guardada correctamente!');
+    } catch (e) {
+      alert('Error al guardar la configuración de Telegram');
+    } finally {
+      setSavingTelegram(false);
+    }
+  };
+
+  const handleTestTelegram = async () => {
+    setTestStatus({ type: 'idle' });
+    if (!telegramToken.trim() || !telegramChatId.trim()) {
+      setTestStatus({ type: 'error', message: 'Por favor, ingresá el Token de Bot y el ID de Chat antes de enviar una prueba.' });
+      return;
+    }
+    try {
+      const url = `https://api.telegram.org/bot${telegramToken.trim()}/sendMessage`;
+      const text = `🔔 *PRUEBA DE CONEXIÓN EXITOSA*\n\n` +
+        `¡Felicidades! Tu bot de Telegram quedó configurado perfectamente para recibir alertas de turnos de *LyS Lavados*.\n\n` +
+        `📱 _ID de Chat:_ \`${telegramChatId.trim()}\`\n` +
+        `🧼 _Web:_ https://lyslavados.com`;
+
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: telegramChatId.trim(),
+          text: text,
+          parse_mode: 'Markdown'
+        })
+      });
+      if (res.ok) {
+        setTestStatus({ type: 'success', message: '¡Mensaje de prueba enviado! Revisá tu celular.' });
+      } else {
+        const err = await res.text();
+        setTestStatus({ type: 'error', message: `Error de Telegram: ${err}` });
+      }
+    } catch (e) {
+      setTestStatus({ type: 'error', message: 'No se pudo conectar con los servidores de Telegram. Verificá tu token o conexión.' });
+    }
+  };
 
   // Detect iframe environments
   useEffect(() => {
@@ -391,7 +463,7 @@ export default function AdminMetrics() {
             </div>
             <p className="text-zinc-500 text-xs font-medium max-w-xl mt-1">
               {isVerifiedAdmin 
-                ? `¡Hola, leandro.saralegui@gmail.com! Estás conectado al proyecto "virtual-photon-31b2m" con Firebase Firestore en tiempo real.` 
+                ? `¡Hola, leandro.saralegui@gmail.com! Estás conectado al proyecto "${firebaseConfig.projectId}" con Firebase Firestore en tiempo real.` 
                 : 'Mostrando métricas simuladas del navegador. Iniciá sesión con tu cuenta de Administrador registrada para sincronizar con Cloud Firestore.'
               }
             </p>
@@ -546,6 +618,110 @@ export default function AdminMetrics() {
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* 🔮 Telegram Integration Control Panel */}
+      {isVerifiedAdmin && (
+        <div className="bg-zinc-900 border border-white/5 rounded-3xl p-6 relative overflow-hidden">
+          <div className="absolute top-0 right-0 w-32 h-32 bg-sky-500/5 blur-2xl rounded-full" />
+          <div className="flex flex-col gap-6 z-10 relative">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="flex items-start gap-3">
+                <div className="p-2.5 bg-sky-500/10 text-sky-400 rounded-xl border border-sky-500/20 shrink-0">
+                  <Send className="w-5 h-5 animate-pulse" />
+                </div>
+                <div>
+                  <h4 className="font-display font-black text-sm italic uppercase tracking-wider text-white">
+                    Configuración de Notificaciones por Telegram
+                  </h4>
+                  <p className="text-zinc-500 text-[11px] font-semibold mt-0.5">
+                    Recibí alertas instantáneas de turnos de tus clientes directamente en tu celular.
+                  </p>
+                </div>
+              </div>
+
+              {/* Enabled Switch */}
+              <label className="inline-flex items-center gap-3 cursor-pointer self-start md:self-auto bg-zinc-950 px-4 py-2 rounded-2xl border border-white/5">
+                <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400">
+                  {telegramEnabled ? '🔔 HABILITADO' : '🔕 DESHABILITADO'}
+                </span>
+                <input 
+                  type="checkbox" 
+                  checked={telegramEnabled}
+                  onChange={(e) => setTelegramEnabled(e.target.checked)}
+                  className="sr-only peer"
+                />
+                <div className="relative w-9 h-5 bg-zinc-850 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-zinc-500 after:border-zinc-400 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-500 peer-checked:after:bg-night peer-checked:after:border-emerald-400"></div>
+              </label>
+            </div>
+
+            {/* Inputs Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400">
+                  Token del Bot de Telegram
+                </label>
+                <input 
+                  type="text" 
+                  placeholder="ej. 6849928192:AAHs8W..."
+                  value={telegramToken}
+                  onChange={(e) => setTelegramToken(e.target.value)}
+                  className="w-full bg-zinc-950 border border-white/5 rounded-xl px-4 py-2.5 text-xs text-white font-mono placeholder:text-zinc-700 focus:outline-none focus:border-emerald-500/50 transition-all"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400">
+                  ID de Chat o Grupo de Telegram
+                </label>
+                <input 
+                  type="text" 
+                  placeholder="ej. -10023456789 o 58219283"
+                  value={telegramChatId}
+                  onChange={(e) => setTelegramChatId(e.target.value)}
+                  className="w-full bg-zinc-950 border border-white/5 rounded-xl px-4 py-2.5 text-xs text-white font-mono placeholder:text-zinc-700 focus:outline-none focus:border-emerald-500/50 transition-all"
+                />
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-white/[0.03]">
+              <div className="text-[10px] text-zinc-500 font-semibold leading-relaxed max-w-md">
+                💡 <span className="text-zinc-400 font-bold">¿Cómo crear el bot en 1 min?</span> Buscá a <strong className="text-zinc-300 font-bold">@BotFather</strong> en Telegram, mandale <code className="bg-zinc-950 px-1.5 py-0.5 rounded text-[9px] text-white font-mono">/newbot</code> para crearlo y copiar el Token. Luego mandale un mensaje inicial a tu bot y conseguí tu Chat ID para vincularlo.
+              </div>
+
+              <div className="flex items-center gap-2 w-full md:w-auto">
+                <button
+                  type="button"
+                  onClick={handleTestTelegram}
+                  className="flex-1 md:flex-none flex items-center justify-center gap-2 bg-zinc-950 hover:bg-zinc-900 border border-white/5 active:scale-95 px-4 py-2.5 rounded-xl text-[10px] font-zinc-400 font-black uppercase tracking-widest transition-all"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" /> Enviar Mensaje Prueba
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleSaveTelegram}
+                  disabled={savingTelegram}
+                  className="flex-1 md:flex-none flex items-center justify-center gap-2 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-night shadow-lg shadow-emerald-500/10 px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest active:scale-95 transition-all"
+                >
+                  {savingTelegram ? 'Guardando...' : 'Guardar Cambios'}
+                </button>
+              </div>
+            </div>
+
+            {/* Test Status Msg */}
+            {testStatus.type !== 'idle' && (
+              <div className={`p-3 rounded-xl border text-[11px] font-medium leading-relaxed ${
+                testStatus.type === 'success' 
+                  ? 'bg-emerald-500/5 border-emerald-500/10 text-emerald-400 font-bold' 
+                  : 'bg-red-500/5 border-red-500/10 text-red-400 font-bold'
+              }`}>
+                {testStatus.message}
+              </div>
+            )}
+          </div>
         </div>
       )}
 

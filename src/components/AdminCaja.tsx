@@ -353,8 +353,8 @@ export default function AdminCaja({ onBack }: { onBack: () => void }) {
       };
       await firestoreService.addGalleryPhoto(payload);
       setNewPhoto({ url: '', title: '', description: '' });
-      const up = await firestoreService.getGallery();
-      setDbPhotos(up);
+      // Update local state directly for instant feedback and to prevent public read overriding before sync completes
+      setDbPhotos(prev => [payload, ...prev]);
     } catch (e: any) {
       setError(e.message || 'Error al guardar foto');
     } finally {
@@ -368,8 +368,8 @@ export default function AdminCaja({ onBack }: { onBack: () => void }) {
     setError(null);
     try {
       await firestoreService.deleteGalleryPhoto(photoId);
-      const up = await firestoreService.getGallery();
-      setDbPhotos(up);
+      // Filter out immediately for instant interactive response
+      setDbPhotos(prev => prev.filter(p => p.id !== photoId));
     } catch (e: any) {
       setError(e.message || 'Error al eliminar foto');
     } finally {

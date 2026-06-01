@@ -36,6 +36,7 @@ import { fetchSlots, createBooking, TimeSlot } from './services/availabilityServ
 import AdminCaja from './components/AdminCaja.tsx';
 import { metricsService } from './services/metricsService.ts';
 import { firestoreService, CatalogService, CatalogVehicle, GalleryPhoto } from './services/firestoreService.ts';
+import { telegramService } from './services/telegramService.ts';
 
 // --- Internal Components ---
 
@@ -479,11 +480,14 @@ export default function App() {
     if (!selectedDateStr || !selectedTime || !vehicle || !selectedService || !clientName || !clientPhone || !clientConfirmedLocation) return;
 
     setIsSubmitting(true);
+    const serviceName = activeServices.find(s => s.id === selectedService)?.name || selectedService;
+    const vehicleName = activeVehicles.find(v => v.id === vehicle)?.name || vehicle;
+
     const result = await createBooking({
       fecha: selectedDateStr,
       hora: selectedTime,
-      tipo: vehicle,
-      servicio: `${selectedService} – $${currentPrice}`,
+      tipo: vehicleName,
+      servicio: `${serviceName} – $${currentPrice}`,
       nombre: clientName,
       telefono: clientPhone,
       direccion: "Venezuela 1659 (Domicilio)"
@@ -491,9 +495,19 @@ export default function App() {
 
     if (result.ok) {
       metricsService.logAction('reserva_completada');
+      
+      // Send Telegram notification in background
+      telegramService.sendBookingNotification({
+        nombre: clientName,
+        telefono: clientPhone,
+        tipo: vehicleName,
+        servicio: `${serviceName} ($${currentPrice})`,
+        fecha: selectedDateStr,
+        hora: selectedTime,
+        direccion: "Venezuela 1659 (Cipolletti, Domicilio)"
+      }).catch(err => console.error('Silent error triggering Telegram notify:', err));
+
       // Generate WhatsApp msg
-      const vehicleName = activeVehicles.find(v => v.id === vehicle)?.name;
-      const serviceName = activeServices.find(s => s.id === selectedService)?.name;
       const [y, m, d] = selectedDateStr.split('-');
       const formattedDate = `${d}/${m}/${y}`;
 
@@ -512,7 +526,6 @@ export default function App() {
       // Reset view or show success
       setView('home');
       setShowConfirmation(false);
-      // Optional: reset state
     } else {
       alert('Error en la reserva: ' + (result.error || 'Intente nuevamente'));
     }

@@ -164,5 +164,10 @@ service cloud.firestore {
       allow read, list: if true;
       allow create, update, delete: if isAdmin();
     }
+
+    // 8. General admin settings (including Telegram notifications bot config)
+    match /settings/{settingId} {
+      allow read, write: if isAdmin();
+    }
   }
 }

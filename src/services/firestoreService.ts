@@ -59,16 +59,44 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
     path
   };
   console.error('Firestore Error Detailed: ', JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
+}
+
+// --- Timeout Promise Wrapper ---
+async function withTimeout<T>(promise: Promise<T>, timeoutMs = 2500): Promise<T> {
+  let timeoutId: any;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(new Error('Firebase operation timed out (client offline/unconfigured)'));
+    }, timeoutMs);
+  });
+  return Promise.race([promise, timeoutPromise]).finally(() => {
+    clearTimeout(timeoutId);
+  });
+}
+
+// --- Local Storage Cache Helpers ---
+function getLocalCache<T>(key: string, defaultValue: T): T {
+  try {
+    const data = localStorage.getItem(key);
+    return data ? JSON.parse(data) : defaultValue;
+  } catch (e) {
+    return defaultValue;
+  }
+}
+
+function setLocalCache<T>(key: string, value: T): void {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch (e) {}
 }
 
 // --- Validate Connection on boot ---
 async function testConnection() {
   try {
-    await getDocFromServer(doc(db, 'test', 'connection'));
+    await withTimeout(getDocFromServer(doc(db, 'test', 'connection')), 1500);
   } catch (error) {
-    if (error instanceof Error && error.message.includes('the client is offline')) {
-      console.error("Please check your Firebase configuration: Client is offline.");
+    if (error instanceof Error) {
+      console.warn("Firestore connection check notice:", error.message);
     }
   }
 }
@@ -142,78 +170,118 @@ export const firestoreService = {
     const colPath = 'bookings';
     try {
       const q = collection(db, colPath);
-      const snap = await getDocs(q);
+      const snap = await withTimeout(getDocs(q), 3000);
       const rows: Booking[] = [];
       snap.forEach(docSnap => {
         rows.push(docSnap.data() as Booking);
       });
+      setLocalCache('lys_cache_bookings', rows);
       return rows;
     } catch (e) {
-      handleFirestoreError(e, OperationType.LIST, colPath);
-      return [];
+      console.warn("Firestore getBookings error/timeout, using local cache:", e);
+      return getLocalCache<Booking[]>('lys_cache_bookings', []);
     }
   },
 
   async createBooking(booking: Booking, isBlocked = false): Promise<void> {
-    const bach = writeBatch(db);
-    const bookingRef = doc(db, 'bookings', booking.id);
     const slotId = `${booking.fecha}_${booking.hora}`;
-    const slotRef = doc(db, 'taken_slots', slotId);
+    
+    // Save to local cache first
+    const localBookings = getLocalCache<Booking[]>('lys_cache_bookings', []);
+    if (!localBookings.some(b => b.id === booking.id)) {
+      localBookings.push(booking);
+      setLocalCache('lys_cache_bookings', localBookings);
+    }
 
-    bach.set(bookingRef, booking);
-    bach.set(slotRef, {
-      id: slotId,
-      fecha: booking.fecha,
-      hora: booking.hora,
-      isBlocked: isBlocked
-    });
+    const localTaken = getLocalCache<TakenSlot[]>('lys_cache_taken_slots', []);
+    if (!localTaken.some(ts => ts.id === slotId)) {
+      localTaken.push({ id: slotId, fecha: booking.fecha, hora: booking.hora, isBlocked });
+      setLocalCache('lys_cache_taken_slots', localTaken);
+    }
 
     try {
-      await bach.commit();
+      const bach = writeBatch(db);
+      const bookingRef = doc(db, 'bookings', booking.id);
+      const slotRef = doc(db, 'taken_slots', slotId);
+
+      bach.set(bookingRef, booking);
+      bach.set(slotRef, {
+        id: slotId,
+        fecha: booking.fecha,
+        hora: booking.hora,
+        isBlocked: isBlocked
+      });
+
+      await withTimeout(bach.commit(), 3000);
     } catch (e) {
       handleFirestoreError(e, OperationType.WRITE, `bookings_and_slots/${booking.id}`);
     }
   },
 
   async deleteBooking(bookingId: string, fecha: string, hora: string): Promise<void> {
-    const bach = writeBatch(db);
-    const bookingRef = doc(db, 'bookings', bookingId);
     const slotId = `${fecha}_${hora}`;
-    const slotRef = doc(db, 'taken_slots', slotId);
 
-    bach.delete(bookingRef);
-    bach.delete(slotRef);
+    // Update local cache
+    const localBookings = getLocalCache<Booking[]>('lys_cache_bookings', []);
+    const filteredBookings = localBookings.filter(b => b.id !== bookingId);
+    setLocalCache('lys_cache_bookings', filteredBookings);
+
+    const localTaken = getLocalCache<TakenSlot[]>('lys_cache_taken_slots', []);
+    const filteredTaken = localTaken.filter(ts => ts.id !== slotId);
+    setLocalCache('lys_cache_taken_slots', filteredTaken);
 
     try {
-      await bach.commit();
+      const bach = writeBatch(db);
+      const bookingRef = doc(db, 'bookings', bookingId);
+      const slotRef = doc(db, 'taken_slots', slotId);
+
+      bach.delete(bookingRef);
+      bach.delete(slotRef);
+
+      await withTimeout(bach.commit(), 3000);
     } catch (e) {
       handleFirestoreError(e, OperationType.DELETE, `bookings_and_slots/${bookingId}`);
     }
   },
 
   async updateBookingStatus(bookingId: string, booking: Booking, newStatus: Booking['estado']): Promise<void> {
-    const bookingRef = doc(db, 'bookings', bookingId);
     const slotId = `${booking.fecha}_${booking.hora}`;
-    const slotRef = doc(db, 'taken_slots', slotId);
 
-    const bach = writeBatch(db);
-    bach.update(bookingRef, { estado: newStatus });
+    // Update local cache
+    const localBookings = getLocalCache<Booking[]>('lys_cache_bookings', []);
+    const updatedBookings = localBookings.map(b => b.id === bookingId ? { ...b, estado: newStatus } : b);
+    setLocalCache('lys_cache_bookings', updatedBookings);
 
+    const localTaken = getLocalCache<TakenSlot[]>('lys_cache_taken_slots', []);
+    let updatedTaken = localTaken;
     if (newStatus === 'cancelado') {
-      // If cancelled, open the spot by deleting the public occupied slot
-      bach.delete(slotRef);
+      updatedTaken = localTaken.filter(ts => ts.id !== slotId);
     } else {
-      // Re-add slot if reactivated
-      bach.set(slotRef, {
-        id: slotId,
-        fecha: booking.fecha,
-        hora: booking.hora,
-        isBlocked: booking.nombre.includes('BLOQUEADO')
-      });
+      if (!localTaken.some(ts => ts.id === slotId)) {
+        updatedTaken.push({ id: slotId, fecha: booking.fecha, hora: booking.hora, isBlocked: booking.nombre.includes('BLOQUEADO') });
+      }
     }
+    setLocalCache('lys_cache_taken_slots', updatedTaken);
 
     try {
-      await bach.commit();
+      const bookingRef = doc(db, 'bookings', bookingId);
+      const slotRef = doc(db, 'taken_slots', slotId);
+      const bach = writeBatch(db);
+      
+      bach.update(bookingRef, { estado: newStatus });
+
+      if (newStatus === 'cancelado') {
+        bach.delete(slotRef);
+      } else {
+        bach.set(slotRef, {
+          id: slotId,
+          fecha: booking.fecha,
+          hora: booking.hora,
+          isBlocked: booking.nombre.includes('BLOQUEADO')
+        });
+      }
+
+      await withTimeout(bach.commit(), 3000);
     } catch (e) {
       handleFirestoreError(e, OperationType.UPDATE, `bookings_and_slots/${bookingId}`);
     }
@@ -224,15 +292,38 @@ export const firestoreService = {
   async getPublicTakenSlots(): Promise<TakenSlot[]> {
     const colPath = 'taken_slots';
     try {
-      const snap = await getDocs(collection(db, colPath));
+      // Calculate today's date in Argentina timezone
+      let todayStr = new Date().toISOString().split('T')[0];
+      try {
+        const formatter = new Intl.DateTimeFormat('en-CA', {
+          timeZone: 'America/Argentina/Buenos_Aires',
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit'
+        });
+        todayStr = formatter.format(new Date());
+      } catch (e) {
+        console.warn('Fallback to system timezone for todayStr:', e);
+      }
+
+      // Query only slots starting from today onwards
+      const q = query(
+        collection(db, colPath), 
+        where('fecha', '>=', todayStr)
+      );
+      
+      const snap = await withTimeout(getDocs(q), 3000);
       const res: TakenSlot[] = [];
       snap.forEach(docSnap => {
         res.push(docSnap.data() as TakenSlot);
       });
+      setLocalCache('lys_cache_taken_slots', res);
       return res;
     } catch (e) {
-      handleFirestoreError(e, OperationType.LIST, colPath);
-      return [];
+      console.warn("Firestore getPublicTakenSlots error/timeout, using local cache:", e);
+      let todayStr = new Date().toISOString().split('T')[0];
+      const localTaken = getLocalCache<TakenSlot[]>('lys_cache_taken_slots', []);
+      return localTaken.filter(ts => ts.fecha >= todayStr);
     }
   },
 
@@ -241,22 +332,30 @@ export const firestoreService = {
   async getMovements(): Promise<Movement[]> {
     const colPath = 'movements';
     try {
-      const snap = await getDocs(collection(db, colPath));
+      const snap = await withTimeout(getDocs(collection(db, colPath)), 3000);
       const list: Movement[] = [];
       snap.forEach(d => {
         list.push(d.data() as Movement);
       });
+      setLocalCache('lys_cache_movements', list);
       return list;
     } catch (e) {
-      handleFirestoreError(e, OperationType.LIST, colPath);
-      return [];
+      console.warn("Firestore getMovements error/timeout, using local cache:", e);
+      return getLocalCache<Movement[]>('lys_cache_movements', []);
     }
   },
 
   async saveMovement(movement: Movement): Promise<void> {
     const colPath = 'movements';
+    
+    // Save to local cache first
+    const localMovements = getLocalCache<Movement[]>('lys_cache_movements', []);
+    const filtered = localMovements.filter(m => m.id !== movement.id);
+    filtered.push(movement);
+    setLocalCache('lys_cache_movements', filtered);
+
     try {
-      await setDoc(doc(db, colPath, movement.id), movement);
+      await withTimeout(setDoc(doc(db, colPath, movement.id), movement), 2500);
     } catch (e) {
       handleFirestoreError(e, OperationType.WRITE, `${colPath}/${movement.id}`);
     }
@@ -264,8 +363,14 @@ export const firestoreService = {
 
   async deleteMovement(id: string): Promise<void> {
     const colPath = 'movements';
+
+    // Delete locally
+    const localMovements = getLocalCache<Movement[]>('lys_cache_movements', []);
+    const filtered = localMovements.filter(m => m.id !== id);
+    setLocalCache('lys_cache_movements', filtered);
+
     try {
-      await deleteDoc(doc(db, colPath, id));
+      await withTimeout(deleteDoc(doc(db, colPath, id)), 2500);
     } catch (e) {
       handleFirestoreError(e, OperationType.DELETE, `${colPath}/${id}`);
     }
@@ -276,7 +381,7 @@ export const firestoreService = {
   async getServices(): Promise<CatalogService[]> {
     const colPath = 'services';
     try {
-      const snap = await getDocs(collection(db, colPath));
+      const snap = await withTimeout(getDocs(collection(db, colPath)), 3000);
       if (snap.empty) {
         // Self-bootstrap initial items from local constants to save setup time
         const initialServices: CatalogService[] = SERVICES.map(s => {
@@ -299,7 +404,8 @@ export const firestoreService = {
         initialServices.forEach(srv => {
           batch.set(doc(db, colPath, srv.id), srv);
         });
-        await batch.commit();
+        await withTimeout(batch.commit(), 3000);
+        setLocalCache('lys_cache_services', initialServices);
         return initialServices;
       }
 
@@ -307,20 +413,36 @@ export const firestoreService = {
       snap.forEach(d => {
         list.push(d.data() as CatalogService);
       });
+      setLocalCache('lys_cache_services', list);
       return list;
     } catch (e) {
-      handleFirestoreError(e, OperationType.LIST, colPath);
-      return [];
+      console.warn("Firestore getServices error/timeout, using fallback:", e);
+      return getLocalCache<CatalogService[]>('lys_cache_services', SERVICES.map(s => ({
+        id: s.id,
+        name: s.name,
+        label: s.label,
+        description: s.description,
+        features: s.features,
+        isFeatured: s.isFeatured ?? false,
+        basePrice: s.id === 'Interior' ? 25000 : (s.id === 'Full' ? 40000 : 20000)
+      })));
     }
   },
 
   async saveService(service: CatalogService): Promise<void> {
     const colPath = 'services';
+
+    // Save locally
+    const localServices = getLocalCache<CatalogService[]>('lys_cache_services', []);
+    const filtered = localServices.filter(s => s.id !== service.id);
+    filtered.push(service);
+    setLocalCache('lys_cache_services', filtered);
+
     try {
-      await setDoc(doc(db, colPath, service.id), {
+      await withTimeout(setDoc(doc(db, colPath, service.id), {
         ...service,
         isFeatured: service.isFeatured ?? false
-      });
+      }), 2500);
     } catch (e) {
       handleFirestoreError(e, OperationType.WRITE, `${colPath}/${service.id}`);
     }
@@ -328,8 +450,14 @@ export const firestoreService = {
 
   async deleteService(serviceId: string): Promise<void> {
     const colPath = 'services';
+
+    // Delete locally
+    const localServices = getLocalCache<CatalogService[]>('lys_cache_services', []);
+    const filtered = localServices.filter(s => s.id !== serviceId);
+    setLocalCache('lys_cache_services', filtered);
+
     try {
-      await deleteDoc(doc(db, colPath, serviceId));
+      await withTimeout(deleteDoc(doc(db, colPath, serviceId)), 2500);
     } catch (e) {
       handleFirestoreError(e, OperationType.DELETE, `${colPath}/${serviceId}`);
     }
@@ -340,7 +468,7 @@ export const firestoreService = {
   async getVehicles(): Promise<CatalogVehicle[]> {
     const colPath = 'vehicles';
     try {
-      const snap = await getDocs(collection(db, colPath));
+      const snap = await withTimeout(getDocs(collection(db, colPath)), 3000);
       if (snap.empty) {
         // Self-bootstrap initial vehicles
         const initialVehicles: CatalogVehicle[] = VEHICLES.map(v => {
@@ -361,7 +489,8 @@ export const firestoreService = {
         initialVehicles.forEach(veh => {
           batch.set(doc(db, colPath, veh.id), veh);
         });
-        await batch.commit();
+        await withTimeout(batch.commit(), 3000);
+        setLocalCache('lys_cache_vehicles', initialVehicles);
         return initialVehicles;
       }
 
@@ -369,17 +498,31 @@ export const firestoreService = {
       snap.forEach(d => {
         list.push(d.data() as CatalogVehicle);
       });
+      setLocalCache('lys_cache_vehicles', list);
       return list;
     } catch (e) {
-      handleFirestoreError(e, OperationType.LIST, colPath);
-      return [];
+      console.warn("Firestore getVehicles error/timeout, using fallback:", e);
+      return getLocalCache<CatalogVehicle[]>('lys_cache_vehicles', VEHICLES.map(v => ({
+        id: v.id,
+        name: v.name,
+        icon: v.icon,
+        examples: v.examples,
+        extraPrice: v.id === 'suv' ? 5000 : (v.id === 'pickup' ? 15000 : 0)
+      })));
     }
   },
 
   async saveVehicle(vehicle: CatalogVehicle): Promise<void> {
     const colPath = 'vehicles';
+
+    // Save locally
+    const localVehicles = getLocalCache<CatalogVehicle[]>('lys_cache_vehicles', []);
+    const filtered = localVehicles.filter(v => v.id !== vehicle.id);
+    filtered.push(vehicle);
+    setLocalCache('lys_cache_vehicles', filtered);
+
     try {
-      await setDoc(doc(db, colPath, vehicle.id), vehicle);
+      await withTimeout(setDoc(doc(db, colPath, vehicle.id), vehicle), 2500);
     } catch (e) {
       handleFirestoreError(e, OperationType.WRITE, `${colPath}/${vehicle.id}`);
     }
@@ -390,7 +533,7 @@ export const firestoreService = {
   async getGallery(): Promise<GalleryPhoto[]> {
     const colPath = 'gallery';
     try {
-      const snap = await getDocs(collection(db, colPath));
+      const snap = await withTimeout(getDocs(collection(db, colPath)), 3000);
       if (snap.empty) {
         // Self-bootstrap visual defaults if desired
         const defaultPhotos: GalleryPhoto[] = [
@@ -422,7 +565,8 @@ export const firestoreService = {
         defaultPhotos.forEach(p => {
           batch.set(doc(db, colPath, p.id), p);
         });
-        await batch.commit();
+        await withTimeout(batch.commit(), 3000);
+        setLocalCache('lys_cache_gallery', defaultPhotos);
         return defaultPhotos;
       }
 
@@ -430,18 +574,26 @@ export const firestoreService = {
       snap.forEach(d => {
         list.push(d.data() as GalleryPhoto);
       });
-      // Sort new ones first
-      return list.sort((a,b) => b.createdAt.localeCompare(a.createdAt));
+      const sorted = list.sort((a,b) => b.createdAt.localeCompare(a.createdAt));
+      setLocalCache('lys_cache_gallery', sorted);
+      return sorted;
     } catch (e) {
-      handleFirestoreError(e, OperationType.LIST, colPath);
-      return [];
+      console.warn("Firestore getGallery error/timeout, using fallback:", e);
+      return getLocalCache<GalleryPhoto[]>('lys_cache_gallery', []);
     }
   },
 
   async addGalleryPhoto(photo: GalleryPhoto): Promise<void> {
     const colPath = 'gallery';
+
+    // Save locally
+    const localGallery = getLocalCache<GalleryPhoto[]>('lys_cache_gallery', []);
+    const filtered = localGallery.filter(p => p.id !== photo.id);
+    filtered.push(photo);
+    setLocalCache('lys_cache_gallery', filtered);
+
     try {
-      await setDoc(doc(db, colPath, photo.id), photo);
+      await withTimeout(setDoc(doc(db, colPath, photo.id), photo), 2500);
     } catch (e) {
       handleFirestoreError(e, OperationType.WRITE, `${colPath}/${photo.id}`);
     }
@@ -449,8 +601,14 @@ export const firestoreService = {
 
   async deleteGalleryPhoto(photoId: string): Promise<void> {
     const colPath = 'gallery';
+
+    // Delete locally
+    const localGallery = getLocalCache<GalleryPhoto[]>('lys_cache_gallery', []);
+    const filtered = localGallery.filter(p => p.id !== photoId);
+    setLocalCache('lys_cache_gallery', filtered);
+
     try {
-      await deleteDoc(doc(db, colPath, photoId));
+      await withTimeout(deleteDoc(doc(db, colPath, photoId)), 2500);
     } catch (e) {
       handleFirestoreError(e, OperationType.DELETE, `${colPath}/${photoId}`);
     }
