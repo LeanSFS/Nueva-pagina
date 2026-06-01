@@ -30,7 +30,7 @@ import {
   LogOut,
   Sparkles
 } from 'lucide-react';
-import { signInWithPopup, GoogleAuthProvider, signOut, User } from 'firebase/auth';
+import { signInWithPopup, signInWithRedirect, getRedirectResult, GoogleAuthProvider, signOut, User } from 'firebase/auth';
 import { auth } from '../services/firebase.ts';
 import { metricsService, SectionTrace } from '../services/metricsService.ts';
 
@@ -41,12 +41,26 @@ export default function AdminMetrics() {
   const [searchTerm, setSearchTerm] = useState('');
   const [logPage, setLogPage] = useState(0);
   const itemsPerPage = 8;
+  const [authError, setAuthError] = useState<string | null>(null);
 
   // Monitor auth state of the admin
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChanged((user) => {
       setCurrentUser(user);
     });
+
+    // Check Google Redirect sign-in result when component mounts
+    getRedirectResult(auth)
+      .then((result) => {
+        if (result?.user) {
+          setCurrentUser(result.user);
+        }
+      })
+      .catch((err) => {
+        console.error("Redirect sign-in error:", err);
+        setAuthError("No se pudo completar el inicio de sesión con Google. ¿Estás en una pestaña normal o externa?");
+      });
+
     return () => unsubscribe();
   }, []);
 
@@ -73,13 +87,23 @@ export default function AdminMetrics() {
 
   const loginWithGoogle = async () => {
     setLoadingCloud(true);
+    setAuthError(null);
     try {
       const provider = new GoogleAuthProvider();
       // Force prompt so users can pick accounts easily
       provider.setCustomParameters({ prompt: 'select_account' });
-      await signInWithPopup(auth, provider);
-    } catch (err) {
+      
+      const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+      
+      if (isMobile) {
+        // Redirection works best on mobile browsers to prevent popup block issues
+        await signInWithRedirect(auth, provider);
+      } else {
+        await signInWithPopup(auth, provider);
+      }
+    } catch (err: any) {
       console.error("Error signing in with Google:", err);
+      setAuthError(err.message || "Error al conectar con Google");
     } finally {
       setLoadingCloud(false);
     }
@@ -375,12 +399,19 @@ export default function AdminMetrics() {
               </button>
             </div>
           ) : (
-            <button
-              onClick={loginWithGoogle}
-              className="w-full md:w-auto flex items-center justify-center gap-2 bg-emerald-500 hover:bg-emerald-400 text-night shadow-lg shadow-emerald-500/10 px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest active:scale-95 transition-all"
-            >
-              <Sparkles className="w-4 h-4 animate-bounce" /> Conectar con Google
-            </button>
+            <div className="flex flex-col md:flex-row gap-2 items-center w-full md:w-auto">
+              {authError && (
+                <span className="text-[10px] text-red-500 font-semibold max-w-xs text-center border border-red-500/10 bg-red-500/5 px-3 py-1.5 rounded-lg">
+                  {authError}
+                </span>
+              )}
+              <button
+                onClick={loginWithGoogle}
+                className="w-full md:w-auto flex items-center justify-center gap-2 bg-emerald-500 hover:bg-emerald-400 text-night shadow-lg shadow-emerald-500/10 px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest active:scale-95 transition-all"
+              >
+                <Sparkles className="w-4 h-4 animate-bounce" /> Conectar con Google
+              </button>
+            </div>
           )}
         </div>
       </div>
