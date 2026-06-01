@@ -499,11 +499,34 @@ export default function AdminMetrics() {
                 </div>
 
                 <div className="space-y-2 mt-2">
-                  <p className="font-bold text-zinc-300">💡 ¿Cómo solucionar este error?</p>
+                  <p className="font-bold text-zinc-300">💡 ¿Cómo solucionar este error de forma inmediata y automática?</p>
                   {authError.includes('auth/unauthorized-domain') || authError.includes('unauthorized') ? (
-                    <div className="space-y-1.5 pl-3 border-l-2 border-red-500/30">
-                      <p>• <strong>Paso 1:</strong> Tu error es un <strong className="text-white">Dominio no autorizado</strong>.</p>
-                      <p>• <strong>Paso 2:</strong> Asegurate de que el dominio <strong className="text-emerald-400 font-mono">{window.location.hostname}</strong> esté ingresado exactamente en tu consola de Firebase &gt; Authentication &gt; Configuración &gt; Dominios Autorizados.</p>
+                    <div className="space-y-3.5 pl-3 border-l-2 border-red-500/30 text-zinc-400">
+                      <p>
+                        <strong>Explicación:</strong> No tenés propietario directo sobre este subproyecto de base de datos generado por la plataforma (por seguridad e infraestructura de AI Studio). Por lo tanto, no podés añadir <code className="bg-zinc-950 px-1 py-0.5 rounded text-white font-mono">{window.location.hostname}</code> a los dominios de Firebase manualmente.
+                      </p>
+                      <p className="text-emerald-400 font-bold">
+                        ¡Pero no te preocupes! Podés iniciar sesión sin hacer configuraciones complejas:
+                      </p>
+                      <div className="bg-zinc-950 p-4 rounded-xl border border-white/5 space-y-3">
+                        <p className="text-[11px] font-medium leading-relaxed">
+                          La base de datos de Firestore está sincronizada en tiempo real. Esto significa que si iniciás sesión desde la <strong>URL de vista previa autorizada</strong>, los turnos de tus clientes que reservan en la web principal van a ingresar igual y vas a poder gestionarlos perfecto.
+                        </p>
+                        <div className="flex flex-col gap-2 pt-1">
+                          <a 
+                            href="https://ais-pre-xhi2yqr5a2veqlnfganuuf-12804574784.us-east1.run.app"
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center justify-between bg-emerald-500 hover:bg-emerald-400 text-night font-black uppercase text-[10px] tracking-wider px-3.5 py-2 rounded-lg transition-all"
+                          >
+                            <span>Ir al panel autorizado (Sincronizado)</span>
+                            <span>➔</span>
+                          </a>
+                          <span className="text-[9px] text-zinc-500 text-center font-bold">
+                            (Usá el botón anterior para loguearte con Google con total normalidad)
+                          </span>
+                        </div>
+                      </div>
                     </div>
                   ) : (
                     <div className="space-y-1.5 pl-3 border-l-2 border-amber-500/30">
