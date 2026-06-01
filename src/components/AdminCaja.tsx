@@ -320,6 +320,55 @@ export default function AdminCaja({ onBack }: { onBack: () => void }) {
 
   const [newPhoto, setNewPhoto] = useState({ url: '', title: '', description: '' });
   const [savingPhoto, setSavingPhoto] = useState(false);
+  const [compressingImage, setCompressingImage] = useState(false);
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setCompressingImage(true);
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new globalThis.Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let width = img.width;
+        let height = img.height;
+
+        // Scale to max 800px while maintaining aspect ratio
+        const maxDim = 800;
+        if (width > maxDim || height > maxDim) {
+          if (width > height) {
+            height = Math.round((height * maxDim) / width);
+            width = maxDim;
+          } else {
+            width = Math.round((width * maxDim) / height);
+            height = maxDim;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, width, height);
+          const compressedBase64 = canvas.toDataURL('image/jpeg', 0.65);
+          setNewPhoto(prev => ({ ...prev, url: compressedBase64 }));
+        }
+        setCompressingImage(false);
+      };
+      img.onerror = () => {
+        alert('Error al cargar la imagen. Intente con otra.');
+        setCompressingImage(false);
+      };
+      img.src = event.target?.result as string;
+    };
+    reader.onerror = () => {
+      alert('Error leyendo el archivo.');
+      setCompressingImage(false);
+    };
+    reader.readAsDataURL(file);
+  };
 
   const loadCatalogAndGallery = async () => {
     try {
@@ -820,17 +869,76 @@ export default function AdminCaja({ onBack }: { onBack: () => void }) {
                     className="w-full bg-zinc-900 border border-white/10 rounded-xl p-3 text-sm focus:border-emerald-500 outline-none"
                   />
                 </div>
-                <div className="md:col-span-8">
-                  <label className="text-[8px] font-black uppercase text-zinc-500 mb-1 block">URL de la Imagen (Unsplash, Imgur, etc.)</label>
-                  <input 
-                    type="text" 
-                    placeholder="https://images.unsplash.com/photo-..." 
-                    value={newPhoto.url} 
-                    onChange={e => setNewPhoto({...newPhoto, url: e.target.value})}
-                    className="w-full bg-zinc-900 border border-white/10 rounded-xl p-3 text-sm focus:border-emerald-500 outline-none"
-                  />
+                <div className="md:col-span-8 flex flex-col justify-end">
+                  <span className="text-[8px] font-black uppercase text-zinc-500 mb-1 block">Imagen del Trabajo (Elegir Archivo o URL)</span>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {/* Native File Selector for Mobile Gallery */}
+                    <div>
+                      <input 
+                        type="file" 
+                        id="phone-image-upload" 
+                        accept="image/*" 
+                        onChange={handleFileChange} 
+                        className="hidden" 
+                      />
+                      <label 
+                        htmlFor="phone-image-upload"
+                        className="w-full bg-zinc-900 hover:bg-zinc-800 border-2 border-dashed border-emerald-500/20 hover:border-emerald-500/40 rounded-xl p-3 text-xs font-black text-center text-emerald-400 uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer select-none transition-all active:scale-[0.98] h-full min-h-[46px]"
+                      >
+                        {compressingImage ? (
+                          <>
+                            <Loader2 className="w-4 h-4 animate-spin text-emerald-400" />
+                            PROCESANDO...
+                          </>
+                        ) : (
+                          <>
+                            <Plus className="w-4 h-4 text-emerald-400" />
+                            SUBIR DESDE CELULAR
+                          </>
+                        )}
+                      </label>
+                    </div>
+
+                    {/* Fallback to Paste a Web URL directly */}
+                    <div>
+                      <input 
+                        type="text" 
+                        placeholder="O pegar URL de imagen..." 
+                        value={newPhoto.url.startsWith('data:') ? 'Imagen Cargada ✓' : newPhoto.url} 
+                        onChange={e => setNewPhoto({...newPhoto, url: e.target.value})}
+                        disabled={newPhoto.url.startsWith('data:')}
+                        className="w-full bg-zinc-900 border border-white/10 rounded-xl p-3 text-sm focus:border-emerald-500 outline-none placeholder:text-zinc-600 disabled:opacity-50 disabled:bg-black/30"
+                      />
+                    </div>
+                  </div>
                 </div>
               </div>
+
+              {/* Show selected image preview */}
+              {newPhoto.url && (
+                <div className="bg-black/50 border border-white/5 rounded-2xl p-3 flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-12 h-12 rounded-lg overflow-hidden bg-zinc-800 border border-white/10 flex-shrink-0">
+                      <img 
+                        src={newPhoto.url} 
+                        alt="Preview" 
+                        className="w-full h-full object-cover" 
+                      />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-[9px] font-black uppercase text-emerald-400 tracking-wider">Imagen Lista para Subir</p>
+                      <p className="text-zinc-400 text-xs truncate max-w-[200px] sm:max-w-xs">{newPhoto.url.startsWith('data:') ? 'Archivo comprimido localmente (JPEG)' : newPhoto.url}</p>
+                    </div>
+                  </div>
+                  <button 
+                    onClick={() => setNewPhoto(prev => ({ ...prev, url: '' }))}
+                    className="text-red-400 hover:text-red-300 transition-colors p-2 text-xs font-bold uppercase tracking-wider cursor-pointer flex-shrink-0"
+                  >
+                    Borrar
+                  </button>
+                </div>
+              )}
+
               <div>
                 <label className="text-[8px] font-black uppercase text-zinc-500 mb-1 block">Descripción del Trabajo</label>
                 <textarea 
@@ -845,7 +953,7 @@ export default function AdminCaja({ onBack }: { onBack: () => void }) {
                 <button 
                   onClick={handleAddPhoto}
                   className="bg-emerald-500 text-night px-6 py-3 rounded-xl font-display font-black italic text-sm hover:bg-emerald-400 transition-all flex items-center gap-2 disabled:opacity-50 cursor-pointer"
-                  disabled={savingPhoto || !newPhoto.url}
+                  disabled={savingPhoto || compressingImage || !newPhoto.url}
                 >
                   {savingPhoto ? <Loader2 className="w-5 h-5 animate-spin" /> : <Plus className="w-5 h-5" />}
                   {savingPhoto ? 'SUBIENDO...' : 'SUBIR FOTO'}
