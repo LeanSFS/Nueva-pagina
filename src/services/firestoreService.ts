@@ -612,5 +612,104 @@ export const firestoreService = {
     } catch (e) {
       handleFirestoreError(e, OperationType.DELETE, `${colPath}/${photoId}`);
     }
+  },
+
+  async importFromGoogleSheets(customUrl?: string): Promise<{ success: boolean; count: number; error?: string }> {
+    try {
+      const url = customUrl || 'https://docs.google.com/spreadsheets/d/1SDYaW0TBtLao-QJOC6TVlkoaRG7x6Ft4GcPudlGzbZc/export?format=csv';
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error('No se pudo acceder a la planilla de Google. Verificá que esté compartida para que cualquiera con el enlace pueda leerla.');
+      }
+      const csvText = await response.text();
+      const lines = csvText.split('\n');
+      let count = 0;
+      
+      const batchList: Booking[] = [];
+      for (let i = 1; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (!line) continue;
+        
+        // CSV parser to correctly handle quotes
+        const r: string[] = [];
+        let cur = '';
+        let inQuotes = false;
+        for (let j = 0; j < line.length; j++) {
+          const char = line[j];
+          if (char === '"') {
+            inQuotes = !inQuotes;
+          } else if (char === ',' && !inQuotes) {
+            r.push(cur);
+            cur = '';
+          } else {
+            cur += char;
+          }
+        }
+        r.push(cur);
+
+        if (r.length < 5) continue; // Skip incomplete lines
+        
+        const id = r[0]?.trim();
+        const fecha = r[1]?.trim();
+        let hora = r[2]?.trim() || '';
+        const servicio = r[3]?.trim() || 'MANUAL';
+        const nombre = r[4]?.trim() || 'TURNO';
+        const telefono = r[5]?.trim() || '00000000';
+        const direccion = r[6]?.trim() || 'Venezuela 1659 (Domicilio)';
+        let estado = (r[7]?.trim() || 'pendiente').toLowerCase();
+        
+        if (!id || !fecha || !hora) continue;
+
+        // Ensure hora has length 5 (e.g., 9:00 -> 09:00)
+        if (hora.length === 4) {
+          hora = '0' + hora;
+        }
+        if (hora.length !== 5) {
+          continue; // Skip invalid hour formats
+        }
+
+        if (!['pendiente', 'confirmado', 'hecho', 'cancelado'].includes(estado)) {
+          estado = 'pendiente';
+        }
+
+        // Deduce vehicle type 'tipo' matching size rules
+        let tipo = 'Auto';
+        const servLower = servicio.toLowerCase();
+        const nameLower = nombre.toLowerCase();
+        if (servLower.includes('camioneta') || servLower.includes('suv')) {
+          tipo = 'SUV / Camioneta Chica';
+        } else if (servLower.includes('pickup') || servLower.includes('pick-up') || servLower.includes('utilitario')) {
+          tipo = 'Pick-up / Utilitario';
+        } else if (servLower.includes('manual') || nameLower.includes('bloqueado')) {
+          tipo = 'MANUAL';
+        }
+
+        const b: Booking = {
+          id,
+          fecha,
+          hora,
+          tipo,
+          servicio: servicio.substring(0, 150),
+          nombre: nombre.substring(0, 150),
+          telefono: telefono.substring(0, 50),
+          direccion: direccion.substring(0, 500),
+          estado: estado as Booking['estado']
+        };
+
+        batchList.push(b);
+      }
+
+      // Save each to Firestore
+      for (const booking of batchList) {
+        const isBlocked = booking.nombre.includes('BLOQUEADO') || booking.servicio.includes('MANUAL');
+        await this.createBooking(booking, isBlocked);
+        count++;
+      }
+
+      return { success: true, count };
+    } catch (e: any) {
+      console.error('Error importing from Google Sheets:', e);
+      return { success: false, count: 0, error: e.message || String(e) };
+    }
   }
 };

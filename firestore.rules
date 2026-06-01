@@ -20,7 +20,7 @@ service cloud.firestore {
     }
 
     function isValidId(id) {
-      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-:]+$');
     }
 
     // --- Phase 4.2 & 4.4: Validation Blueprints with strict size / bounds ---

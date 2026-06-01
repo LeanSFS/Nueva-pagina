@@ -35,6 +35,7 @@ import { signInWithPopup, signInWithRedirect, getRedirectResult, GoogleAuthProvi
 import { auth } from '../services/firebase.ts';
 import { metricsService, SectionTrace } from '../services/metricsService.ts';
 import { telegramService } from '../services/telegramService.ts';
+import { firestoreService } from '../services/firestoreService.ts';
 import firebaseConfig from '../../firebase-applet-config.json';
 import { Send } from 'lucide-react';
 
@@ -54,6 +55,42 @@ export default function AdminMetrics() {
   const [telegramChatId, setTelegramChatId] = useState('');
   const [savingTelegram, setSavingTelegram] = useState(false);
   const [testStatus, setTestStatus] = useState<{ type: 'idle' | 'success' | 'error', message?: string }>({ type: 'idle' });
+
+  // Google Sheets import state
+  const [importingSheets, setImportingSheets] = useState(false);
+  const [sheetUrl, setSheetUrl] = useState('https://docs.google.com/spreadsheets/d/1SDYaW0TBtLao-QJOC6TVlkoaRG7x6Ft4GcPudlGzbZc/edit?usp=sharing');
+  const [importResult, setImportResult] = useState<{ type: 'idle' | 'success' | 'error', message?: string }>({ type: 'idle' });
+
+  const handleImportSheets = async () => {
+    setImportingSheets(true);
+    setImportResult({ type: 'idle' });
+    try {
+      let targetUrl = sheetUrl.trim();
+      if (targetUrl.includes('/edit')) {
+        targetUrl = targetUrl.replace(/\/edit.*/, '/export?format=csv');
+      }
+      
+      const res = await firestoreService.importFromGoogleSheets(targetUrl);
+      if (res.success) {
+        setImportResult({ 
+          type: 'success', 
+          message: `¡Sincronización exitosa! Se procesaron e insertaron ${res.count} turnos correctamente en Firestore.` 
+        });
+      } else {
+        setImportResult({ 
+          type: 'error', 
+          message: `Ocurrió un error al importar: ${res.error || 'error desconocido'}` 
+        });
+      }
+    } catch (err: any) {
+      setImportResult({ 
+        type: 'error', 
+        message: `Fallo inesperado de conexión o procesamiento: ${err.message || err}` 
+      });
+    } finally {
+      setImportingSheets(false);
+    }
+  };
 
   useEffect(() => {
     async function loadTelegramSettings() {
@@ -719,6 +756,70 @@ export default function AdminMetrics() {
                   : 'bg-red-500/5 border-red-500/10 text-red-400 font-bold'
               }`}>
                 {testStatus.message}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* 📊 Google Sheets Sync Control Panel */}
+      {isVerifiedAdmin && (
+        <div className="bg-zinc-900 border border-white/5 rounded-3xl p-6 relative overflow-hidden">
+          <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/5 blur-2xl rounded-full" />
+          <div className="flex flex-col gap-6 z-10 relative">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="flex items-start gap-3">
+                <div className="p-2.5 bg-emerald-500/10 text-emerald-400 rounded-xl border border-emerald-500/20 shrink-0">
+                  <Database className="w-5 h-5 animate-pulse" />
+                </div>
+                <div>
+                  <h4 className="font-display font-black text-sm italic uppercase tracking-wider text-white">
+                    Sincronizador de Datos (Google Sheets)
+                  </h4>
+                  <p className="text-zinc-500 text-[11px] font-semibold mt-0.5">
+                    Importá y sincronizá turnos directamente desde tu planilla pública de Google Sheets en Firestore.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Input URL */}
+            <div className="space-y-1.55">
+              <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400">
+                Enlace para Compartir de Google Sheets (Planilla de turnos)
+              </label>
+              <div className="flex flex-col sm:flex-row gap-2">
+                <input 
+                  type="text" 
+                  placeholder="ej. https://docs.google.com/spreadsheets/d/.../edit?usp=sharing"
+                  value={sheetUrl}
+                  onChange={(e) => setSheetUrl(e.target.value)}
+                  className="flex-1 bg-zinc-950 border border-white/5 rounded-xl px-4 py-2.5 text-xs text-white font-mono placeholder:text-zinc-700 focus:outline-none focus:border-emerald-500/50 transition-all font-semibold"
+                />
+                <button
+                  type="button"
+                  onClick={handleImportSheets}
+                  disabled={importingSheets || !sheetUrl.trim()}
+                  className="flex items-center justify-center gap-2 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-night shadow-lg shadow-emerald-500/10 px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest active:scale-95 transition-all shrink-0"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${importingSheets ? 'animate-spin' : ''}`} />
+                  {importingSheets ? 'Procesando...' : 'Iniciar Sincronización'}
+                </button>
+              </div>
+            </div>
+
+            <div className="text-[10px] text-zinc-500 font-semibold leading-relaxed">
+              💡 <span className="text-zinc-400 font-bold">Instrucciones básicas:</span> Asegurate de que la planilla de Google Sheets esté configurada como <strong className="text-zinc-300">"Cualquier usuario que tenga el vínculo puede ver"</strong> en el botón Compartir de Google Sheets para permitir que se descarguen los datos. ¡No toques nada en la base de datos de Firebase manualmente!
+            </div>
+
+            {/* Import Status Msg */}
+            {importResult.type !== 'idle' && (
+              <div className={`p-3 rounded-xl border text-[11px] font-medium leading-relaxed ${
+                importResult.type === 'success' 
+                  ? 'bg-emerald-500/5 border-emerald-500/10 text-emerald-400 font-bold' 
+                  : 'bg-red-500/5 border-red-500/10 text-red-400 font-bold'
+              }`}>
+                {importResult.message}
               </div>
             )}
           </div>
