@@ -18,43 +18,21 @@ import {
   X,
   LayoutDashboard,
   Wallet,
-  BarChart3 as BarChartIcon
+  BarChart3 as BarChartIcon,
+  Activity,
+  Sparkles,
+  Loader2
 } from 'lucide-react';
 import AdminAgenda from './AdminAgenda.tsx';
 import AdminRendimientos from './AdminRendimientos.tsx';
+import AdminMetrics from './AdminMetrics.tsx';
+import { firestoreService, Movement, Booking } from '../services/firestoreService.ts';
 
-const WEBAPP_URL = 'https://script.google.com/macros/s/AKfycbyDd--FDaQPnqG_LQ4MzLuRmIQc99Y0WK1Axpwh3Tc4GX1DLCHn77XTr2-wBZUVCuVO/exec';
 const CATS_INGRESO = ['Lavado', 'Extra', 'Propina', 'Otros'];
 const CATS_GASTO = ['Insumos', 'Herramientas', 'Mantenimiento', 'Publicidad', 'Impuestos', 'Otros'];
 
-interface Booking {
-  id: string;
-  fecha: string;
-  hora: string;
-  nombre: string;
-  telefono: string;
-  tipo: string;
-  servicio: string;
-  estado?: string;
-  direccion?: string;
-}
-
-interface Movement {
-  id: string;
-  fecha: string;
-  tipo: string;
-  categoria: string;
-  concepto: string;
-  monto_ars: number;
-  medio: string;
-  estado: string;
-  factura: string;
-  cliente: string;
-  notas: string;
-}
-
 export default function AdminCaja({ onBack }: { onBack: () => void }) {
-  const [activeTab, setActiveTab] = useState<'agenda' | 'caja' | 'stats'>('agenda');
+  const [activeTab, setActiveTab] = useState<'agenda' | 'caja' | 'stats' | 'metrics' | 'catalog' | 'gallery'>('agenda');
   const [allMovements, setAllMovements] = useState<Movement[]>([]);
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [loading, setLoading] = useState(false);
@@ -116,7 +94,7 @@ export default function AdminCaja({ onBack }: { onBack: () => void }) {
     estado: 'Pagado',
     factura: '',
     cliente: '',
-    notas: ''
+    notes: ''
   });
   const [submitting, setSubmitting] = useState(false);
   const [altaSuccess, setAltaSuccess] = useState(false);
@@ -132,14 +110,12 @@ export default function AdminCaja({ onBack }: { onBack: () => void }) {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch(`${WEBAPP_URL}?action=caja_list&t=${Date.now()}`);
-      const data = await response.json();
-      if (!data.ok) throw new Error(data.error || 'Error al cargar datos');
-      
-      const sorted = (data.rows || []).sort((a: any, b: any) => (b.fecha || '').localeCompare(a.fecha || ''));
+      const data = await firestoreService.getMovements();
+      const sorted = data.sort((a, b) => b.fecha.localeCompare(a.fecha));
       setAllMovements(sorted);
     } catch (err: any) {
-      setError(err.message);
+      console.error('Error loading movements:', err);
+      setError('Error al acceder a Caja en Firestore. Verifique sus permisos de administrador.');
     } finally {
       setLoading(false);
     }
@@ -147,9 +123,8 @@ export default function AdminCaja({ onBack }: { onBack: () => void }) {
 
   const fetchBookings = async () => {
     try {
-      const response = await fetch(`${WEBAPP_URL}?action=list&t=${Date.now()}`);
-      const data = await response.json();
-      if (data.ok) setBookings(data.rows || []);
+      const data = await firestoreService.getBookings();
+      setBookings(data);
     } catch (e) {
       console.error('Error fetching bookings:', e);
     }
@@ -167,17 +142,24 @@ export default function AdminCaja({ onBack }: { onBack: () => void }) {
     }
     setSubmitting(true);
     setAltaSuccess(false);
+    setError(null);
     try {
-      const params = new URLSearchParams({
-        action: 'caja_add',
-        ...newMovement,
-        tipo: newMovement.tipo.toLowerCase(),
-        medio: newMovement.medio.toLowerCase(),
-        estado: newMovement.estado.toLowerCase()
-      });
-      const response = await fetch(`${WEBAPP_URL}?${params.toString()}`);
-      const data = await response.json();
-      if (!data.ok) throw new Error(data.error || 'Error al agregar');
+      const movementId = `mov_${Date.now()}_generic`;
+      const val: Movement = {
+        id: movementId,
+        fecha: newMovement.fecha,
+        tipo: newMovement.tipo as 'Ingreso' | 'Gasto',
+        categoria: newMovement.categoria,
+        concepto: newMovement.concepto,
+        monto_ars: Number(newMovement.monto) || 0,
+        medio: newMovement.medio,
+        estado: newMovement.estado as 'Pagado' | 'Pendiente',
+        factura: newMovement.factura || '',
+        cliente: newMovement.cliente || '',
+        notas: newMovement.notes || ''
+      };
+
+      await firestoreService.saveMovement(val);
       
       setAltaSuccess(true);
       setNewMovement({
@@ -185,11 +167,11 @@ export default function AdminCaja({ onBack }: { onBack: () => void }) {
         concepto: '',
         monto: '',
         factura: '',
-        notas: ''
+        notes: ''
       });
       fetchRows();
     } catch (err: any) {
-      setError(err.message);
+      setError(err.message || 'Error al guardar movimiento');
     } finally {
       setSubmitting(false);
     }
@@ -198,23 +180,28 @@ export default function AdminCaja({ onBack }: { onBack: () => void }) {
   const handleUpdate = async () => {
     if (!editForm) return;
     setLoading(true);
+    setError(null);
     try {
-      const params = new URLSearchParams({
-        action: 'caja_update',
+      const val: Movement = {
         id: editingId!,
-        ...editForm,
-        tipo: editForm.tipo.toLowerCase(),
-        medio: editForm.medio.toLowerCase(),
-        estado: editForm.estado.toLowerCase()
-      });
-      const response = await fetch(`${WEBAPP_URL}?${params.toString()}`);
-      const data = await response.json();
-      if (!data.ok) throw new Error(data.error || 'Error al actualizar');
+        fecha: editForm.fecha,
+        tipo: editForm.tipo as 'Ingreso' | 'Gasto',
+        categoria: editForm.categoria,
+        concepto: editForm.concepto,
+        monto_ars: Number(editForm.monto_ars) || 0,
+        medio: editForm.medio,
+        estado: editForm.estado as 'Pagado' | 'Pendiente',
+        factura: editForm.factura || '',
+        cliente: editForm.cliente || '',
+        notas: editForm.notas || ''
+      };
+
+      await firestoreService.saveMovement(val);
       
       setEditingId(null);
       fetchRows();
     } catch (err: any) {
-      setError(err.message);
+      setError(err.message || 'Error al actualizar movimiento');
     } finally {
       setLoading(false);
     }
@@ -223,15 +210,13 @@ export default function AdminCaja({ onBack }: { onBack: () => void }) {
   const handleDelete = async () => {
     if (!deletingId) return;
     setLoading(true);
+    setError(null);
     try {
-      const response = await fetch(`${WEBAPP_URL}?action=caja_delete&id=${deletingId}`);
-      const data = await response.json();
-      if (!data.ok) throw new Error(data.error || 'Error al borrar');
-      
+      await firestoreService.deleteMovement(deletingId);
       setDeletingId(null);
       fetchRows();
     } catch (err: any) {
-      setError(err.message);
+      setError(err.message || 'Error al borrar movimiento');
     } finally {
       setLoading(false);
     }
@@ -302,6 +287,96 @@ export default function AdminCaja({ onBack }: { onBack: () => void }) {
     return map;
   }, [bookings]);
 
+  const [dbServices, setDbServices] = useState<any[]>([]);
+  const [dbVehicles, setDbVehicles] = useState<any[]>([]);
+  const [dbPhotos, setDbPhotos] = useState<any[]>([]);
+  const [savingCatalog, setSavingCatalog] = useState(false);
+  const [catalogSuccess, setCatalogSuccess] = useState(false);
+
+  const [newPhoto, setNewPhoto] = useState({ url: '', title: '', description: '' });
+  const [savingPhoto, setSavingPhoto] = useState(false);
+
+  const loadCatalogAndGallery = async () => {
+    try {
+      const srvs = await firestoreService.getServices();
+      setDbServices(srvs);
+      const vehs = await firestoreService.getVehicles();
+      setDbVehicles(vehs);
+      const phts = await firestoreService.getGallery();
+      setDbPhotos(phts);
+    } catch (e) {
+      console.error('Error loading config/gallery:', e);
+    }
+  };
+
+  useEffect(() => {
+    fetchRows();
+    fetchBookings();
+    loadCatalogAndGallery();
+  }, []);
+
+  const handleSaveCatalog = async () => {
+    setSavingCatalog(true);
+    setCatalogSuccess(false);
+    setError(null);
+    try {
+      for (const srv of dbServices) {
+        await firestoreService.saveService(srv);
+      }
+      for (const veh of dbVehicles) {
+        await firestoreService.saveVehicle(veh);
+      }
+      setCatalogSuccess(true);
+      setTimeout(() => setCatalogSuccess(false), 3000);
+    } catch (e: any) {
+      setError(e.message || 'Error al guardar catálogo');
+    } finally {
+      setSavingCatalog(false);
+    }
+  };
+
+  const handleAddPhoto = async () => {
+    if (!newPhoto.url) {
+      setError('Complete la URL de la imagen');
+      return;
+    }
+    setSavingPhoto(true);
+    setError(null);
+    try {
+      const photoId = `photo_${Date.now()}`;
+      const payload = {
+        id: photoId,
+        url: newPhoto.url,
+        title: newPhoto.title || 'Trabajo Realizado',
+        description: newPhoto.description || 'Resultado profesional en nuestro taller.',
+        createdAt: new Date().toISOString()
+      };
+      await firestoreService.addGalleryPhoto(payload);
+      setNewPhoto({ url: '', title: '', description: '' });
+      const up = await firestoreService.getGallery();
+      setDbPhotos(up);
+    } catch (e: any) {
+      setError(e.message || 'Error al guardar foto');
+    } finally {
+      setSavingPhoto(false);
+    }
+  };
+
+  const handleDeletePhoto = async (photoId: string) => {
+    if (!window.confirm('¿Seguro que quiere eliminar esta imagen de la galería?')) return;
+    setLoading(true);
+    setError(null);
+    try {
+      await firestoreService.deleteGalleryPhoto(photoId);
+      const up = await firestoreService.getGallery();
+      setDbPhotos(up);
+    } catch (e: any) {
+      setError(e.message || 'Error al eliminar foto');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-950 text-white p-4 md:p-8 font-sans">
       <div className="max-w-6xl mx-auto">
@@ -311,24 +386,42 @@ export default function AdminCaja({ onBack }: { onBack: () => void }) {
             <span>Salir del Panel</span>
           </button>
           
-          <div className="flex bg-zinc-900/50 p-1 rounded-2xl border border-white/5">
+          <div className="flex bg-zinc-900/50 p-1 rounded-2xl border border-white/5 overflow-x-auto max-w-full">
             <button 
               onClick={() => setActiveTab('agenda')}
-              className={`flex items-center gap-2 px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${activeTab === 'agenda' ? 'bg-emerald-500 text-night shadow-lg' : 'text-zinc-500 hover:text-white'}`}
+              className={`flex items-center gap-2 px-4 md:px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all whitespace-nowrap ${activeTab === 'agenda' ? 'bg-emerald-500 text-night shadow-lg' : 'text-zinc-500 hover:text-white'}`}
             >
               <LayoutDashboard className="w-4 h-4" /> Agenda
             </button>
             <button 
+              onClick={() => setActiveTab('catalog')}
+              className={`flex items-center gap-2 px-4 md:px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all whitespace-nowrap ${activeTab === 'catalog' ? 'bg-emerald-500 text-night shadow-lg' : 'text-zinc-500 hover:text-white'}`}
+            >
+              <Sparkles className="w-4 h-4" /> Precios
+            </button>
+            <button 
+              onClick={() => setActiveTab('gallery')}
+              className={`flex items-center gap-2 px-4 md:px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all whitespace-nowrap ${activeTab === 'gallery' ? 'bg-emerald-500 text-night shadow-lg' : 'text-zinc-500 hover:text-white'}`}
+            >
+              <Plus className="w-4 h-4" /> Galería
+            </button>
+            <button 
               onClick={() => setActiveTab('caja')}
-              className={`flex items-center gap-2 px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${activeTab === 'caja' ? 'bg-emerald-500 text-night shadow-lg' : 'text-zinc-500 hover:text-white'}`}
+              className={`flex items-center gap-2 px-4 md:px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all whitespace-nowrap ${activeTab === 'caja' ? 'bg-emerald-500 text-night shadow-lg' : 'text-zinc-500 hover:text-white'}`}
             >
               <Wallet className="w-4 h-4" /> Caja
             </button>
             <button 
               onClick={() => setActiveTab('stats')}
-              className={`flex items-center gap-2 px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${activeTab === 'stats' ? 'bg-emerald-500 text-night shadow-lg' : 'text-zinc-500 hover:text-white'}`}
+              className={`flex items-center gap-2 px-4 md:px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all whitespace-nowrap ${activeTab === 'stats' ? 'bg-emerald-500 text-night shadow-lg' : 'text-zinc-500 hover:text-white'}`}
             >
               <BarChartIcon className="w-4 h-4" /> Rendimientos
+            </button>
+            <button 
+              onClick={() => setActiveTab('metrics')}
+              className={`flex items-center gap-2 px-4 md:px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all whitespace-nowrap ${activeTab === 'metrics' ? 'bg-emerald-500 text-night shadow-lg' : 'text-zinc-500 hover:text-white'}`}
+            >
+              <Activity className="w-4 h-4" /> Métricas
             </button>
           </div>
           
@@ -341,6 +434,206 @@ export default function AdminCaja({ onBack }: { onBack: () => void }) {
           />
         ) : activeTab === 'stats' ? (
           <AdminRendimientos bookings={bookings} movements={allMovements} />
+        ) : activeTab === 'catalog' ? (
+          <div className="bg-zinc-900 border border-white/5 rounded-[2.5rem] p-8 md:p-12 space-y-8 animate-fade-in">
+            <div>
+              <h2 className="text-2xl font-display font-black italic text-white tracking-tight flex items-center gap-3">
+                <Sparkles className="w-6 h-6 text-emerald-500" /> CATALOGO Y PRECIOS
+              </h2>
+              <p className="text-zinc-500 text-[10px] font-black uppercase tracking-widest mt-1">Configuración dinámica del sitio web</p>
+            </div>
+
+            {catalogSuccess && (
+              <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-2xl text-xs font-bold uppercase tracking-widest flex items-center gap-3">
+                <CheckCircle2 className="w-5 h-5 animate-bounce" /> ¡Precios y servicios actualizados con éxito en la Nube!
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+              {/* Services pricing modification */}
+              <div className="space-y-6">
+                <h3 className="text-sm font-black uppercase tracking-widest text-emerald-500">Servicios Base</h3>
+                <div className="space-y-4">
+                  {dbServices.map((srv, idx) => (
+                    <div key={srv.id} className="p-6 bg-slate-950 border border-white/10 rounded-2xl relative overflow-hidden">
+                      <div className="flex flex-wrap items-center justify-between gap-4">
+                        <div>
+                          <div className="text-[9px] font-black uppercase text-zinc-500 tracking-widest">{srv.label}</div>
+                          <div className="font-display font-black italic text-lg text-white uppercase">{srv.name}</div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-zinc-500 font-bold">$</span>
+                          <input 
+                            type="number" 
+                            value={srv.basePrice} 
+                            onChange={(e) => {
+                              const copy = [...dbServices];
+                              copy[idx].basePrice = Number(e.target.value) || 0;
+                              setDbServices(copy);
+                            }}
+                            className="bg-zinc-900 border border-white/10 text-emerald-400 font-display font-black italic text-lg rounded-xl p-3 w-31 outline-none focus:border-emerald-500 text-right font-black"
+                          />
+                        </div>
+                      </div>
+                      <div className="mt-4">
+                        <label className="text-[8px] font-black uppercase text-zinc-650 block mb-1">Descripción corta</label>
+                        <input 
+                          type="text" 
+                          value={srv.description} 
+                          onChange={(e) => {
+                            const copy = [...dbServices];
+                            copy[idx].description = e.target.value;
+                            setDbServices(copy);
+                          }}
+                          className="bg-zinc-900 border border-white/5 text-zinc-350 text-xs rounded-xl p-2.5 w-full outline-none focus:border-emerald-500"
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Vehicles multiplier modifications */}
+              <div className="space-y-6">
+                <h3 className="text-sm font-black uppercase tracking-widest text-emerald-500">Adicionales por Vehículo</h3>
+                <div className="space-y-4">
+                  {dbVehicles.map((veh, idx) => (
+                    <div key={veh.id} className="p-6 bg-slate-950 border border-white/10 rounded-2xl flex items-center justify-between gap-4">
+                      <div>
+                        <div className="text-[9px] font-black uppercase text-zinc-500 tracking-widest">Ejemplos: {veh.examples}</div>
+                        <div className="font-display font-black italic text-lg text-white uppercase">{veh.name}</div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-zinc-500 font-bold">+$</span>
+                        <input 
+                          type="number" 
+                          value={veh.extraPrice} 
+                          onChange={(e) => {
+                            const copy = [...dbVehicles];
+                            copy[idx].extraPrice = Number(e.target.value) || 0;
+                            setDbVehicles(copy);
+                          }}
+                          className="bg-zinc-900 border border-white/10 text-emerald-400 font-display font-black italic text-lg rounded-xl p-3 w-31 outline-none focus:border-emerald-500 text-right font-black"
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="p-6 bg-emerald-500/5 border border-emerald-500/10 rounded-2xl">
+                  <h4 className="flex items-center gap-2 text-emerald-500 mb-2 font-display text-sm font-black italic">¿CÓMO AFECTA ESTO?</h4>
+                  <p className="text-zinc-500 text-xs leading-relaxed">
+                    Al actualizar estos importes, el simulador de precio de la página de inicio recalculará automáticamente:
+                    <br />
+                    <span className="text-white font-bold">Precio Final = Precio Base de Lavado + Adicional según Tipo de Vehículo.</span>
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex justify-end pt-6 border-t border-white/[0.05]">
+              <button 
+                onClick={handleSaveCatalog}
+                className="bg-emerald-500 text-night px-8 py-3.5 rounded-2xl font-display font-black italic text-sm hover:bg-emerald-400 transition-all flex items-center gap-3 shadow-[0_0_30px_rgba(16,185,129,0.3)] disabled:opacity-50 font-black cursor-pointer"
+                disabled={savingCatalog}
+              >
+                {savingCatalog ? <Loader2 className="w-5 h-5 animate-spin" /> : <CheckCircle2 className="w-5 h-5" />} 
+                {savingCatalog ? 'GUARDANDO...' : 'GUARDAR CAMBIOS EN LA NUBE'}
+              </button>
+            </div>
+          </div>
+        ) : activeTab === 'gallery' ? (
+          <div className="bg-zinc-900 border border-white/5 rounded-[2.5rem] p-8 md:p-12 space-y-8 animate-fade-in">
+            <div>
+              <h2 className="text-2xl font-display font-black italic text-white tracking-tight flex items-center gap-3">
+                <Plus className="w-6 h-6 text-emerald-500" /> GALERÍA DE RESULTADOS
+              </h2>
+              <p className="text-zinc-500 text-[10px] font-black uppercase tracking-widest mt-1">Sube fotos reales para motivar a tus clientes</p>
+            </div>
+
+            {/* Upload form */}
+            <div className="bg-slate-950 border border-white/10 p-6 rounded-3xl space-y-4">
+              <h3 className="text-xs font-black uppercase tracking-widest text-zinc-400 mb-2">Agregar Nueva Foto</h3>
+              <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
+                <div className="md:col-span-4">
+                  <label className="text-[8px] font-black uppercase text-zinc-500 mb-1 block">Título</label>
+                  <input 
+                    type="text" 
+                    placeholder="Ej. Pulido Ópticas" 
+                    value={newPhoto.title} 
+                    onChange={e => setNewPhoto({...newPhoto, title: e.target.value})}
+                    className="w-full bg-zinc-900 border border-white/10 rounded-xl p-3 text-sm focus:border-emerald-500 outline-none"
+                  />
+                </div>
+                <div className="md:col-span-8">
+                  <label className="text-[8px] font-black uppercase text-zinc-500 mb-1 block">URL de la Imagen (Unsplash, Imgur, etc.)</label>
+                  <input 
+                    type="text" 
+                    placeholder="https://images.unsplash.com/photo-..." 
+                    value={newPhoto.url} 
+                    onChange={e => setNewPhoto({...newPhoto, url: e.target.value})}
+                    className="w-full bg-zinc-900 border border-white/10 rounded-xl p-3 text-sm focus:border-emerald-500 outline-none"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="text-[8px] font-black uppercase text-zinc-500 mb-1 block">Descripción del Trabajo</label>
+                <textarea 
+                  rows={2}
+                  placeholder="Detalles de la limpieza, ceras aplicadas, etc." 
+                  value={newPhoto.description} 
+                  onChange={e => setNewPhoto({...newPhoto, description: e.target.value})}
+                  className="w-full bg-zinc-900 border border-white/10 rounded-xl p-3 text-sm focus:border-emerald-500 outline-none"
+                />
+              </div>
+              <div className="flex justify-end pt-2">
+                <button 
+                  onClick={handleAddPhoto}
+                  className="bg-emerald-500 text-night px-6 py-3 rounded-xl font-display font-black italic text-sm hover:bg-emerald-400 transition-all flex items-center gap-2 disabled:opacity-50 cursor-pointer"
+                  disabled={savingPhoto || !newPhoto.url}
+                >
+                  {savingPhoto ? <Loader2 className="w-5 h-5 animate-spin" /> : <Plus className="w-5 h-5" />}
+                  {savingPhoto ? 'SUBIENDO...' : 'SUBIR FOTO'}
+                </button>
+              </div>
+            </div>
+
+            {/* Photo List Grid */}
+            <div className="space-y-4">
+              <h3 className="text-xs font-black uppercase tracking-widest text-zinc-400">Imágenes Actuales ({dbPhotos.length})</h3>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                {dbPhotos.map(photo => (
+                  <div key={photo.id} className="bg-slate-950 border border-white/5 rounded-2xl overflow-hidden group flex flex-col h-full hover:border-white/10 transition-colors">
+                    <div className="h-44 relative bg-zinc-900 overflow-hidden">
+                      <img 
+                        src={photo.url} 
+                        alt={photo.title}
+                        className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                        referrerPolicy="no-referrer"
+                      />
+                      <button 
+                        onClick={() => handleDeletePhoto(photo.id)}
+                        className="absolute top-3 right-3 p-2 bg-red-600 hover:bg-red-500 text-white rounded-lg transition-colors shadow-lg cursor-pointer"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                    <div className="p-4 flex flex-col flex-1 pb-5">
+                      <h4 className="font-display font-black italic text-base mb-1 truncate text-white">{photo.title}</h4>
+                      <p className="text-zinc-500 text-xs line-clamp-2 leading-relaxed flex-1">{photo.description}</p>
+                    </div>
+                  </div>
+                ))}
+                {dbPhotos.length === 0 && (
+                  <div className="col-span-3 text-center py-12 text-zinc-500 italic">No hay imágenes en la galería. Agrégalas arriba.</div>
+                )}
+              </div>
+            </div>
+          </div>
+        ) : activeTab === 'stats' ? (
+          <AdminRendimientos bookings={bookings} movements={allMovements} />
+        ) : activeTab === 'metrics' ? (
+          <AdminMetrics />
         ) : (
           <>
             {/* Stats Grid */}

@@ -1,0 +1,168 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // --- Phase 4.1: Default Deny Safety Net ---
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Phase 4.3: Hardened Global Helpers (No Client Claims Trust) ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isEmailVerified() {
+      return request.auth.token.email_verified == true;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && isEmailVerified() && request.auth.token.email == 'leandro.saralegui@gmail.com';
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // --- Phase 4.2 & 4.4: Validation Blueprints with strict size / bounds ---
+    function isValidTrace(trace) {
+      return trace.keys().hasAll(['id', 'type', 'timestamp', 'device', 'path'])
+          && trace.keys().size() == 5
+          && trace.id is string && trace.id.size() <= 128
+          && trace.type is string && trace.type in ['visita', 'click_servicios', 'inicio_reserva', 'reserva_completada', 'click_galeria', 'click_faq']
+          && trace.timestamp is string && trace.timestamp.size() <= 50
+          && trace.device is string && trace.device in ['Mobile', 'Desktop', 'Tablet']
+          && trace.path is string && trace.path.size() <= 200;
+    }
+
+    function isValidBooking(booking) {
+      return booking.keys().hasAll(['id', 'fecha', 'hora', 'tipo', 'servicio', 'nombre', 'telefono', 'direccion', 'estado'])
+          && booking.keys().size() == 9
+          && booking.id is string && booking.id.size() <= 128
+          && booking.fecha is string && booking.fecha.size() == 10
+          && booking.hora is string && booking.hora.size() == 5
+          && booking.tipo is string && booking.tipo.size() <= 150
+          && booking.servicio is string && booking.servicio.size() <= 150
+          && booking.nombre is string && booking.nombre.size() <= 150
+          && booking.telefono is string && booking.telefono.size() <= 50
+          && booking.direccion is string && booking.direccion.size() <= 500
+          && booking.estado is string && booking.estado in ['pendiente', 'confirmado', 'hecho', 'cancelado'];
+    }
+
+    function isValidTakenSlot(slot) {
+      return slot.keys().hasAll(['id', 'fecha', 'hora', 'isBlocked'])
+          && slot.keys().size() == 4
+          && slot.id is string && slot.id.size() <= 128
+          && slot.fecha is string && slot.fecha.size() == 10
+          && slot.hora is string && slot.hora.size() == 5
+          && slot.isBlocked is bool;
+    }
+
+    function isValidMovement(mov) {
+      return mov.keys().hasAll(['id', 'fecha', 'tipo', 'categoria', 'concepto', 'monto_ars', 'medio', 'estado', 'factura', 'cliente', 'notas'])
+          && mov.keys().size() == 11
+          && mov.id is string && mov.id.size() <= 128
+          && mov.fecha is string && mov.fecha.size() == 10
+          && mov.tipo is string && mov.tipo in ['Ingreso', 'Gasto']
+          && mov.categoria is string && mov.categoria.size() <= 100
+          && mov.concepto is string && mov.concepto.size() <= 200
+          && (mov.monto_ars is int || mov.monto_ars is float)
+          && mov.medio is string && mov.medio.size() <= 100
+          && mov.estado is string && mov.estado in ['Pagado', 'Pendiente']
+          && mov.factura is string && mov.factura.size() <= 100
+          && mov.cliente is string && mov.cliente.size() <= 150
+          && mov.notas is string && mov.notas.size() <= 1000;
+    }
+
+    function isValidService(srv) {
+      return srv.keys().hasAll(['id', 'name', 'label', 'description', 'features', 'basePrice'])
+          && srv.keys().size() >= 6 && srv.keys().size() <= 7 // isFeatured can be optional
+          && srv.id is string && srv.id.size() <= 100
+          && srv.name is string && srv.name.size() <= 150
+          && srv.label is string && srv.label.size() <= 150
+          && srv.description is string && srv.description.size() <= 1000
+          && srv.features is list && srv.features.size() <= 20
+          && (srv.basePrice is int || srv.basePrice is float);
+    }
+
+    function isValidVehicle(veh) {
+      return veh.keys().hasAll(['id', 'name', 'icon', 'examples', 'extraPrice'])
+          && veh.keys().size() == 5
+          && veh.id is string && veh.id.size() <= 100
+          && veh.name is string && veh.name.size() <= 150
+          && veh.icon is string && veh.icon.size() <= 30
+          && veh.examples is string && veh.examples.size() <= 1000
+          && (veh.extraPrice is int || veh.extraPrice is float);
+    }
+
+    function isValidPhoto(pho) {
+      return pho.keys().hasAll(['id', 'url', 'title', 'description', 'createdAt'])
+          && pho.keys().size() == 5
+          && pho.id is string && pho.id.size() <= 128
+          && pho.url is string && pho.url.size() <= 1000
+          && pho.title is string && pho.title.size() <= 150
+          && pho.description is string && pho.description.size() <= 1000
+          && pho.createdAt is string && pho.createdAt.size() <= 50;
+    }
+
+    // --- Collection Rules ---
+
+    // 1. Traces
+    match /traces/{traceId} {
+      allow create: if isValidId(traceId) 
+                    && isValidTrace(request.resource.data) 
+                    && request.resource.data.id == traceId;
+      allow read: if isAdmin();
+      allow delete: if isAdmin();
+      allow update: if false;
+    }
+
+    // 2. Bookings (Turnos)
+    match /bookings/{bookingId} {
+      // Anyone can submit a reservation form. It validates format and limits injection.
+      allow create: if isValidId(bookingId)
+                    && isValidBooking(request.resource.data)
+                    && request.resource.data.id == bookingId;
+      // Protected get so client can read their exact booking receipt after submission
+      allow get: if true;
+      // Absolute PII protection: general list searches must go through administrator authentication
+      allow list: if isAdmin();
+      allow update, delete: if isAdmin() && isValidBooking(request.resource.data);
+    }
+
+    // 3. Taken Slots (Public availability schedule)
+    match /taken_slots/{slotId} {
+      // Publicly viewable and searchable, required to draw the booking scheduler calendar
+      allow read, list: if true;
+      // Creation: Guests can book slots, but they CANNOT block out hours. isBlocked=true is reserved for verified admin only.
+      allow create: if isValidId(slotId)
+                    && isValidTakenSlot(request.resource.data)
+                    && request.resource.data.id == slotId
+                    && (request.resource.data.isBlocked == false || isAdmin());
+      // Deletions / Modifications are administrative
+      allow update, delete: if isAdmin();
+    }
+
+    // 4. Caja (Cash Registry - completely shielded)
+    match /movements/{movementId} {
+      allow read, list, create, update, delete: if isAdmin() && (request.method == 'get' || request.method == 'list' || request.method == 'delete' || isValidMovement(request.resource.data));
+    }
+
+    // 5. Catalog washing services
+    match /services/{serviceId} {
+      allow read, list: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    // 6. Configured physical vehicles
+    match /vehicles/{vehicleId} {
+      allow read, list: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    // 7. Dynamic photo gallery results
+    match /gallery/{photoId} {
+      allow read, list: if true;
+      allow create, update, delete: if isAdmin();
+    }
+  }
+}

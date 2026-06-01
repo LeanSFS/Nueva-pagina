@@ -15,21 +15,8 @@ import {
   ChevronLeft
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { fetchSlots, createBooking, clearCache } from '../services/availabilityService.ts';
-
-const WEBAPP_URL = 'https://script.google.com/macros/s/AKfycbyDd--FDaQPnqG_LQ4MzLuRmIQc99Y0WK1Axpwh3Tc4GX1DLCHn77XTr2-wBZUVCuVO/exec';
-
-interface Booking {
-  id: string;
-  fecha: string;
-  hora: string;
-  nombre: string;
-  telefono: string;
-  tipo: string;
-  servicio: string;
-  estado?: string;
-  direccion?: string;
-}
+import { firestoreService, Booking } from '../services/firestoreService.ts';
+import { fetchSlots, clearCache } from '../services/availabilityService.ts';
 
 export default function AdminAgenda({ customerVisits = {} }: { customerVisits?: Record<string, number> }) {
   const [allBookings, setAllBookings] = useState<Booking[]>([]);
@@ -43,16 +30,13 @@ export default function AdminAgenda({ customerVisits = {} }: { customerVisits?: 
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch(`${WEBAPP_URL}?action=list&t=${Date.now()}`);
-      const data = await response.json();
-      if (data.ok) {
-        setAllBookings(data.rows || []);
-      } else {
-        setError(data.error || 'Error al cargar agenda');
-      }
+      const data = await firestoreService.getBookings();
+      // Sort bookings chronologically by hour
+      const sorted = data.sort((a, b) => a.hora.localeCompare(b.hora));
+      setAllBookings(sorted);
     } catch (err) {
-      console.error('Error loading agenda:', err);
-      setError('Error de conexión con el servidor');
+      console.error('Error loading agenda from Firestore:', err);
+      setError('No tienes permisos suficientes de Firestore o hay un error de conexión.');
     } finally {
       setLoading(false);
     }
@@ -64,19 +48,18 @@ export default function AdminAgenda({ customerVisits = {} }: { customerVisits?: 
 
   const dayBookings = allBookings.filter(b => b.fecha === filterDate);
 
-  const handleUpdateStatus = async (id: string, newStatus: string) => {
+  const handleUpdateStatus = async (id: string, newStatus: Booking['estado']) => {
+    const booking = allBookings.find(b => b.id === id);
+    if (!booking) return;
+
     setLoading(true);
     setActionError(null);
     try {
-      const response = await fetch(`${WEBAPP_URL}?action=status&id=${encodeURIComponent(id)}&estado=${encodeURIComponent(newStatus)}&t=${Date.now()}`);
-      const data = await response.json();
-      if (data.ok) {
-        await loadBookings();
-      } else {
-        setActionError(data.error || 'Error al actualizar estado');
-      }
+      await firestoreService.updateBookingStatus(id, booking, newStatus);
+      clearCache();
+      await loadBookings();
     } catch (e) {
-      setActionError('Error de conexión');
+      setActionError('Error de permisos o conexión al actualizar el estado.');
     } finally {
       setLoading(false);
     }
@@ -86,25 +69,25 @@ export default function AdminAgenda({ customerVisits = {} }: { customerVisits?: 
     setLoading(true);
     setActionError(null);
     try {
-      const result = await createBooking({
+      const blockId = `block_${Date.now()}_generic`;
+      const blockBooking: Booking = {
+        id: blockId,
         fecha: filterDate,
         hora: time,
         nombre: 'TURNO BLOQUEADO',
         telefono: '00000000',
         tipo: 'BLOQUEO',
         servicio: 'MANUAL',
-        direccion: 'ADMIN'
-      });
+        direccion: 'ADMIN',
+        estado: 'confirmado'
+      };
 
-      if (result.ok) {
-        clearCache();
-        await loadBookings();
-        setBlockingTime(null);
-      } else {
-        setActionError(result.error || 'Error al bloquear');
-      }
+      await firestoreService.createBooking(blockBooking, true);
+      clearCache();
+      await loadBookings();
+      setBlockingTime(null);
     } catch (e) {
-      setActionError('Error de conexión');
+      setActionError('Error de Firestore al intentar bloquear el horario.');
     } finally {
       setLoading(false);
     }
@@ -116,16 +99,11 @@ export default function AdminAgenda({ customerVisits = {} }: { customerVisits?: 
     setLoading(true);
     setActionError(null);
     try {
-      const response = await fetch(`${WEBAPP_URL}?action=delete&id=${encodeURIComponent(book.id)}&fecha=${encodeURIComponent(book.fecha)}&hora=${encodeURIComponent(book.hora)}&t=${Date.now()}`);
-      const data = await response.json();
-      if (data.ok) {
-        clearCache();
-        await loadBookings();
-      } else {
-        setActionError(data.error || 'Error al eliminar');
-      }
+      await firestoreService.deleteBooking(book.id, book.fecha, book.hora);
+      clearCache();
+      await loadBookings();
     } catch (e) {
-      setActionError('Error de conexión');
+      setActionError('Error de Firestore al eliminar el turno.');
     } finally {
       setLoading(false);
     }
@@ -143,13 +121,13 @@ export default function AdminAgenda({ customerVisits = {} }: { customerVisits?: 
   };
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-8 animate-fade-in">
       <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6 bg-zinc-900 p-6 rounded-3xl border border-white/5">
         <div>
           <h2 className="text-2xl font-display font-black italic text-white tracking-tight flex items-center gap-3">
             <Calendar className="w-6 h-6 text-emerald-500" /> AGENDA DE TURNOS
           </h2>
-          <p className="text-zinc-500 text-[10px] font-black uppercase tracking-widest mt-1">Gestioná tus citas y bloqueá horarios</p>
+          <p className="text-zinc-500 text-[10px] font-black uppercase tracking-widest mt-1">Sincronizado con Cloud Firestore</p>
         </div>
         <div className="flex items-center gap-4 w-full md:w-auto">
           <input 
@@ -191,16 +169,16 @@ export default function AdminAgenda({ customerVisits = {} }: { customerVisits?: 
           <h3 className="text-xs font-black uppercase tracking-widest text-zinc-500 mb-4 px-2">Estado del Día</h3>
           <div className="bg-zinc-900 border border-white/5 rounded-3xl overflow-hidden">
              {possibleTimes.map(time => {
-               const booking = dayBookings.find(b => b.hora === time);
-               return (
-                 <div key={time} className="flex items-center justify-between p-4 border-b border-white/[0.02] last:border-0 hover:bg-white/[0.02] transition-colors">
+                const booking = dayBookings.find(b => b.hora === time && b.estado !== 'cancelado');
+                return (
+                  <div key={time} className="flex items-center justify-between p-4 border-b border-white/[0.02] last:border-0 hover:bg-white/[0.02] transition-colors">
                     <div className="flex items-center gap-3">
                       <div className={`w-2 h-2 rounded-full ${booking ? 'bg-amber-500' : 'bg-emerald-500'}`} />
                       <span className="font-display font-black italic text-lg">{time}hs</span>
                     </div>
                     {booking ? (
                       <span className={`text-[8px] font-black uppercase tracking-tighter px-2 py-0.5 rounded border ${getStatusColor(booking.estado || '')}`}>
-                        {booking.estado || 'OCUPADO'}
+                        {booking.nombre.includes('BLOQUEADO') ? 'BLOQUEADO' : (booking.estado || 'OCUPADO')}
                       </span>
                     ) : blockingTime === time ? (
                       <button 
@@ -217,8 +195,8 @@ export default function AdminAgenda({ customerVisits = {} }: { customerVisits?: 
                         <Lock className="w-3 h-3" /> BLOQUEAR
                       </button>
                     )}
-                 </div>
-               );
+                  </div>
+                );
              })}
           </div>
           <div className="p-6 bg-emerald-500/5 border border-emerald-500/10 rounded-2xl">
@@ -227,110 +205,111 @@ export default function AdminAgenda({ customerVisits = {} }: { customerVisits?: 
                 <span className="text-[10px] font-black uppercase tracking-widest">Consejo Admin</span>
              </div>
              <p className="text-zinc-500 text-xs font-medium leading-relaxed">
-                Podés bloquear horarios para uso personal o reparaciones. Aparecerán como ocupados para los clientes.
+                Los turnos bloqueados se guardan en Firestore y ocultan la disponibilidad inmediatamente para todos los clientes en la web.
              </p>
           </div>
         </div>
 
         <div className="md:col-span-8">
-           <h3 className="text-xs font-black uppercase tracking-widest text-zinc-500 mb-4 px-2">Detalle de Reservas ({dayBookings.length})</h3>
-           
-           {loading && allBookings.length === 0 ? (
-             <div className="bg-zinc-900/50 border border-white/5 rounded-3xl p-12 flex flex-col items-center justify-center gap-4">
-                <Loader2 className="w-8 h-8 text-emerald-500 animate-spin" />
-                <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Sincronizando con Google Sheets...</p>
-             </div>
-           ) : error ? (
-             <div className="bg-red-500/10 border border-red-500/20 rounded-3xl p-12 text-center">
-                <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
-                <p className="text-red-500 font-bold mb-2 uppercase tracking-widest text-xs">Error de Servidor</p>
-                <p className="text-zinc-400 text-sm mb-6">{error}</p>
-                <button onClick={loadBookings} className="px-6 py-2 bg-zinc-800 rounded-xl text-[10px] font-black text-white hover:bg-zinc-700">REINTENTAR</button>
-             </div>
-           ) : dayBookings.length === 0 ? (
-             <div className="bg-zinc-900 border border-white/5 rounded-3xl p-12 text-center">
-                <Calendar className="w-12 h-12 text-zinc-700 mx-auto mb-4" />
-                <p className="text-zinc-400 font-medium italic">Sin turnos agendados para este día.</p>
-             </div>
-           ) : (
-             <div className="space-y-4">
-                {dayBookings.map(book => {
-                  const telClean = book.telefono.replace(/\D/g, '');
-                  const isRecurrent = (customerVisits[telClean] || 0) > 1;
+            <h3 className="text-xs font-black uppercase tracking-widest text-zinc-500 mb-4 px-2">Detalle de Reservas ({dayBookings.length})</h3>
+            
+            {loading && allBookings.length === 0 ? (
+              <div className="bg-zinc-900/50 border border-white/5 rounded-3xl p-12 flex flex-col items-center justify-center gap-4">
+                 <Loader2 className="w-8 h-8 text-emerald-500 animate-spin" />
+                 <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Sincronizando con Cloud Firestore...</p>
+              </div>
+            ) : error ? (
+              <div className="bg-red-500/10 border border-red-500/20 rounded-3xl p-12 text-center">
+                 <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
+                 <p className="text-red-500 font-bold mb-2 uppercase tracking-widest text-xs">Acceso Denegado / Error</p>
+                 <p className="text-zinc-400 text-sm mb-6">{error}</p>
+                 <p className="text-zinc-500 text-xs mb-6">Asegúrate de estar autenticado como el Administrador "leandro.saralegui@gmail.com".</p>
+                 <button onClick={loadBookings} className="px-6 py-2 bg-zinc-800 rounded-xl text-[10px] font-black text-white hover:bg-zinc-700">REINTENTAR</button>
+              </div>
+            ) : dayBookings.length === 0 ? (
+              <div className="bg-zinc-900 border border-white/5 rounded-3xl p-12 text-center">
+                 <Calendar className="w-12 h-12 text-zinc-700 mx-auto mb-4" />
+                 <p className="text-zinc-400 font-medium italic">Sin turnos agendados para este día.</p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                 {dayBookings.map(book => {
+                   const telClean = book.telefono.replace(/\D/g, '');
+                   const isRecurrent = (customerVisits[telClean] || 0) > 1;
 
-                  return (
-                    <div key={book.id} className="bg-zinc-900 border border-white/5 rounded-3xl p-6 relative overflow-hidden group">
-                       {book.nombre.includes('BLOQUEADO') && (
-                         <div className="absolute top-0 left-0 w-1.5 h-full bg-zinc-700" />
-                       )}
-                       
-                       <div className="flex flex-col gap-6">
-                          <div className="flex flex-wrap items-start justify-between gap-4">
-                            <div className="flex gap-4">
-                               <div className={`w-14 h-14 rounded-2xl flex items-center justify-center flex-shrink-0 ${book.nombre.includes('BLOQUEADO') ? 'bg-white/5 text-zinc-600' : 'bg-emerald-500/10 text-emerald-500'}`}>
-                                  {book.nombre.includes('BLOQUEADO') ? <Lock className="w-6 h-6" /> : <User className="w-6 h-6" />}
-                               </div>
-                               <div>
-                                  <div className="flex items-center gap-3 mb-1 flex-wrap">
-                                     <div className="font-display font-black italic text-xl text-white uppercase tracking-tight">
-                                       {book.nombre}
-                                     </div>
-                                     {isRecurrent && (
-                                       <span className="bg-emerald-500/10 text-emerald-500 text-[8px] font-black uppercase tracking-widest px-2 py-0.5 rounded border border-emerald-500/20">
-                                          ⭐ Recurrente
-                                       </span>
-                                     )}
-                                     <span className={`text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full border ${getStatusColor(book.estado || '')}`}>
-                                        {book.estado || 'PENDIENTE'}
-                                     </span>
-                                  </div>
-                                  <div className="flex flex-wrap gap-x-6 gap-y-2 text-[11px] font-bold text-zinc-500 uppercase tracking-widest">
-                                     <span className="flex items-center gap-2"><Clock className="w-4 h-4 text-emerald-500" /> {book.hora}hs</span>
-                                     {book.telefono !== '00000000' && <span className="flex items-center gap-2"><Phone className="w-4 h-4 text-emerald-500" /> {book.telefono}</span>}
-                                     <span className="flex items-center gap-2"><Package className="w-4 h-4 text-emerald-500" /> {book.servicio}</span>
-                                  </div>
-                               </div>
-                            </div>
-                            
-                            <div className="flex gap-2">
-                               {book.telefono !== '00000000' && (
-                                 <a 
-                                   href={`https://wa.me/${book.telefono.replace(/\D/g, '')}`} 
-                                   target="_blank" rel="noreferrer"
-                                   className="p-3 bg-[#25D366]/10 text-[#25D366] hover:bg-[#25D366] hover:text-white rounded-xl transition-all"
-                                 >
-                                   <Phone className="w-5 h-5" />
-                                 </a>
-                               )}
-                               <button 
-                                 onClick={() => handleDeleteBooking(book)}
-                                 className="p-3 bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white rounded-xl transition-all"
-                               >
-                                 <Trash2 className="w-5 h-5" />
-                               </button>
-                            </div>
-                          </div>
+                   return (
+                     <div key={book.id} className="bg-zinc-900 border border-white/5 rounded-3xl p-6 relative overflow-hidden group">
+                        {book.nombre.includes('BLOQUEADO') && (
+                          <div className="absolute top-0 left-0 w-1.5 h-full bg-zinc-700" />
+                        )}
+                        
+                        <div className="flex flex-col gap-6">
+                           <div className="flex flex-wrap items-start justify-between gap-4">
+                             <div className="flex gap-4">
+                                <div className={`w-14 h-14 rounded-2xl flex items-center justify-center flex-shrink-0 ${book.nombre.includes('BLOQUEADO') ? 'bg-white/5 text-zinc-600' : 'bg-emerald-500/10 text-emerald-500'}`}>
+                                   {book.nombre.includes('BLOQUEADO') ? <Lock className="w-6 h-6" /> : <User className="w-6 h-6" />}
+                                </div>
+                                <div>
+                                   <div className="flex items-center gap-3 mb-1 flex-wrap">
+                                      <div className="font-display font-black italic text-xl text-white uppercase tracking-tight">
+                                        {book.nombre}
+                                      </div>
+                                      {isRecurrent && (
+                                        <span className="bg-emerald-500/10 text-emerald-500 text-[8px] font-black uppercase tracking-widest px-2 py-0.5 rounded border border-emerald-500/20">
+                                           ⭐ Recurrente
+                                        </span>
+                                      )}
+                                      <span className={`text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full border ${getStatusColor(book.estado || '')}`}>
+                                         {book.estado || 'PENDIENTE'}
+                                      </span>
+                                   </div>
+                                   <div className="flex flex-wrap gap-x-6 gap-y-2 text-[11px] font-bold text-zinc-500 uppercase tracking-widest">
+                                      <span className="flex items-center gap-2"><Clock className="w-4 h-4 text-emerald-500" /> {book.hora}hs</span>
+                                      {book.telefono !== '00000000' && <span className="flex items-center gap-2"><Phone className="w-4 h-4 text-emerald-500" /> {book.telefono}</span>}
+                                      <span className="flex items-center gap-2"><Package className="w-4 h-4 text-emerald-500" /> {book.servicio}</span>
+                                   </div>
+                                </div>
+                             </div>
+                             
+                             <div className="flex gap-2">
+                                {book.telefono !== '00000000' && (
+                                  <a 
+                                    href={`https://wa.me/${book.telefono.replace(/\D/g, '')}`} 
+                                    target="_blank" rel="noreferrer"
+                                    className="p-3 bg-[#25D366]/10 text-[#25D366] hover:bg-[#25D366] hover:text-white rounded-xl transition-all"
+                                  >
+                                    <Phone className="w-5 h-5" />
+                                  </a>
+                                )}
+                                <button 
+                                  onClick={() => handleDeleteBooking(book)}
+                                  className="p-3 bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white rounded-xl transition-all"
+                                >
+                                  <Trash2 className="w-5 h-5" />
+                                </button>
+                             </div>
+                           </div>
 
-                          {book.direccion && book.direccion !== 'ADMIN' && (
-                            <div className="p-4 bg-white/5 rounded-2xl border border-white/5">
-                               <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest mb-1">Dirección / Detalles</p>
-                               <p className="text-zinc-300 text-sm italic">{book.direccion}</p>
-                            </div>
-                          )}
+                           {book.direccion && book.direccion !== 'ADMIN' && (
+                             <div className="p-4 bg-white/5 rounded-2xl border border-white/5">
+                                <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest mb-1">Dirección / Detalles</p>
+                                <p className="text-zinc-300 text-sm italic">{book.direccion}</p>
+                             </div>
+                           )}
 
-                          {!book.nombre.includes('BLOQUEADO') && (
-                            <div className="flex flex-wrap gap-2 pt-2">
-                               <button onClick={() => handleUpdateStatus(book.id, 'confirmado')} className="px-4 py-2 bg-blue-500/10 hover:bg-blue-500 text-blue-500 hover:text-white border border-blue-500/20 rounded-xl text-[10px] font-black uppercase transition-all">Confirmar</button>
-                               <button onClick={() => handleUpdateStatus(book.id, 'hecho')} className="px-4 py-2 bg-emerald-500/10 hover:bg-emerald-500 text-emerald-500 hover:text-white border border-emerald-500/20 rounded-xl text-[10px] font-black uppercase transition-all">Finalizado</button>
-                               <button onClick={() => handleUpdateStatus(book.id, 'cancelado')} className="px-4 py-2 bg-red-500/10 hover:bg-red-500 text-red-500 hover:text-white border border-red-500/20 rounded-xl text-[10px] font-black uppercase transition-all">Cancelar</button>
-                            </div>
-                          )}
-                       </div>
-                    </div>
-                  );
-                })}
-             </div>
-           )}
+                           {!book.nombre.includes('BLOQUEADO') && (
+                             <div className="flex flex-wrap gap-2 pt-2">
+                                <button onClick={() => handleUpdateStatus(book.id, 'confirmado')} className="px-4 py-2 bg-blue-500/10 hover:bg-blue-500 text-blue-500 hover:text-white border border-blue-500/20 rounded-xl text-[10px] font-black uppercase transition-all">Confirmar</button>
+                                <button onClick={() => handleUpdateStatus(book.id, 'hecho')} className="px-4 py-2 bg-emerald-500/10 hover:bg-emerald-500 text-emerald-500 hover:text-white border border-emerald-500/20 rounded-xl text-[10px] font-black uppercase transition-all">Finalizado</button>
+                                <button onClick={() => handleUpdateStatus(book.id, 'cancelado')} className="px-4 py-2 bg-red-500/10 hover:bg-red-500 text-red-500 hover:text-white border border-red-500/20 rounded-xl text-[10px] font-black uppercase transition-all">Cancelar</button>
+                             </div>
+                           )}
+                        </div>
+                     </div>
+                   );
+                 })}
+              </div>
+            )}
         </div>
       </div>
     </div>

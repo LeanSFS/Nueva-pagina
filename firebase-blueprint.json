@@ -1,0 +1,153 @@
+{
+  "entities": {
+    "SectionTrace": {
+      "title": "SectionTrace",
+      "description": "Un registro de interacción de un usuario con la página web para análisis de rendimiento y visitas.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Identificador único de la traza."
+        },
+        "type": {
+          "type": "string",
+          "enum": ["visita", "click_servicios", "inicio_reserva", "reserva_completada", "click_galeria", "click_faq"],
+          "description": "El tipo de interacción realizada en la web."
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Fecha y hora en formato ISO de la interacción."
+        },
+        "device": {
+          "type": "string",
+          "enum": ["Mobile", "Desktop", "Tablet"],
+          "description": "Tipo de dispositivo detectado."
+        },
+        "path": {
+          "type": "string",
+          "description": "La sección o URL exacta donde ocurrió la acción."
+        }
+      },
+      "required": ["id", "type", "timestamp", "device", "path"]
+    },
+    "Booking": {
+      "title": "Booking",
+      "description": "Reserva de un turno por un cliente en un horario y servicio específico.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "fecha": { "type": "string", "description": "Fecha en formato YYYY-MM-DD" },
+        "hora": { "type": "string", "description": "Hora en formato HH:MM (ej. 09:00)" },
+        "tipo": { "type": "string", "description": "Tipo de vehículo o BLOQUEO" },
+        "servicio": { "type": "string", "description": "Servicio contratado o MANUAL/BLOQUEO" },
+        "nombre": { "type": "string", "description": "Nombre del cliente o TURNO BLOQUEADO" },
+        "telefono": { "type": "string" },
+        "direccion": { "type": "string", "description": "Dirección o notas adicionales" },
+        "estado": { "type": "string", "enum": ["pendiente", "confirmado", "hecho", "cancelado"] }
+      },
+      "required": ["id", "fecha", "hora", "tipo", "servicio", "nombre", "telefono", "direccion", "estado"]
+    },
+    "TakenSlot": {
+      "title": "TakenSlot",
+      "description": "Horario ocupado/bloqueado público para visualización del calendario en la web.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Año-Mes-Día_Hora" },
+        "fecha": { "type": "string" },
+        "hora": { "type": "string" },
+        "isBlocked": { "type": "boolean" }
+      },
+      "required": ["id", "fecha", "hora", "isBlocked"]
+    },
+    "Movement": {
+      "title": "Movement",
+      "description": "Registro contable dinámico de caja para ingresos y gastos.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "fecha": { "type": "string", "description": "Fecha del movimiento YYYY-MM-DD" },
+        "tipo": { "type": "string", "enum": ["Ingreso", "Gasto"] },
+        "categoria": { "type": "string" },
+        "concepto": { "type": "string" },
+        "monto_ars": { "type": "number" },
+        "medio": { "type": "string" },
+        "estado": { "type": "string", "enum": ["Pagado", "Pendiente"] },
+        "factura": { "type": "string" },
+        "cliente": { "type": "string" },
+        "notas": { "type": "string" }
+      },
+      "required": ["id", "fecha", "tipo", "categoria", "concepto", "monto_ars", "medio", "estado"]
+    },
+    "Service": {
+      "title": "Service",
+      "description": "Servicio de detallado de lavado con sus características y precio base.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "label": { "type": "string" },
+        "description": { "type": "string" },
+        "isFeatured": { "type": "boolean" },
+        "basePrice": { "type": "number" }
+      },
+      "required": ["id", "name", "label", "description", "basePrice"]
+    },
+    "Vehicle": {
+      "title": "Vehicle",
+      "description": "Tipo de vehículo con su factor de costo extra y ejemplos representativos.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "icon": { "type": "string" },
+        "examples": { "type": "string" },
+        "extraPrice": { "type": "number" }
+      },
+      "required": ["id", "name", "icon", "examples", "extraPrice"]
+    },
+    "Photo": {
+      "title": "Photo",
+      "description": "Imagen de la galería dinâmica de resultados para mostrar trabajos reales.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "url": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "url", "createdAt"]
+    }
+  },
+  "firestore": {
+    "traces/{traceId}": {
+      "schema": "SectionTrace",
+      "description": "Colección global de métricas de tránsito e interacciones de usuarios."
+    },
+    "bookings/{bookingId}": {
+      "schema": "Booking",
+      "description": "Agenda de turnos reservados por los clientes."
+    },
+    "taken_slots/{slotId}": {
+      "schema": "TakenSlot",
+      "description": "Lista de horarios ocupados el día."
+    },
+    "movements/{movementId}": {
+      "schema": "Movement",
+      "description": "Registro de caja diaria para ingresos y egresos de caja capital."
+    },
+    "services/{serviceId}": {
+      "schema": "Service",
+      "description": "Servicios configurables de lavado y detallado."
+    },
+    "vehicles/{vehicleId}": {
+      "schema": "Vehicle",
+      "description": "Categorías de vehículos con extras aplicables."
+    },
+    "gallery/{photoId}": {
+      "schema": "Photo",
+      "description": "Lista de fotos y resultados detallados expuestos en la web."
+    }
+  }
+}

@@ -34,6 +34,8 @@ import { SERVICES, VEHICLES, BASE_PRICES, TYPE_EXTRA } from './constants.ts';
 import { VehicleType, ServiceKey } from './types.ts';
 import { fetchSlots, createBooking, TimeSlot } from './services/availabilityService.ts';
 import AdminCaja from './components/AdminCaja.tsx';
+import { metricsService } from './services/metricsService.ts';
+import { firestoreService, CatalogService, CatalogVehicle, GalleryPhoto } from './services/firestoreService.ts';
 
 // --- Internal Components ---
 
@@ -99,6 +101,7 @@ const Navigation = ({ setView, view }: { setView: (v: 'home' | 'booking') => voi
       <div className="flex items-center gap-6 md:gap-12 text-[10px] md:text-[11px] font-black uppercase tracking-[0.2em] md:tracking-[0.3em] text-zinc-500">
         <button 
           onClick={() => {
+            metricsService.logAction('click_servicios');
             if (view !== 'home') {
               setView('home');
               setTimeout(() => document.getElementById('services')?.scrollIntoView({ behavior: 'smooth' }), 100);
@@ -137,6 +140,39 @@ const SummaryItem = ({ label, value }: { label: string, value: string | undefine
 
 export default function App() {
   const [view, setView] = useState<'home' | 'booking' | 'admin'>('home');
+  const [dbServices, setDbServices] = useState<CatalogService[]>([]);
+  const [dbVehicles, setDbVehicles] = useState<CatalogVehicle[]>([]);
+  const [dbPhotos, setDbPhotos] = useState<GalleryPhoto[]>([]);
+
+  useEffect(() => {
+    const loadData = async () => {
+      try {
+        const srvs = await firestoreService.getServices();
+        setDbServices(srvs);
+        const vehs = await firestoreService.getVehicles();
+        setDbVehicles(vehs);
+        const phts = await firestoreService.getGallery();
+        setDbPhotos(phts);
+      } catch (e) {
+        console.error("Error loading db catalog in client:", e);
+      }
+    };
+    loadData();
+  }, [view]);
+
+  const activeServices = useMemo(() => {
+    return dbServices.length > 0 ? dbServices : SERVICES;
+  }, [dbServices]);
+
+  const activeVehicles = useMemo(() => {
+    return dbVehicles.length > 0 ? dbVehicles : VEHICLES;
+  }, [dbVehicles]);
+  
+  // Track Page Landing Visita
+  useEffect(() => {
+    metricsService.logAction('visita');
+  }, []);
+
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false);
   const [adminPassword, setAdminPassword] = useState('');
   const [showPasswordPrompt, setShowPasswordPrompt] = useState(false);
@@ -212,6 +248,7 @@ export default function App() {
     setSelectedService(service);
     setSelectedDateStr(null);
     setSelectedTime(null);
+    metricsService.logAction('click_servicios');
     setTimeout(() => scrollToSection(step3Ref), 600);
   };
 
@@ -228,6 +265,7 @@ export default function App() {
     setSelectedDateStr(null);
     setSelectedTime(null);
     setView('booking');
+    metricsService.logAction('inicio_reserva');
   };
 
   // Confirmation state
@@ -382,18 +420,27 @@ export default function App() {
   
   const calculatePrice = (service: ServiceKey | null, vType: VehicleType | null) => {
     if (!service || !vType) return 0;
+
+    const dbS = activeServices.find(s => s.id === service);
+    const dbV = activeVehicles.find(v => v.id === vType);
+
+    if (dbServices.length > 0 && dbVehicles.length > 0) {
+      const basePrice = dbS ? dbS.basePrice : 0;
+      const extraPrice = dbV ? dbV.extraPrice : 0;
+      return basePrice + extraPrice;
+    }
     
-    // Exact overrides per user request
+    // Exact overrides per user request (Updated with +$5k across all services)
     if (vType === 'pickup') {
-      if (service === 'Exterior') return 25000;
-      if (service === 'Interior') return 25000;
-      if (service === 'Full') return 50000;
+      if (service === 'Exterior') return 30000;
+      if (service === 'Interior') return 30000;
+      if (service === 'Full') return 55000;
     }
     
     if (vType === 'suv') {
-      if (service === 'Interior') return 20000;
-      // Exterior SUV is 15000 + 5000 = 20000 based on constants
-      // Full SUV is 35000 + 5000 = 40000 based on constants
+      if (service === 'Interior') return 25000;
+      // Exterior SUV is 20000 + 5000 = 25000 based on constants
+      // Full SUV is 40000 + 5000 = 45000 based on constants
     }
 
     const base = BASE_PRICES[service] || 0;
@@ -443,9 +490,10 @@ export default function App() {
     });
 
     if (result.ok) {
+      metricsService.logAction('reserva_completada');
       // Generate WhatsApp msg
-      const vehicleName = VEHICLES.find(v => v.id === vehicle)?.name;
-      const serviceName = SERVICES.find(s => s.id === selectedService)?.name;
+      const vehicleName = activeVehicles.find(v => v.id === vehicle)?.name;
+      const serviceName = activeServices.find(s => s.id === selectedService)?.name;
       const [y, m, d] = selectedDateStr.split('-');
       const formattedDate = `${d}/${m}/${y}`;
 
@@ -818,7 +866,12 @@ export default function App() {
                           }`}
                         >
                           <button
-                            onClick={() => setOpenFaq(isOpen ? null : index)}
+                            onClick={() => {
+                              setOpenFaq(isOpen ? null : index);
+                              if (!isOpen) {
+                                metricsService.logAction('click_faq');
+                              }
+                            }}
                             className="w-full text-left p-5 md:p-6 flex justify-between items-center gap-4 focus:outline-none focus:ring-1 focus:ring-emerald-500/30 font-display"
                           >
                             <span className={`text-base md:text-lg font-black tracking-tight transition-colors duration-300 ${
@@ -859,6 +912,45 @@ export default function App() {
               {/* Social Media CTA Section */}
               <div className="mt-20 pb-20 border-t border-white/[0.03] pt-16">
                 <SectionHeader kicker="Galería" title="Nuestros <span class='text-emerald-500'>Resultados</span>" number="05" />
+
+                {/* Dynamic Photo Gallery Grid */}
+                {dbPhotos.length > 0 && (
+                  <div className="mt-12 mb-16">
+                    <p className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-500 mb-6 font-semibold text-center md:text-left">FOTOS REALES DE NUESTROS TRABAJOS RECIENTES</p>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                      {dbPhotos.map((photo) => (
+                        <motion.div 
+                          key={photo.id}
+                          initial={{ opacity: 0, y: 15 }}
+                          whileInView={{ opacity: 1, y: 0 }}
+                          viewport={{ once: true }}
+                          transition={{ duration: 0.5 }}
+                          className="bg-zinc-900/60 border border-white/5 rounded-3xl overflow-hidden group hover:border-emerald-500/20 transition-all duration-300 flex flex-col h-full"
+                        >
+                          <div className="h-64 overflow-hidden relative">
+                            <img 
+                              src={photo.url} 
+                              alt={photo.title}
+                              className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                              referrerPolicy="no-referrer"
+                            />
+                            <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent opacity-60 group-hover:opacity-40 transition-opacity" />
+                          </div>
+                          <div className="p-6 flex flex-col justify-between flex-1">
+                            <div>
+                              <h4 className="font-display font-black italic text-lg uppercase text-white mb-2 tracking-tight">{photo.title}</h4>
+                              <p className="text-zinc-400 text-xs leading-relaxed font-medium">{photo.description}</p>
+                            </div>
+                            <div className="mt-4 pt-4 border-t border-white/[0.04] text-[9px] font-black uppercase tracking-widest text-zinc-500">
+                              Resultado Profesional LyS
+                            </div>
+                          </div>
+                        </motion.div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 <div className="bg-zinc-900 shadow-2xl border border-white/5 rounded-[3rem] p-8 md:p-16 relative overflow-hidden">
                   <div className="absolute -top-24 -right-24 w-96 h-96 bg-emerald-500/10 blur-[120px] rounded-full pointer-events-none" />
                   
@@ -1112,7 +1204,7 @@ export default function App() {
                      </div>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-6">
-                    {VEHICLES.map((v) => (
+                    {activeVehicles.map((v) => (
                       <button
                         key={v.id}
                         onClick={() => handleVehicleSelect(v.id as VehicleType)}
@@ -1167,7 +1259,7 @@ export default function App() {
                          </div>
                       </div>
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-2 md:gap-4 lg:gap-6">
-                        {SERVICES.map((s) => (
+                        {activeServices.map((s) => (
                           <motion.div
                             key={s.id}
                             initial={{ opacity: 0, y: 10 }}
@@ -1698,11 +1790,11 @@ export default function App() {
                 <div className="space-y-4 mb-10">
                   <div className="flex justify-between items-center py-3 border-b border-white/[0.05]">
                     <span className="text-zinc-500 text-[10px] font-black uppercase tracking-widest">Servicio</span>
-                    <span className="text-white font-display font-black italic">{SERVICES.find(s => s.id === selectedService)?.name}</span>
+                    <span className="text-white font-display font-black italic">{activeServices.find(s => s.id === selectedService)?.name}</span>
                   </div>
                   <div className="flex justify-between items-center py-3 border-b border-white/[0.05]">
                     <span className="text-zinc-500 text-[10px] font-black uppercase tracking-widest">Vehículo</span>
-                    <span className="text-white font-display font-black italic">{VEHICLES.find(v => v.id === vehicle)?.name}</span>
+                    <span className="text-white font-display font-black italic">{activeVehicles.find(v => v.id === vehicle)?.name}</span>
                   </div>
                   <div className="flex justify-between items-center py-3 border-b border-white/[0.05]">
                     <span className="text-zinc-500 text-[10px] font-black uppercase tracking-widest">Fecha</span>

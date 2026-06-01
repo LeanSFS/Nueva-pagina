@@ -56,9 +56,9 @@ export const VEHICLES = [
 ];
 
 export const BASE_PRICES: Record<string, number> = {
-  Exterior: 15000,
-  Interior: 20000,
-  Full: 35000
+  Exterior: 20000,
+  Interior: 25000,
+  Full: 40000
 };
 
 export const TYPE_EXTRA: Record<string, number> = {

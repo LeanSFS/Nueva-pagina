@@ -3,64 +3,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { firestoreService, Booking } from './firestoreService.ts';
+
 export interface TimeSlot {
   fecha: string;
   slots: string[];
   count?: number;
-}
-
-const WEBAPP_URL = 'https://script.google.com/macros/s/AKfycbyDd--FDaQPnqG_LQ4MzLuRmIQc99Y0WK1Axpwh3Tc4GX1DLCHn77XTr2-wBZUVCuVO/exec';
-
-let memoryCache: TimeSlot[] | null = null;
-
-export async function fetchSlots(forceRefresh = false): Promise<TimeSlot[]> {
-  if (forceRefresh) {
-    memoryCache = null;
-    sessionStorage.removeItem('lys_slots_cache');
-  }
-
-  // Check memory cache first
-  if (memoryCache) return memoryCache;
-
-  // Check session storage
-  try {
-    const cached = sessionStorage.getItem('lys_slots_cache');
-    if (cached) {
-      const { data, timestamp } = JSON.parse(cached);
-      // Cache valid for 2 minutes
-      if (Date.now() - timestamp < 120000) {
-        memoryCache = data;
-        return data;
-      }
-    }
-  } catch (e) {
-    console.error('Error reading cache:', e);
-  }
-
-  try {
-    const response = await fetch(`${WEBAPP_URL}?action=slots14&days=14&t=${Date.now()}`);
-    const data = await response.json();
-    if (!data.ok || !Array.isArray(data.rows)) {
-      throw new Error(data.error || 'Respuesta inválida del servidor');
-    }
-    
-    // Update caches
-    memoryCache = data.rows;
-    sessionStorage.setItem('lys_slots_cache', JSON.stringify({
-      data: data.rows,
-      timestamp: Date.now()
-    }));
-
-    return data.rows;
-  } catch (error) {
-    console.error('Error fetching slots:', error);
-    return memoryCache || [];
-  }
-}
-
-export function clearCache() {
-  memoryCache = null;
-  sessionStorage.removeItem('lys_slots_cache');
 }
 
 export interface BookingData {
@@ -73,17 +21,97 @@ export interface BookingData {
   direccion: string;
 }
 
+// Memory cache for slots
+let memoryCache: TimeSlot[] | null = null;
+let lastFetchTime = 0;
+
+export async function fetchSlots(forceRefresh = false): Promise<TimeSlot[]> {
+  const cacheDuration = 10000; // 10 seconds short-live client cache, fast response times
+  const nowTime = Date.now();
+
+  if (!forceRefresh && memoryCache && (nowTime - lastFetchTime < cacheDuration)) {
+    return memoryCache;
+  }
+
+  try {
+    // 1. Get taken / blocked slots from Firestore
+    const takenList = await firestoreService.getPublicTakenSlots();
+    
+    // Create query lookup set: "YYYY-MM-DD_HH:MM"
+    const busySlots = new Set<string>();
+    takenList.forEach(ts => {
+      busySlots.add(`${ts.fecha}_${ts.hora}`);
+    });
+
+    const possibleTimes = ['09:00', '11:00', '13:00', '15:00', '17:00'];
+    const slotsResult: TimeSlot[] = [];
+
+    // 2. Generate slots for the next 14 days
+    const today = new Date();
+    for (let i = 0; i < 14; i++) {
+      const d = new Date(today);
+      d.setDate(today.getDate() + i);
+
+      // Skips Sundays (assuming Sunday is closed)
+      if (d.getDay() === 0) {
+        continue;
+      }
+
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      const fechaStr = `${year}-${month}-${day}`;
+
+      // Filter possible slots checking if they are busy
+      const availableSlots = possibleTimes.filter(time => {
+        const lookupKey = `${fechaStr}_${time}`;
+        return !busySlots.has(lookupKey);
+      });
+
+      slotsResult.push({
+        fecha: fechaStr,
+        slots: availableSlots,
+        count: availableSlots.length
+      });
+    }
+
+    memoryCache = slotsResult;
+    lastFetchTime = nowTime;
+    return slotsResult;
+
+  } catch (error) {
+    console.error('Error computing available slots via Firestore:', error);
+    return [];
+  }
+}
+
+export function clearCache() {
+  memoryCache = null;
+  lastFetchTime = 0;
+}
+
 export async function createBooking(data: BookingData): Promise<{ ok: boolean; id?: string; error?: string }> {
   try {
-    const qs = new URLSearchParams({
-      action: 'create',
-      ...data
-    });
-    const response = await fetch(`${WEBAPP_URL}?${qs.toString()}`);
-    const result = await response.json();
-    return result;
+    const bookingId = `book_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+    const newBooking: Booking = {
+      id: bookingId,
+      fecha: data.fecha,
+      hora: data.hora,
+      tipo: data.tipo,
+      servicio: data.servicio,
+      nombre: data.nombre,
+      telefono: data.telefono,
+      direccion: data.direccion,
+      estado: 'pendiente'
+    };
+
+    // Commit to Firestore (creates booking and blocks slot atomically)
+    await firestoreService.createBooking(newBooking, false);
+    clearCache();
+
+    return { ok: true, id: bookingId };
   } catch (error) {
-    console.error('Error creating booking:', error);
-    return { ok: false, error: error instanceof Error ? error.message : 'Error desconocido' };
+    console.error('Error reserving booking via Firestore:', error);
+    return { ok: false, error: error instanceof Error ? error.message : 'Error al guardar reserva' };
   }
 }
