@@ -514,7 +514,7 @@ export default function AdminMetrics() {
                         </p>
                         <div className="flex flex-col gap-2 pt-1">
                           <a 
-                            href="https://ais-pre-xhi2yqr5a2veqlnfganuuf-12804574784.us-east1.run.app"
+                            href="https://ais-dev-xhi2yqr5a2veqlnfganuuf-12804574784.us-east1.run.app"
                             target="_blank" 
                             rel="noopener noreferrer"
                             className="inline-flex items-center justify-between bg-emerald-500 hover:bg-emerald-400 text-night font-black uppercase text-[10px] tracking-wider px-3.5 py-2 rounded-lg transition-all"
