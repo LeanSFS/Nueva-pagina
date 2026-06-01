@@ -14,6 +14,7 @@ import {
   ArrowRight, 
   CheckCircle2, 
   Smartphone,
+  ChevronLeft,
   ChevronRight,
   Info,
   CalendarDays,
@@ -144,6 +145,15 @@ export default function App() {
   const [dbServices, setDbServices] = useState<CatalogService[]>([]);
   const [dbVehicles, setDbVehicles] = useState<CatalogVehicle[]>([]);
   const [dbPhotos, setDbPhotos] = useState<GalleryPhoto[]>([]);
+  const [currentPhotoIndex, setCurrentPhotoIndex] = useState(0);
+
+  const handleNextPhoto = () => {
+    setCurrentPhotoIndex((prev) => (prev + 1) % dbPhotos.length);
+  };
+
+  const handlePrevPhoto = () => {
+    setCurrentPhotoIndex((prev) => (prev - 1 + dbPhotos.length) % dbPhotos.length);
+  };
 
   useEffect(() => {
     const loadData = async () => {
@@ -930,41 +940,100 @@ export default function App() {
               <div className="mt-20 pb-20 border-t border-white/[0.03] pt-16">
                 <SectionHeader kicker="Galería" title="Nuestros <span class='text-emerald-500'>Resultados</span>" number="05" />
 
-                {/* Dynamic Photo Gallery Grid */}
+                {/* Dynamic Photo Gallery Carousel */}
                 {dbPhotos.length > 0 && (
-                  <div className="mt-12 mb-16">
-                    <p className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-500 mb-6 font-semibold text-center md:text-left">FOTOS REALES DE NUESTROS TRABAJOS RECIENTES</p>
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                      {dbPhotos.map((photo) => (
-                        <motion.div 
-                          key={photo.id}
-                          initial={{ opacity: 0, y: 15 }}
-                          whileInView={{ opacity: 1, y: 0 }}
-                          viewport={{ once: true }}
-                          transition={{ duration: 0.5 }}
-                          className="bg-zinc-900/60 border border-white/5 rounded-3xl overflow-hidden group hover:border-emerald-500/20 transition-all duration-300 flex flex-col h-full"
-                        >
-                          <div className="h-64 overflow-hidden relative">
-                            <img 
-                              src={photo.url} 
-                              alt={photo.title}
-                              className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-                              referrerPolicy="no-referrer"
-                            />
-                            <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent opacity-60 group-hover:opacity-40 transition-opacity" />
+                  <div className="mt-12 mb-16 relative">
+                    <p className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-500 mb-6 font-semibold text-center">FOTOS REALES DE NUESTROS TRABAJOS RECIENTES</p>
+                    
+                    <div className="relative max-w-4xl mx-auto px-4 md:px-14">
+                      {/* Left Arrow Button (Highly Notorious & Floating at the edges) */}
+                      <button
+                        onClick={handlePrevPhoto}
+                        aria-label="Anterior imagen"
+                        className="absolute left-0 md:-left-4 top-1/2 -translate-y-1/2 z-25 bg-emerald-500 hover:bg-emerald-400 active:scale-90 text-night p-4 md:p-5 rounded-full shadow-2xl shadow-emerald-500/40 hover:shadow-emerald-400/60 flex items-center justify-center transition-all border border-white/20 select-none group focus:outline-none focus:ring-2 focus:ring-emerald-400 cursor-pointer"
+                      >
+                        <ChevronLeft className="w-6 h-6 md:w-8 md:h-8 stroke-[3.5px] group-hover:-translate-x-0.5 transition-transform" />
+                      </button>
+
+                      {/* Right Arrow Button (Highly Notorious & Floating at the edges) */}
+                      <button
+                        onClick={handleNextPhoto}
+                        aria-label="Siguiente imagen"
+                        className="absolute right-0 md:-right-4 top-1/2 -translate-y-1/2 z-25 bg-emerald-500 hover:bg-emerald-400 active:scale-90 text-night p-4 md:p-5 rounded-full shadow-2xl shadow-emerald-500/40 hover:shadow-emerald-400/60 flex items-center justify-center transition-all border border-white/20 select-none group focus:outline-none focus:ring-2 focus:ring-emerald-400 cursor-pointer"
+                      >
+                        <ChevronRight className="w-6 h-6 md:w-8 md:h-8 stroke-[3.5px] group-hover:translate-x-0.5 transition-transform" />
+                      </button>
+
+                      <div className="overflow-hidden bg-zinc-900/60 border border-white/5 rounded-[2.5rem] hover:border-emerald-500/10 transition-all duration-300">
+                        <div className="flex flex-col md:flex-row items-stretch min-h-[360px] md:min-h-[400px]">
+                          {/* Image Panel */}
+                          <div className="w-full md:w-3/5 h-64 md:h-auto overflow-hidden relative self-stretch flex-shrink-0">
+                            <AnimatePresence mode="wait">
+                              <motion.img 
+                                key={dbPhotos[currentPhotoIndex]?.id || 'carousel-img'}
+                                src={dbPhotos[currentPhotoIndex]?.url || ''} 
+                                alt={dbPhotos[currentPhotoIndex]?.title || ''}
+                                initial={{ opacity: 0, scale: 1.05 }}
+                                animate={{ opacity: 1, scale: 1 }}
+                                exit={{ opacity: 0, scale: 0.95 }}
+                                transition={{ duration: 0.4 }}
+                                className="w-full h-full object-cover"
+                                referrerPolicy="no-referrer"
+                              />
+                            </AnimatePresence>
+                            <div className="absolute inset-0 bg-gradient-to-t md:bg-gradient-to-r from-black/90 via-black/40 to-transparent" />
                           </div>
-                          <div className="p-6 flex flex-col justify-between flex-1">
-                            <div>
-                              <h4 className="font-display font-black italic text-lg uppercase text-white mb-2 tracking-tight">{photo.title}</h4>
-                              <p className="text-zinc-400 text-xs leading-relaxed font-medium">{photo.description}</p>
-                            </div>
-                            <div className="mt-4 pt-4 border-t border-white/[0.04] text-[9px] font-black uppercase tracking-widest text-zinc-500">
-                              Resultado Profesional LyS
-                            </div>
+
+                          {/* Text / Stats Panel */}
+                          <div className="w-full md:w-2/5 p-6 md:p-8 flex flex-col justify-between bg-zinc-950/45 relative z-10 self-stretch min-w-0">
+                            <AnimatePresence mode="wait">
+                              <motion.div
+                                key={dbPhotos[currentPhotoIndex]?.id || 'carousel-text'}
+                                initial={{ opacity: 0, x: 20 }}
+                                animate={{ opacity: 1, x: 0 }}
+                                exit={{ opacity: 0, x: -20 }}
+                                transition={{ duration: 0.3 }}
+                                className="flex flex-col h-full justify-between min-w-0"
+                              >
+                                <div>
+                                  <div className="text-[8px] md:text-[9px] font-black uppercase tracking-[0.2em] text-emerald-500 mb-2 font-display">
+                                    Trabajo Realizado ({currentPhotoIndex + 1} de {dbPhotos.length})
+                                  </div>
+                                  <h4 className="font-display font-black italic text-lg md:text-2xl uppercase text-white mb-3 tracking-tight leading-tight">
+                                    {dbPhotos[currentPhotoIndex]?.title}
+                                  </h4>
+                                  <p className="text-zinc-400 text-xs md:text-sm leading-relaxed font-semibold">
+                                    {dbPhotos[currentPhotoIndex]?.description}
+                                  </p>
+                                </div>
+
+                                <div className="mt-6 pt-4 border-t border-white/[0.04] flex items-center justify-between text-[10px] font-black uppercase tracking-widest text-zinc-500">
+                                  <span>Detallado Premium</span>
+                                  <span className="text-emerald-500 font-bold font-mono">OK ✓</span>
+                                </div>
+                              </motion.div>
+                            </AnimatePresence>
                           </div>
-                        </motion.div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Pagination Indicators - Clickable dots */}
+                    <div className="flex justify-center gap-2 mt-6">
+                      {dbPhotos.map((photo, idx) => (
+                        <button
+                          key={photo.id + '_dot'}
+                          onClick={() => setCurrentPhotoIndex(idx)}
+                          className={`h-2.5 rounded-full transition-all duration-300 ${
+                            idx === currentPhotoIndex 
+                              ? 'w-8 bg-emerald-500' 
+                              : 'w-2.5 bg-zinc-700 hover:bg-zinc-500'
+                          }`}
+                          aria-label={`Ir a imagen ${idx + 1}`}
+                        />
                       ))}
                     </div>
+
                   </div>
                 )}
 
