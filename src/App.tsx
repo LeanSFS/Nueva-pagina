@@ -408,7 +408,7 @@ export default function App() {
           setWeatherData(map);
         }
       } catch (e) {
-        console.error('Weather error:', e);
+        console.log('Unable to fetch weather (offline or blocked):', e);
       }
     }
     fetchWeather();

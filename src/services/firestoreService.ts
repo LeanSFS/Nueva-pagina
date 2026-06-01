@@ -289,7 +289,7 @@ export const firestoreService = {
             label: s.label,
             description: s.description,
             features: s.features,
-            isFeatured: s.isFeatured,
+            isFeatured: s.isFeatured ?? false,
             basePrice
           };
         });
@@ -317,7 +317,10 @@ export const firestoreService = {
   async saveService(service: CatalogService): Promise<void> {
     const colPath = 'services';
     try {
-      await setDoc(doc(db, colPath, service.id), service);
+      await setDoc(doc(db, colPath, service.id), {
+        ...service,
+        isFeatured: service.isFeatured ?? false
+      });
     } catch (e) {
       handleFirestoreError(e, OperationType.WRITE, `${colPath}/${service.id}`);
     }
