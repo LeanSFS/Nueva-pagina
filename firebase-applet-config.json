@@ -1,10 +1,9 @@
 {
-  "projectId": "virtual-photon-31b2m",
-  "appId": "1:230232499829:web:dd964fccb1e215e348ba3c",
-  "apiKey": "AIzaSyDe8pBFrBJHaKisl33KdqZfwnu62VjClYg",
-  "authDomain": "virtual-photon-31b2m.firebaseapp.com",
-  "firestoreDatabaseId": "ai-studio-69d90ef9-b3d2-436b-92bc-6a355a969e5d",
-  "storageBucket": "virtual-photon-31b2m.firebasestorage.app",
-  "messagingSenderId": "230232499829",
-  "measurementId": ""
+  "projectId": "lyslavados-41b48",
+  "appId": "1:93680478075:web:c8c5b0bb81edc695f83fde",
+  "apiKey": "AIzaSyCHzuLalazsfw38jHzrfXOhyl-O01hkn40",
+  "authDomain": "lyslavados-41b48.firebaseapp.com",
+  "storageBucket": "lyslavados-41b48.firebasestorage.app",
+  "messagingSenderId": "93680478075",
+  "measurementId": "G-PV1513LYGV"
 }

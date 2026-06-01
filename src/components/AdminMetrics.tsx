@@ -501,31 +501,39 @@ export default function AdminMetrics() {
                 <div className="space-y-2 mt-2">
                   <p className="font-bold text-zinc-300">💡 ¿Cómo solucionar este error de forma inmediata y automática?</p>
                   {authError.includes('auth/unauthorized-domain') || authError.includes('unauthorized') ? (
-                    <div className="space-y-3.5 pl-3 border-l-2 border-red-500/30 text-zinc-400">
+                    <div className="space-y-3.5 pl-3 border-l-2 border-emerald-500/35 text-zinc-400">
                       <p>
-                        <strong>Explicación:</strong> No tenés propietario directo sobre este subproyecto de base de datos generado por la plataforma (por seguridad e infraestructura de AI Studio). Por lo tanto, no podés añadir <code className="bg-zinc-950 px-1 py-0.5 rounded text-white font-mono">{window.location.hostname}</code> a los dominios de Firebase manualmente.
-                      </p>
-                      <p className="text-emerald-400 font-bold">
-                        ¡Pero no te preocupes! Podés iniciar sesión sin hacer configuraciones complejas:
+                        <strong>¡Buenas noticias!</strong> Como configuramos tu propio proyecto de Firebase (<strong className="text-emerald-400 font-mono">lyslavados-41b48</strong>), tenés control absoluto para autorizar los dominios que quieras desde tu consola.
                       </p>
                       <div className="bg-zinc-950 p-4 rounded-xl border border-white/5 space-y-3">
-                        <p className="text-[11px] font-medium leading-relaxed">
-                          La base de datos de Firestore está sincronizada en tiempo real. Esto significa que si iniciás sesión desde la <strong>URL de vista previa autorizada</strong>, los turnos de tus clientes que reservan en la web principal van a ingresar igual y vas a poder gestionarlos perfecto.
+                        <p className="text-[11px] font-bold text-white uppercase tracking-wider">🛠️ Pasos para solucionarlo en 1 minuto:</p>
+                        <ol className="list-decimal pl-4 space-y-2 text-[11px]">
+                          <li>
+                            Entrá a la configuración de Authentication de tu proyecto: <br/>
+                            <a 
+                              href="https://console.firebase.google.com/project/lyslavados-41b48/authentication/settings"
+                              target="_blank" 
+                              rel="noopener noreferrer" 
+                              className="text-emerald-400 underline hover:text-emerald-300 font-semibold"
+                            >
+                              Ir a Firebase Console ➔
+                            </a>
+                          </li>
+                          <li>
+                            Buscá la sección de <strong>"Dominios autorizados"</strong> (Authorized domains) abajo del todo.
+                          </li>
+                          <li>
+                            Hacé clic en **"Agregar dominio"** e ingresá exactamente estos dominios uno por uno:
+                            <ul className="list-disc pl-4 mt-1.5 space-y-1 text-zinc-400 font-mono text-[10px]">
+                              <li><strong className="text-white bg-zinc-900 px-1.5 py-0.5 rounded">{window.location.hostname}</strong> (Dominio donde estás ahora)</li>
+                              <li><strong className="text-white bg-zinc-900 px-1.5 py-0.5 rounded">lyslavados.com</strong> (Tu web oficial)</li>
+                              <li><strong className="text-white bg-zinc-900 px-1.5 py-0.5 rounded">ais-pre-xhi2yqr5a2veqlnfganuuf-12804574784.us-east1.run.app</strong> (Vista compartida de AI Studio)</li>
+                            </ul>
+                          </li>
+                        </ol>
+                        <p className="text-[10px] text-zinc-500 italic font-medium leading-relaxed pt-1 border-t border-white/[0.03]">
+                          Una vez guardado en Firebase, el botón de "Iniciar sesión con Google" va a funcionar de forma inmediata en todos estos sitios.
                         </p>
-                        <div className="flex flex-col gap-2 pt-1">
-                          <a 
-                            href="https://ais-dev-xhi2yqr5a2veqlnfganuuf-12804574784.us-east1.run.app"
-                            target="_blank" 
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center justify-between bg-emerald-500 hover:bg-emerald-400 text-night font-black uppercase text-[10px] tracking-wider px-3.5 py-2 rounded-lg transition-all"
-                          >
-                            <span>Ir al panel autorizado (Sincronizado)</span>
-                            <span>➔</span>
-                          </a>
-                          <span className="text-[9px] text-zinc-500 text-center font-bold">
-                            (Usá el botón anterior para loguearte con Google con total normalidad)
-                          </span>
-                        </div>
                       </div>
                     </div>
                   ) : (
