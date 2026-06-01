@@ -101,7 +101,7 @@ function isUserAdmin(): boolean {
 // --- Validate Connection on boot ---
 async function testConnection() {
   try {
-    await withTimeout(getDocFromServer(doc(db, 'test', 'connection')), 1500);
+    await withTimeout(getDocFromServer(doc(db, 'test', 'connection')), 5000);
   } catch (error) {
     if (error instanceof Error) {
       console.warn("Firestore connection check notice:", error.message);
@@ -799,6 +799,221 @@ export const firestoreService = {
       return { success: true, count };
     } catch (e: any) {
       console.error('Error importing from Google Sheets:', e);
+      return { success: false, count: 0, error: e.message || String(e) };
+    }
+  },
+
+  async importCajaFromGoogleSheets(customUrl?: string): Promise<{ success: boolean; count: number; error?: string }> {
+    try {
+      // Construct the URL to target the "Caja" tab as CSV
+      let url = 'https://docs.google.com/spreadsheets/d/1SDYaW0TBtLao-QJOC6TVlkoaRG7x6Ft4GcPudlGzbZc/gviz/tq?tqx=out:csv&sheet=Caja';
+      if (customUrl) {
+        let clean = customUrl.trim();
+        if (clean.includes('/edit')) {
+          url = clean.replace(/\/edit.*/, '/gviz/tq?tqx=out:csv&sheet=Caja');
+        } else {
+          url = clean;
+        }
+      }
+
+      console.log('Fetching Google Sheet for Caja from:', url);
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error('No se pudo acceder a la pestaña "Caja" de la planilla de Google. Verificá que la planilla esté compartida públicamente.');
+      }
+      const csvText = await response.text();
+      const lines = csvText.split('\n');
+      if (lines.length <= 1) {
+        return { success: true, count: 0 };
+      }
+
+      // Parse headers from the first line
+      const firstLiner: string[] = [];
+      let curHeader = '';
+      let inHeaderQuotes = false;
+      const firstLineStr = lines[0].trim();
+      for (let j = 0; j < firstLineStr.length; j++) {
+        const char = firstLineStr[j];
+        if (char === '"') {
+          inHeaderQuotes = !inHeaderQuotes;
+        } else if (char === ',' && !inHeaderQuotes) {
+          firstLiner.push(curHeader);
+          curHeader = '';
+        } else {
+          curHeader += char;
+        }
+      }
+      firstLiner.push(curHeader);
+
+      const headers = firstLiner.map(h => 
+        h.trim()
+         .toLowerCase()
+         .normalize("NFD")
+         .replace(/[\u0300-\u036f]/g, "")
+         .replace(/[^a-z0-9_]/g, '')
+      );
+
+      console.log('Caja Sheet headers found:', headers);
+
+      // Find indices or fall back to default indexes (id, fecha, tipo, categoria, concepto, monto_ars, medio, estado, factura, turno_id, cliente, notas)
+      let idxId = headers.findIndex(h => h === 'id');
+      let idxFecha = headers.findIndex(h => h.includes('fecha') || h === 'dia' || h === 'date');
+      let idxTipo = headers.findIndex(h => h.includes('tipo') || h === 'type');
+      let idxCategoria = headers.findIndex(h => h.includes('categoria') || h === 'category');
+      let idxConcepto = headers.findIndex(h => h.includes('concepto') || h.includes('descripcion') || h === 'concept' || h === 'description');
+      let idxMonto = headers.findIndex(h => h.includes('monto') || h.includes('importe') || h === 'amount');
+      let idxMedio = headers.findIndex(h => h.includes('medio') || h.includes('forma') || h === 'method' || h.includes('pago'));
+      let idxEstado = headers.findIndex(h => h.includes('estado') || h === 'status');
+      let idxFactura = headers.findIndex(h => h.includes('factura') || h === 'invoice');
+      let idxCliente = headers.findIndex(h => h.includes('cliente') || h === 'client' || h === 'customer');
+      let idxNotas = headers.findIndex(h => h.includes('notas') || h.includes('nota') || h === 'notes' || h.includes('obs'));
+
+      // Fallback to sequential index design matching: id, fecha, tipo, categoria, concepto, monto_ars, medio, estado, factura, turno_id, cliente, notas
+      if (idxId === -1) idxId = 0;
+      if (idxFecha === -1) idxFecha = 1;
+      if (idxTipo === -1) idxTipo = 2;
+      if (idxCategoria === -1) idxCategoria = 3;
+      if (idxConcepto === -1) idxConcepto = 4;
+      if (idxMonto === -1) idxMonto = 5;
+      if (idxMedio === -1) idxMedio = 6;
+      if (idxEstado === -1) idxEstado = 7;
+      if (idxFactura === -1) idxFactura = 8;
+      // Index 9 is turno_id, skip it
+      if (idxCliente === -1) idxCliente = 10;
+      if (idxNotas === -1) idxNotas = 11;
+
+      console.log('Resolved Caja column indices:', {
+        idxId, idxFecha, idxTipo, idxCategoria, idxConcepto, idxMonto, idxMedio, idxEstado, idxFactura, idxCliente, idxNotas
+      });
+
+      let count = 0;
+      const batchList: Movement[] = [];
+
+      for (let i = 1; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (!line) continue;
+
+        // CSV parser to correctly handle quotes
+        const r: string[] = [];
+        let cur = '';
+        let inQuotes = false;
+        for (let j = 0; j < line.length; j++) {
+          const char = line[j];
+          if (char === '"') {
+            inQuotes = !inQuotes;
+          } else if (char === ',' && !inQuotes) {
+            r.push(cur);
+            cur = '';
+          } else {
+            cur += char;
+          }
+        }
+        r.push(cur);
+
+        // Check if we have minimum columns needed for a record
+        if (r.length < 5) continue;
+
+        const rawFecha = r[idxFecha]?.trim();
+        if (!rawFecha) continue;
+
+        // Parse date
+        let fecha = rawFecha;
+        if (/^\d{4}-\d{2}-\d{2}$/.test(fecha)) {
+          // Already YYYY-MM-DD
+        } else {
+          const parts = fecha.split(/[\/\-]/);
+          if (parts.length === 3) {
+            let p0 = parts[0].trim();
+            let p1 = parts[1].trim();
+            let p2 = parts[2].trim();
+            if (p0.length === 4) {
+              // YYYY-MM-DD or YYYY/MM/DD
+              fecha = `${p0}-${p1.padStart(2, '0')}-${p2.padStart(2, '0')}`;
+            } else {
+              // DD/MM/YYYY or D/M/YYYY
+              let year = p2;
+              if (year.length === 2) year = '20' + year;
+              fecha = `${year}-${p1.padStart(2, '0')}-${p0.padStart(2, '0')}`;
+            }
+          }
+        }
+
+        // Validate size/format of date
+        if (fecha.length !== 10) continue;
+
+        // Parse tipo
+        let tipoVal = (r[idxTipo]?.trim() || 'Ingreso').toLowerCase();
+        let tipo: 'Ingreso' | 'Gasto' = 'Ingreso';
+        if (tipoVal.includes('gasto') || tipoVal.includes('egreso') || tipoVal.includes('out') || tipoVal.includes('spend')) {
+          tipo = 'Gasto';
+        }
+
+        // Parse category and concept
+        const categoria = (r[idxCategoria]?.trim() || (tipo === 'Ingreso' ? 'Servicios' : 'Gastos Generales')).substring(0, 150);
+        const concepto = (r[idxConcepto]?.trim() || 'Importado de planilla').substring(0, 500);
+
+        // Parse amount
+        let rawMonto = r[idxMonto]?.trim() || '0';
+        rawMonto = rawMonto.replace(/[^0-9,\.\-]/g, '');
+        if (rawMonto.includes(',') && rawMonto.includes('.')) {
+          rawMonto = rawMonto.replace(/\./g, '').replace(/,/g, '.');
+        } else if (rawMonto.includes(',')) {
+          const parts = rawMonto.split(',');
+          if (parts[parts.length - 1].length === 2) {
+            rawMonto = rawMonto.replace(/,/g, '.');
+          } else {
+            rawMonto = rawMonto.replace(/,/g, '');
+          }
+        }
+        const monto_ars = parseFloat(rawMonto) || 0;
+        if (monto_ars <= 0) continue; // Skip zero/invalid entries
+
+        const medio = (r[idxMedio]?.trim() || 'Efectivo').substring(0, 150);
+
+        // Parse status
+        let estadoVal = (r[idxEstado]?.trim() || 'Pagado').toLowerCase();
+        let estado: 'Pagado' | 'Pendiente' = 'Pagado';
+        if (estadoVal.includes('pend') || estadoVal.includes('debe')) {
+          estado = 'Pendiente';
+        }
+
+        const factura = (r[idxFactura]?.trim() || '').substring(0, 200);
+        const cliente = (r[idxCliente]?.trim() || '').substring(0, 200);
+        const notas = (r[idxNotas]?.trim() || '').substring(0, 2000);
+
+        // Deterministic ID or sequential fallback
+        const id = (idxId !== -1 && r[idxId]?.trim()) 
+          ? r[idxId]?.trim() 
+          : `mov_${fecha}_${concepto.replace(/[^a-zA-Z0-9]/g, '')}_${monto_ars}_${i}`;
+
+        const m: Movement = {
+          id,
+          fecha,
+          tipo,
+          categoria,
+          concepto,
+          monto_ars,
+          medio,
+          estado,
+          factura,
+          cliente,
+          notas
+        } as Movement;
+
+        batchList.push(m);
+      }
+
+      console.log(`Parsed ${batchList.length} movements of Caja. Starting insertion...`);
+
+      // Save each to Firestore and Local Cache
+      for (const movement of batchList) {
+        await this.saveMovement(movement);
+        count++;
+      }
+
+      return { success: true, count };
+    } catch (e: any) {
+      console.error('Error importing caja from Google Sheets:', e);
       return { success: false, count: 0, error: e.message || String(e) };
     }
   }

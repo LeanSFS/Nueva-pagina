@@ -43,7 +43,6 @@ export async function fetchSlots(forceRefresh = false): Promise<TimeSlot[]> {
       busySlots.add(`${ts.fecha}_${ts.hora}`);
     });
 
-    const possibleTimes = ['09:00', '11:00', '13:00', '15:00', '17:00'];
     const slotsResult: TimeSlot[] = [];
 
     // 2. Generate slots for the next 14 days
@@ -57,13 +56,19 @@ export async function fetchSlots(forceRefresh = false): Promise<TimeSlot[]> {
         continue;
       }
 
+      // Define possible times based on the day of the week
+      // Saturday = 6, Weekdays = 1-5
+      const dTimes = d.getDay() === 6 
+        ? ['09:00', '11:00', '15:00', '17:00']
+        : ['09:00', '11:00'];
+
       const year = d.getFullYear();
       const month = String(d.getMonth() + 1).padStart(2, '0');
       const day = String(d.getDate()).padStart(2, '0');
       const fechaStr = `${year}-${month}-${day}`;
 
       // Filter possible slots checking if they are busy
-      const availableSlots = possibleTimes.filter(time => {
+      const availableSlots = dTimes.filter(time => {
         const lookupKey = `${fechaStr}_${time}`;
         return !busySlots.has(lookupKey);
       });

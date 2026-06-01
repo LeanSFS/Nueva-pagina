@@ -97,6 +97,33 @@ export default function AdminMetrics() {
     }
   };
 
+  const handleImportCaja = async () => {
+    setImportingSheets(true);
+    setImportResult({ type: 'idle' });
+    try {
+      let targetUrl = sheetUrl.trim();
+      const res = await firestoreService.importCajaFromGoogleSheets(targetUrl);
+      if (res.success) {
+        setImportResult({ 
+          type: 'success', 
+          message: `¡Sincronización exitosa! Se procesaron e insertaron ${res.count} movimientos de caja correctamente en Firestore.` 
+        });
+      } else {
+        setImportResult({ 
+          type: 'error', 
+          message: `Ocurrió un error al importar caja: ${res.error || 'error desconocido'}` 
+        });
+      }
+    } catch (err: any) {
+      setImportResult({ 
+        type: 'error', 
+        message: `Fallo inesperado de conexión o procesamiento de caja: ${err.message || err}` 
+      });
+    } finally {
+      setImportingSheets(false);
+    }
+  };
+
   useEffect(() => {
     async function loadTelegramSettings() {
       try {
@@ -782,39 +809,50 @@ export default function AdminMetrics() {
                     Sincronizador de Datos (Google Sheets)
                   </h4>
                   <p className="text-zinc-500 text-[11px] font-semibold mt-0.5">
-                    Importá y sincronizá turnos directamente desde tu planilla pública de Google Sheets en Firestore.
+                    Importá y sincronizá turnos y movimientos de caja directamente desde tu planilla pública de Google Sheets.
                   </p>
                 </div>
               </div>
             </div>
 
             {/* Input URL */}
-            <div className="space-y-1.55">
+            <div className="space-y-2">
               <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400">
-                Enlace para Compartir de Google Sheets (Planilla de turnos)
+                Enlace para Compartir de Google Sheets (Planilla de turnos y caja)
               </label>
-              <div className="flex flex-col sm:flex-row gap-2">
+              <div className="flex flex-col md:flex-row gap-3">
                 <input 
                   type="text" 
                   placeholder="ej. https://docs.google.com/spreadsheets/d/.../edit?usp=sharing"
                   value={sheetUrl}
                   onChange={(e) => setSheetUrl(e.target.value)}
-                  className="flex-1 bg-zinc-950 border border-white/5 rounded-xl px-4 py-2.5 text-xs text-white font-mono placeholder:text-zinc-700 focus:outline-none focus:border-emerald-500/50 transition-all font-semibold"
+                  className="flex-1 bg-zinc-950 border border-white/5 rounded-xl px-4 py-3 text-xs text-white font-mono placeholder:text-zinc-700 focus:outline-none focus:border-emerald-500/50 transition-all font-semibold"
                 />
-                <button
-                  type="button"
-                  onClick={handleImportSheets}
-                  disabled={importingSheets || !sheetUrl.trim()}
-                  className="flex items-center justify-center gap-2 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-night shadow-lg shadow-emerald-500/10 px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest active:scale-95 transition-all shrink-0"
-                >
-                  <RefreshCw className={`w-3.5 h-3.5 ${importingSheets ? 'animate-spin' : ''}`} />
-                  {importingSheets ? 'Procesando...' : 'Iniciar Sincronización'}
-                </button>
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <button
+                    type="button"
+                    onClick={handleImportSheets}
+                    disabled={importingSheets || !sheetUrl.trim()}
+                    className="flex-1 sm:flex-initial flex items-center justify-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-white/5 disabled:opacity-50 px-5 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest active:scale-95 transition-all shrink-0"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${importingSheets ? 'animate-spin' : ''}`} />
+                    Sincronizar Turnos
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleImportCaja}
+                    disabled={importingSheets || !sheetUrl.trim()}
+                    className="flex-1 sm:flex-initial flex items-center justify-center gap-2 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-night shadow-lg shadow-emerald-500/10 px-5 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest active:scale-95 transition-all shrink-0"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${importingSheets ? 'animate-spin' : ''}`} />
+                    Sincronizar Caja
+                  </button>
+                </div>
               </div>
             </div>
 
             <div className="text-[10px] text-zinc-500 font-semibold leading-relaxed">
-              💡 <span className="text-zinc-400 font-bold">Instrucciones básicas:</span> Asegurate de que la planilla de Google Sheets esté configurada como <strong className="text-zinc-300">"Cualquier usuario que tenga el vínculo puede ver"</strong> en el botón Compartir de Google Sheets para permitir que se descarguen los datos. ¡No toques nada en la base de datos de Firebase manualmente!
+              💡 <span className="text-zinc-400 font-bold">Instrucciones básicas:</span> Asegurate de que la planilla de Google Sheets esté configurada como <strong className="text-zinc-300">"Cualquier usuario que tenga el vínculo puede ver"</strong> en el botón Compartir de Google Sheets para permitir que se descarguen los datos de las pestañas (Turnos y Caja).
             </div>
 
             {/* Import Status Msg */}

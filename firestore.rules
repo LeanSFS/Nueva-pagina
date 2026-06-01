@@ -64,19 +64,20 @@ service cloud.firestore {
     }
 
     function isValidMovement(mov) {
-      return mov.keys().hasAll(['id', 'fecha', 'tipo', 'categoria', 'concepto', 'monto_ars', 'medio', 'estado'])
-          && mov.keys().size() >= 8 && mov.keys().size() <= 11
+      return mov.keys().hasAll(['id', 'fecha', 'tipo', 'categoria', 'concepto', 'monto_ars'])
+          && mov.keys().size() >= 6 && mov.keys().size() <= 14
           && mov.id is string && mov.id.size() <= 128
           && mov.fecha is string && mov.fecha.size() == 10
-          && mov.tipo is string && mov.tipo in ['Ingreso', 'Gasto']
-          && mov.categoria is string && mov.categoria.size() <= 100
-          && mov.concepto is string && mov.concepto.size() <= 200
+          && mov.tipo is string && (mov.tipo == 'Ingreso' || mov.tipo == 'Gasto' || mov.tipo == 'ingreso' || mov.tipo == 'gasto')
+          && mov.categoria is string && mov.categoria.size() <= 200
+          && mov.concepto is string && mov.concepto.size() <= 1000
           && (mov.monto_ars is int || mov.monto_ars is float)
-          && mov.medio is string && mov.medio.size() <= 100
-          && mov.estado is string && mov.estado in ['Pagado', 'Pendiente']
-          && (!('factura' in mov) || mov.factura is string && mov.factura.size() <= 100)
-          && (!('cliente' in mov) || mov.cliente is string && mov.cliente.size() <= 150)
-          && (!('notas' in mov) || mov.notas is string && mov.notas.size() <= 1000);
+          && (!('medio' in mov) || mov.medio is string && mov.medio.size() <= 200)
+          && (!('estado' in mov) || mov.estado is string && mov.estado.size() <= 100)
+          && (!('factura' in mov) || mov.factura is string && mov.factura.size() <= 200)
+          && (!('cliente' in mov) || mov.cliente is string && mov.cliente.size() <= 200)
+          && (!('notas' in mov) || mov.notas is string && mov.notas.size() <= 2000)
+          && (!('notes' in mov) || mov.notes is string && mov.notes.size() <= 2000);
     }
 
     function isValidService(srv) {

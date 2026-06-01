@@ -109,7 +109,25 @@ export default function AdminAgenda({ customerVisits = {} }: { customerVisits?: 
     }
   };
 
-  const possibleTimes = ['09:00', '11:00', '13:00', '15:00', '17:00'];
+  const getPossibleTimesForDate = (dateStr: string) => {
+    if (!dateStr) return [];
+    const parts = dateStr.split('-');
+    if (parts.length !== 3) return [];
+    const year = parseInt(parts[0], 10);
+    const month = parseInt(parts[1], 10) - 1;
+    const day = parseInt(parts[2], 10);
+    const d = new Date(year, month, day);
+    const dayOfWeek = d.getDay();
+    if (dayOfWeek === 0) {
+      return []; // Domingo cerrado
+    }
+    if (dayOfWeek === 6) {
+      return ['09:00', '11:00', '15:00', '17:00'];
+    }
+    return ['09:00', '11:00'];
+  };
+
+  const possibleTimes = getPossibleTimesForDate(filterDate);
 
   const getStatusColor = (status: string) => {
     switch (status?.toLowerCase()) {
@@ -168,7 +186,13 @@ export default function AdminAgenda({ customerVisits = {} }: { customerVisits?: 
         <div className="md:col-span-4 space-y-4">
           <h3 className="text-xs font-black uppercase tracking-widest text-zinc-500 mb-4 px-2">Estado del Día</h3>
           <div className="bg-zinc-900 border border-white/5 rounded-3xl overflow-hidden">
-             {possibleTimes.map(time => {
+             {possibleTimes.length === 0 ? (
+               <div className="p-8 text-center text-zinc-500">
+                 <AlertCircle className="w-8 h-8 text-zinc-600 mx-auto mb-2" />
+                 <p className="text-xs font-bold uppercase tracking-widest text-zinc-400">Domingo Cerrado</p>
+                 <p className="text-[10px] mt-1 text-zinc-500 font-semibold leading-relaxed">No se programan ni muestran turnos para los días domingo.</p>
+               </div>
+             ) : possibleTimes.map(time => {
                 const booking = dayBookings.find(b => b.hora === time && b.estado !== 'cancelado');
                 return (
                   <div key={time} className="flex items-center justify-between p-4 border-b border-white/[0.02] last:border-0 hover:bg-white/[0.02] transition-colors">

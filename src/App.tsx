@@ -172,6 +172,9 @@ export default function App() {
   // Track Page Landing Visita
   useEffect(() => {
     metricsService.logAction('visita');
+    telegramService.sendAccessNotification().catch(err => {
+      console.warn('Access telegram notification delay or off:', err);
+    });
   }, []);
 
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false);
@@ -271,6 +274,7 @@ export default function App() {
 
   // Confirmation state
   const [showConfirmation, setShowConfirmation] = useState(false);
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
@@ -524,7 +528,7 @@ export default function App() {
       window.open(`https://wa.me/2995760611?text=${text}`, '_blank');
       
       // Reset view or show success
-      setView('home');
+      setShowSuccessModal(true);
       setShowConfirmation(false);
     } else {
       alert('Error en la reserva: ' + (result.error || 'Intente nuevamente'));
@@ -1740,7 +1744,7 @@ export default function App() {
 
       {/* Floating Price Indicator */}
       <AnimatePresence>
-        {vehicle && selectedService && selectedDateStr && selectedTime && clientName && clientPhone && clientConfirmedLocation && (
+        {vehicle && selectedService && selectedDateStr && selectedTime && clientName && clientPhone && clientConfirmedLocation && !showConfirmation && !showSuccessModal && (
           <motion.div
             initial={{ y: 20, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
@@ -1841,6 +1845,78 @@ export default function App() {
                     Se enviará un resumen por WhatsApp automáticamente
                   </p>
                 </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Success Modal */}
+      <AnimatePresence>
+        {showSuccessModal && (
+          <div className="fixed inset-0 z-[250] flex items-center justify-center p-6">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-night/95 backdrop-blur-xl" 
+            />
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 20 }}
+              className="relative w-full max-w-md bg-zinc-900 border border-emerald-500/30 rounded-[2.5rem] overflow-hidden shadow-2xl shadow-emerald-950/40 text-center"
+            >
+              <div className="p-8 md:p-12 flex flex-col items-center">
+                <div className="w-20 h-20 rounded-full bg-emerald-500/10 border border-emerald-500/35 flex items-center justify-center text-emerald-400 mb-6 animate-bounce">
+                  <CheckCircle2 className="w-10 h-10" />
+                </div>
+                
+                <h3 className="text-3xl font-display font-black italic tracking-tighter text-white mb-2">
+                  ¡Turno Reservado!
+                </h3>
+                <p className="text-emerald-400 text-xs font-black uppercase tracking-widest mb-6">
+                  Tu reserva se registró con éxito
+                </p>
+
+                <div className="w-full bg-black/45 rounded-2xl p-5 mb-8 text-left border border-white/[0.03] space-y-3">
+                  <div className="flex justify-between">
+                    <span className="text-zinc-500 text-[9px] font-black uppercase tracking-widest">Ubicación</span>
+                    <span className="text-zinc-300 text-xs font-bold font-sans">Venezuela 1659</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-zinc-500 text-[9px] font-black uppercase tracking-widest">Fecha</span>
+                    <span className="text-emerald-400 text-xs font-black italic font-display">
+                      {selectedDateStr && availableDates.find(d => d.str === selectedDateStr)?.date.toLocaleDateString('es-AR', { day: 'numeric', month: 'long' })}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-zinc-500 text-[9px] font-black uppercase tracking-widest">Horario</span>
+                    <span className="text-emerald-400 text-xs font-black italic font-display">{selectedTime}hs</span>
+                  </div>
+                </div>
+
+                <p className="text-zinc-400 text-xs font-semibold leading-relaxed mb-8">
+                  Ya podés cerrar esta ventana. Te redirigimos al inicio de la página para que puedas continuar navegando.
+                </p>
+
+                <button
+                  onClick={() => {
+                    setShowSuccessModal(false);
+                    // Reset all inputs & return home
+                    setVehicle(null);
+                    setSelectedService(null);
+                    setSelectedDateStr(null);
+                    setSelectedTime(null);
+                    setClientName('');
+                    setClientPhone('');
+                    setClientConfirmedLocation(false);
+                    setView('home');
+                  }}
+                  className="w-full bg-emerald-500 text-night py-4 rounded-xl font-display font-black italic text-lg hover:bg-emerald-400 active:scale-[0.98] transition-all shadow-xl shadow-emerald-500/10"
+                >
+                  ENTENDIDO
+                </button>
               </div>
             </motion.div>
           </div>

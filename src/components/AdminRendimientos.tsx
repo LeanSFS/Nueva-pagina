@@ -31,7 +31,7 @@ interface Booking {
 interface Movement {
   id: string;
   fecha: string;
-  tipo: 'ingreso' | 'gasto';
+  tipo: string;
   categoria: string;
   monto_ars: number;
 }
@@ -49,12 +49,12 @@ export default function AdminRendimientos({ bookings, movements }: { bookings: B
 
     movements.forEach(m => {
       const mes = m.fecha.substring(0, 7); // YYYY-MM
-      if (m.tipo === 'ingreso') {
+      if (m.tipo && m.tipo.toLowerCase() === 'ingreso') {
         totalIngresos += m.monto_ars;
         ingresosPorMes[mes] = (ingresosPorMes[mes] || 0) + m.monto_ars;
         totalServiciosCount++;
         serviciosPorMes[mes] = (serviciosPorMes[mes] || 0) + 1;
-      } else {
+      } else if (m.tipo && m.tipo.toLowerCase() === 'gasto') {
         totalGastos += m.monto_ars;
         gastosPorMes[mes] = (gastosPorMes[mes] || 0) + m.monto_ars;
       }
@@ -124,8 +124,8 @@ export default function AdminRendimientos({ bookings, movements }: { bookings: B
            <h3 className="text-xs font-black uppercase tracking-widest text-white mb-8 flex items-center gap-2">
              <BarChart3 className="w-4 h-4 text-emerald-500" /> Evolución Financiera
            </h3>
-           <div className="h-[350px] w-full">
-              <ResponsiveContainer width="100%" height="100%">
+           <div className="h-[350px] w-full min-w-0 relative">
+              <ResponsiveContainer width="100%" height="100%" minWidth={0}>
                  <AreaChart data={stats.historyData}>
                     <defs>
                       <linearGradient id="colorNeto" x1="0" y1="0" x2="0" y2="1">
