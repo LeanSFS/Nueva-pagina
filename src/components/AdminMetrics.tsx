@@ -28,7 +28,8 @@ import {
   Database,
   CloudLightning,
   LogOut,
-  Sparkles
+  Sparkles,
+  AlertTriangle
 } from 'lucide-react';
 import { signInWithPopup, signInWithRedirect, getRedirectResult, GoogleAuthProvider, signOut, User } from 'firebase/auth';
 import { auth } from '../services/firebase.ts';
@@ -42,6 +43,23 @@ export default function AdminMetrics() {
   const [logPage, setLogPage] = useState(0);
   const itemsPerPage = 8;
   const [authError, setAuthError] = useState<string | null>(null);
+  const [isIframe, setIsIframe] = useState(false);
+  const [preferredMethod, setPreferredMethod] = useState<'popup' | 'redirect'>('popup');
+
+  // Detect iframe environments
+  useEffect(() => {
+    try {
+      setIsIframe(window.self !== window.top);
+    } catch (e) {
+      setIsIframe(true);
+    }
+
+    // Set mobile default to redirect, desktop to popup, but allow switching
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    if (isMobile) {
+      setPreferredMethod('redirect');
+    }
+  }, []);
 
   // Monitor auth state of the admin
   useEffect(() => {
@@ -58,7 +76,7 @@ export default function AdminMetrics() {
       })
       .catch((err) => {
         console.error("Redirect sign-in error:", err);
-        setAuthError("No se pudo completar el inicio de sesión con Google. ¿Estás en una pestaña normal o externa?");
+        setAuthError(err.code || err.message || "No se pudo completar el redireccionamiento para Google.");
       });
 
     return () => unsubscribe();
@@ -93,17 +111,14 @@ export default function AdminMetrics() {
       // Force prompt so users can pick accounts easily
       provider.setCustomParameters({ prompt: 'select_account' });
       
-      const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-      
-      if (isMobile) {
-        // Redirection works best on mobile browsers to prevent popup block issues
+      if (preferredMethod === 'redirect') {
         await signInWithRedirect(auth, provider);
       } else {
         await signInWithPopup(auth, provider);
       }
     } catch (err: any) {
       console.error("Error signing in with Google:", err);
-      setAuthError(err.message || "Error al conectar con Google");
+      setAuthError(err.code || err.message || "Error al conectar con Google");
     } finally {
       setLoadingCloud(false);
     }
@@ -384,7 +399,7 @@ export default function AdminMetrics() {
         </div>
 
         <div className="flex gap-2 w-full md:w-auto shrink-0 z-10">
-          {currentUser ? (
+          {currentUser && (
             <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full">
               {!isVerifiedAdmin && (
                 <span className="text-[9px] font-black text-red-400 uppercase tracking-widest self-center text-center">
@@ -398,23 +413,110 @@ export default function AdminMetrics() {
                 <LogOut className="w-4 h-4" /> Desconectarse
               </button>
             </div>
-          ) : (
-            <div className="flex flex-col md:flex-row gap-2 items-center w-full md:w-auto">
-              {authError && (
-                <span className="text-[10px] text-red-500 font-semibold max-w-xs text-center border border-red-500/10 bg-red-500/5 px-3 py-1.5 rounded-lg">
-                  {authError}
-                </span>
-              )}
-              <button
-                onClick={loginWithGoogle}
-                className="w-full md:w-auto flex items-center justify-center gap-2 bg-emerald-500 hover:bg-emerald-400 text-night shadow-lg shadow-emerald-500/10 px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest active:scale-95 transition-all"
-              >
-                <Sparkles className="w-4 h-4 animate-bounce" /> Conectar con Google
-              </button>
-            </div>
           )}
         </div>
       </div>
+
+      {/* Auth Assistant for Offline / Non-authenticated admins */}
+      {!currentUser && (
+        <div className="bg-zinc-900/40 border border-white/5 rounded-3xl p-6 space-y-4">
+          <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4">
+            <div className="space-y-1">
+              <h4 className="font-display font-black text-xs uppercase tracking-wider text-zinc-300">
+                Opciones de Acceso de Administrador
+              </h4>
+              <p className="text-[11px] text-zinc-500 font-medium max-w-xl leading-relaxed">
+                Seleccioná el método de autenticación preferido para conectar con tu panel. Si estás en Safari móvil u otro entorno de seguridad estricta, te recomendamos probar ambos métodos o abrir la app de forma independiente.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3 w-full xl:w-auto">
+              <div className="flex bg-zinc-950 border border-white/5 p-1 rounded-xl text-[10px] uppercase font-black tracking-widest">
+                <button
+                  type="button"
+                  onClick={() => setPreferredMethod('popup')}
+                  className={`px-3 py-1.5 rounded-lg transition-all ${preferredMethod === 'popup' ? 'bg-emerald-500 text-night' : 'text-zinc-500 hover:text-zinc-200'}`}
+                >
+                  Popup
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPreferredMethod('redirect')}
+                  className={`px-3 py-1.5 rounded-lg transition-all ${preferredMethod === 'redirect' ? 'bg-emerald-500 text-night' : 'text-zinc-500 hover:text-zinc-200'}`}
+                >
+                  Redirect
+                </button>
+              </div>
+
+              <button
+                onClick={loginWithGoogle}
+                disabled={loadingCloud}
+                className="flex-1 xl:flex-none flex items-center justify-center gap-2 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-night shadow-lg shadow-emerald-500/10 px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest active:scale-95 transition-all"
+              >
+                <Sparkles className="w-3.5 h-3.5 animate-bounce" /> Conectar con Google
+              </button>
+            </div>
+          </div>
+
+          {/* Iframe environmental caution warning */}
+          {isIframe && (
+            <div className="bg-amber-500/5 border border-amber-500/10 rounded-2xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2 text-amber-400 font-black uppercase tracking-wider text-[10px]">
+                  <AlertTriangle className="w-4 h-4" /> Entorno de Visor Detectado (Iframe)
+                </div>
+                <p className="text-zinc-400 leading-relaxed font-semibold text-[11px]">
+                  Estás visualizando el sistema dentro de un frame o simulador de AI Studio. Los navegadores móviles bloquean el inicio de sesión de Google por seguridad dentro de iframes.
+                </p>
+              </div>
+              <a
+                href={window.location.href}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex shrink-0 items-center justify-center gap-2 bg-amber-500 hover:bg-amber-400 text-night px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all text-center"
+              >
+                Abrir en Pestaña Independiente ↗
+              </a>
+            </div>
+          )}
+
+          {/* Error Diagnostics Assistant */}
+          {authError && (
+            <div className="bg-red-500/5 border border-red-500/10 p-5 rounded-2xl text-left space-y-3 text-xs leading-relaxed">
+              <div className="flex items-center gap-2 font-black uppercase tracking-widest text-[10px] text-red-400">
+                <AlertTriangle className="w-4 h-4" /> Asistente de Diagnóstico de Error
+              </div>
+              <p className="font-semibold text-zinc-300">
+                Error de Firebase: <code className="bg-zinc-950 px-2 py-1 rounded text-red-400 text-xs font-mono">{authError}</code>
+              </p>
+              
+              <div className="text-zinc-400 space-y-3 pt-3 border-t border-white/[0.04]">
+                <div>
+                  <p className="font-black text-[10px] text-zinc-300 uppercase tracking-wider mb-1">🔗 Dominio Actual del Navegador:</p>
+                  <p className="font-semibold text-white bg-zinc-950 p-2 rounded border border-white/5 inline-block font-mono">
+                    {window.location.hostname}
+                  </p>
+                </div>
+
+                <div className="space-y-2 mt-2">
+                  <p className="font-bold text-zinc-300">💡 ¿Cómo solucionar este error?</p>
+                  {authError.includes('auth/unauthorized-domain') || authError.includes('unauthorized') ? (
+                    <div className="space-y-1.5 pl-3 border-l-2 border-red-500/30">
+                      <p>• <strong>Paso 1:</strong> Tu error es un <strong className="text-white">Dominio no autorizado</strong>.</p>
+                      <p>• <strong>Paso 2:</strong> Asegurate de que el dominio <strong className="text-emerald-400 font-mono">{window.location.hostname}</strong> esté ingresado exactamente en tu consola de Firebase &gt; Authentication &gt; Configuración &gt; Dominios Autorizados.</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-1.5 pl-3 border-l-2 border-amber-500/30">
+                      <p>• Si estás en tu celular y al tocar el botón abre una pestaña que se cierra al instante, cambiá el método a <strong className="text-white">"Redirect"</strong> arriba.</p>
+                      <p>• Si estás dentro de AI Studio, tocá el botón superior de <strong className="text-amber-400">"Abrir en Pestaña Independiente"</strong> de arriba para salir del visor iframe y loguearte de manera normal.</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-white/[0.05] pb-6">
         <div>
