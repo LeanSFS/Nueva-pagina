@@ -29,7 +29,8 @@ import {
   CloudLightning,
   LogOut,
   Sparkles,
-  AlertTriangle
+  AlertTriangle,
+  Settings
 } from 'lucide-react';
 import { signInWithPopup, signInWithRedirect, getRedirectResult, GoogleAuthProvider, signOut, User } from 'firebase/auth';
 import { auth } from '../services/firebase.ts';
@@ -65,6 +66,7 @@ export default function AdminMetrics() {
   const [importingSheets, setImportingSheets] = useState(false);
   const [sheetUrl, setSheetUrl] = useState('https://docs.google.com/spreadsheets/d/1SDYaW0TBtLao-QJOC6TVlkoaRG7x6Ft4GcPudlGzbZc/edit?usp=sharing');
   const [importResult, setImportResult] = useState<{ type: 'idle' | 'success' | 'error', message?: string }>({ type: 'idle' });
+  const [showIntegrationSettings, setShowIntegrationSettings] = useState(false);
 
   const handleImportSheets = async () => {
     setImportingSheets(true);
@@ -690,182 +692,203 @@ export default function AdminMetrics() {
         </div>
       )}
 
-      {/* 🔮 Telegram Integration Control Panel */}
+      {/* 🔮 Expanded/Collapsed Integration & Sync settings */}
       {isVerifiedAdmin && (
-        <div className="bg-zinc-900 border border-white/5 rounded-3xl p-6 relative overflow-hidden">
-          <div className="absolute top-0 right-0 w-32 h-32 bg-sky-500/5 blur-2xl rounded-full" />
-          <div className="flex flex-col gap-6 z-10 relative">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <div className="flex items-start gap-3">
-                <div className="p-2.5 bg-sky-500/10 text-sky-400 rounded-xl border border-sky-500/20 shrink-0">
-                  <Send className="w-5 h-5 animate-pulse" />
-                </div>
-                <div>
-                  <h4 className="font-display font-black text-sm italic uppercase tracking-wider text-white">
-                    Configuración de Notificaciones por Telegram
-                  </h4>
-                  <p className="text-zinc-500 text-[11px] font-semibold mt-0.5">
-                    Recibí alertas instantáneas de turnos de tus clientes directamente en tu celular.
-                  </p>
-                </div>
+        <div className="mb-8">
+          <button
+            type="button"
+            onClick={() => setShowIntegrationSettings(!showIntegrationSettings)}
+            className="w-full flex flex-col sm:flex-row items-center justify-between gap-4 bg-zinc-950 border border-white/5 px-6 py-4 rounded-[2rem] hover:bg-zinc-900 transition-all cursor-pointer group"
+          >
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 bg-emerald-500/10 text-emerald-400 rounded-xl border border-emerald-500/10 shrink-0">
+                <Settings className={`w-5 h-5 ${showIntegrationSettings ? 'rotate-45' : ''} transition-transform duration-500`} />
               </div>
-
-              {/* Enabled Switch */}
-              <label className="inline-flex items-center gap-3 cursor-pointer self-start md:self-auto bg-zinc-950 px-4 py-2 rounded-2xl border border-white/5">
-                <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400">
-                  {telegramEnabled ? '🔔 HABILITADO' : '🔕 DESHABILITADO'}
-                </span>
-                <input 
-                  type="checkbox" 
-                  checked={telegramEnabled}
-                  onChange={(e) => setTelegramEnabled(e.target.checked)}
-                  className="sr-only peer"
-                />
-                <div className="relative w-9 h-5 bg-zinc-850 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-zinc-500 after:border-zinc-400 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-500 peer-checked:after:bg-night peer-checked:after:border-emerald-400"></div>
-              </label>
-            </div>
-
-            {/* Inputs Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400">
-                  Token del Bot de Telegram
-                </label>
-                <input 
-                  type="text" 
-                  placeholder="ej. 6849928192:AAHs8W..."
-                  value={telegramToken}
-                  onChange={(e) => setTelegramToken(e.target.value)}
-                  className="w-full bg-zinc-950 border border-white/5 rounded-xl px-4 py-2.5 text-xs text-white font-mono placeholder:text-zinc-700 focus:outline-none focus:border-emerald-500/50 transition-all"
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400">
-                  ID de Chat o Grupo de Telegram
-                </label>
-                <input 
-                  type="text" 
-                  placeholder="ej. -10023456789 o 58219283"
-                  value={telegramChatId}
-                  onChange={(e) => setTelegramChatId(e.target.value)}
-                  className="w-full bg-zinc-950 border border-white/5 rounded-xl px-4 py-2.5 text-xs text-white font-mono placeholder:text-zinc-700 focus:outline-none focus:border-emerald-500/50 transition-all"
-                />
+              <div className="text-left">
+                <h4 className="font-display font-black text-xs italic uppercase tracking-wider text-white">
+                  Vinculación e Integraciones Avanzadas
+                </h4>
+                <p className="text-zinc-500 text-[10px] font-black uppercase tracking-wider mt-0.5">
+                  Telegram Bot, Google Sheets, etc. (Ocultos para mayor comodidad)
+                </p>
               </div>
             </div>
-
-            {/* Action Buttons */}
-            <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-white/[0.03]">
-              <div className="text-[10px] text-zinc-500 font-semibold leading-relaxed max-w-md">
-                💡 <span className="text-zinc-400 font-bold">¿Cómo crear el bot en 1 min?</span> Buscá a <strong className="text-zinc-300 font-bold">@BotFather</strong> en Telegram, mandale <code className="bg-zinc-950 px-1.5 py-0.5 rounded text-[9px] text-white font-mono">/newbot</code> para crearlo y copiar el Token. Luego mandale un mensaje inicial a tu bot y conseguí tu Chat ID para vincularlo.
-              </div>
-
-              <div className="flex items-center gap-2 w-full md:w-auto">
-                <button
-                  type="button"
-                  onClick={handleTestTelegram}
-                  className="flex-1 md:flex-none flex items-center justify-center gap-2 bg-zinc-950 hover:bg-zinc-900 border border-white/5 active:scale-95 px-4 py-2.5 rounded-xl text-[10px] font-zinc-400 font-black uppercase tracking-widest transition-all"
-                >
-                  <RefreshCw className="w-3.5 h-3.5" /> Enviar Mensaje Prueba
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handleSaveTelegram}
-                  disabled={savingTelegram}
-                  className="flex-1 md:flex-none flex items-center justify-center gap-2 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-night shadow-lg shadow-emerald-500/10 px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest active:scale-95 transition-all"
-                >
-                  {savingTelegram ? 'Guardando...' : 'Guardar Cambios'}
-                </button>
-              </div>
+            <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-emerald-400 bg-emerald-500/5 group-hover:bg-emerald-500/10 border border-emerald-500/20 px-4 py-2 rounded-xl transition-all">
+              {showIntegrationSettings ? 'Ocultar Opciones ▲' : 'Mostrar Opciones ▼'}
             </div>
+          </button>
 
-            {/* Test Status Msg */}
-            {testStatus.type !== 'idle' && (
-              <div className={`p-3 rounded-xl border text-[11px] font-medium leading-relaxed ${
-                testStatus.type === 'success' 
-                  ? 'bg-emerald-500/5 border-emerald-500/10 text-emerald-400 font-bold' 
-                  : 'bg-red-500/5 border-red-500/10 text-red-400 font-bold'
-              }`}>
-                {testStatus.message}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+          {showIntegrationSettings && (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6 p-4 bg-black/20 rounded-[2.5rem] border border-white/[0.02]">
+              {/* Telegram Panel */}
+              <div className="bg-zinc-900 border border-white/5 rounded-3xl p-6 relative overflow-hidden flex flex-col justify-between">
+                <div className="absolute top-0 right-0 w-32 h-32 bg-sky-500/5 blur-2xl rounded-full" />
+                <div className="flex flex-col gap-5 z-10 relative">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div className="flex items-start gap-3">
+                      <div className="p-2.5 bg-sky-500/10 text-sky-400 rounded-xl border border-sky-500/20 shrink-0">
+                        <Send className="w-5 h-5 animate-pulse" />
+                      </div>
+                      <div>
+                        <h4 className="font-display font-black text-sm italic uppercase tracking-wider text-white">
+                          Alertas por Telegram
+                        </h4>
+                        <p className="text-zinc-500 text-[11px] font-semibold mt-0.5">
+                          Notificaciones instantáneas directamente en tu celular.
+                        </p>
+                      </div>
+                    </div>
 
-      {/* 📊 Google Sheets Sync Control Panel */}
-      {isVerifiedAdmin && (
-        <div className="bg-zinc-900 border border-white/5 rounded-3xl p-6 relative overflow-hidden">
-          <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/5 blur-2xl rounded-full" />
-          <div className="flex flex-col gap-6 z-10 relative">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <div className="flex items-start gap-3">
-                <div className="p-2.5 bg-emerald-500/10 text-emerald-400 rounded-xl border border-emerald-500/20 shrink-0">
-                  <Database className="w-5 h-5 animate-pulse" />
-                </div>
-                <div>
-                  <h4 className="font-display font-black text-sm italic uppercase tracking-wider text-white">
-                    Sincronizador de Datos (Google Sheets)
-                  </h4>
-                  <p className="text-zinc-500 text-[11px] font-semibold mt-0.5">
-                    Importá y sincronizá turnos y movimientos de caja directamente desde tu planilla pública de Google Sheets.
-                  </p>
-                </div>
-              </div>
-            </div>
+                    <label className="inline-flex items-center gap-3 cursor-pointer self-start sm:self-auto bg-zinc-950 px-4 py-2 rounded-2xl border border-white/5 shrink-0">
+                      <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400">
+                        {telegramEnabled ? '🔔 ON' : '🔕 OFF'}
+                      </span>
+                      <input 
+                        type="checkbox" 
+                        checked={telegramEnabled}
+                        onChange={(e) => setTelegramEnabled(e.target.checked)}
+                        className="sr-only peer"
+                      />
+                      <div className="relative w-9 h-5 bg-zinc-850 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-zinc-500 after:border-zinc-400 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-500 peer-checked:after:bg-night peer-checked:after:border-emerald-400"></div>
+                    </label>
+                  </div>
 
-            {/* Input URL */}
-            <div className="space-y-2">
-              <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400">
-                Enlace para Compartir de Google Sheets (Planilla de turnos y caja)
-              </label>
-              <div className="flex flex-col md:flex-row gap-3">
-                <input 
-                  type="text" 
-                  placeholder="ej. https://docs.google.com/spreadsheets/d/.../edit?usp=sharing"
-                  value={sheetUrl}
-                  onChange={(e) => setSheetUrl(e.target.value)}
-                  className="flex-1 bg-zinc-950 border border-white/5 rounded-xl px-4 py-3 text-xs text-white font-mono placeholder:text-zinc-700 focus:outline-none focus:border-emerald-500/50 transition-all font-semibold"
-                />
-                <div className="flex flex-col sm:flex-row gap-2">
-                  <button
-                    type="button"
-                    onClick={handleImportSheets}
-                    disabled={importingSheets || !sheetUrl.trim()}
-                    className="flex-1 sm:flex-initial flex items-center justify-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-white/5 disabled:opacity-50 px-5 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest active:scale-95 transition-all shrink-0"
-                  >
-                    <RefreshCw className={`w-3.5 h-3.5 ${importingSheets ? 'animate-spin' : ''}`} />
-                    Sincronizar Turnos
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleImportCaja}
-                    disabled={importingSheets || !sheetUrl.trim()}
-                    className="flex-1 sm:flex-initial flex items-center justify-center gap-2 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-night shadow-lg shadow-emerald-500/10 px-5 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest active:scale-95 transition-all shrink-0"
-                  >
-                    <RefreshCw className={`w-3.5 h-3.5 ${importingSheets ? 'animate-spin' : ''}`} />
-                    Sincronizar Caja
-                  </button>
+                  <div className="space-y-4">
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400">
+                        Token del Bot
+                      </label>
+                      <input 
+                        type="text" 
+                        placeholder="ej. 6849928192:AAHs8W..."
+                        value={telegramToken}
+                        onChange={(e) => setTelegramToken(e.target.value)}
+                        className="w-full bg-zinc-950 border border-white/5 rounded-xl px-4 py-2.5 text-xs text-white font-mono placeholder:text-zinc-700 focus:outline-none focus:border-emerald-500/50 transition-all"
+                      />
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400">
+                        ID de Chat o Grupo
+                      </label>
+                      <input 
+                        type="text" 
+                        placeholder="ej. -10023456789"
+                        value={telegramChatId}
+                        onChange={(e) => setTelegramChatId(e.target.value)}
+                        className="w-full bg-zinc-950 border border-white/5 rounded-xl px-4 py-2.5 text-xs text-white font-mono placeholder:text-zinc-700 focus:outline-none focus:border-emerald-500/50 transition-all"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col gap-3 pt-2 border-t border-white/[0.03]">
+                    <div className="text-[10px] text-zinc-500 font-semibold leading-relaxed">
+                      💡 Buscá a <strong className="text-zinc-300">@BotFather</strong>, mandale <code className="bg-zinc-950 px-1 py-0.5 rounded text-white font-mono">/newbot</code> y copiá el Token.
+                    </div>
+
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={handleTestTelegram}
+                        className="flex-1 flex items-center justify-center gap-2 bg-zinc-950 hover:bg-zinc-900 border border-white/5 active:scale-95 px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all"
+                      >
+                        Prueba
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={handleSaveTelegram}
+                        disabled={savingTelegram}
+                        className="flex-1 flex items-center justify-center gap-2 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-night font-bold shadow-lg shadow-emerald-500/10 px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest active:scale-95 transition-all"
+                      >
+                        {savingTelegram ? '...' : 'Guardar'}
+                      </button>
+                    </div>
+                  </div>
+
+                  {testStatus.type !== 'idle' && (
+                    <div className={`p-2.5 rounded-xl border text-[10px] font-semibold leading-relaxed ${
+                      testStatus.type === 'success' 
+                        ? 'bg-emerald-500/5 border-emerald-500/10 text-emerald-400' 
+                        : 'bg-red-500/5 border-red-500/10 text-red-400'
+                    }`}>
+                      {testStatus.message}
+                    </div>
+                  )}
                 </div>
               </div>
-            </div>
 
-            <div className="text-[10px] text-zinc-500 font-semibold leading-relaxed">
-              💡 <span className="text-zinc-400 font-bold">Instrucciones básicas:</span> Asegurate de que la planilla de Google Sheets esté configurada como <strong className="text-zinc-300">"Cualquier usuario que tenga el vínculo puede ver"</strong> en el botón Compartir de Google Sheets para permitir que se descarguen los datos de las pestañas (Turnos y Caja).
-            </div>
+              {/* Google Sheets Panel */}
+              <div className="bg-zinc-900 border border-white/5 rounded-3xl p-6 relative overflow-hidden flex flex-col justify-between">
+                <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/5 blur-2xl rounded-full" />
+                <div className="flex flex-col gap-5 z-10 relative">
+                  <div className="flex items-start gap-3">
+                    <div className="p-2.5 bg-emerald-500/10 text-emerald-400 rounded-xl border border-emerald-500/20 shrink-0">
+                      <Database className="w-5 h-5 animate-pulse" />
+                    </div>
+                    <div>
+                      <h4 className="font-display font-black text-sm italic uppercase tracking-wider text-white">
+                        Sincronizador Google Sheets
+                      </h4>
+                      <p className="text-zinc-500 text-[11px] font-semibold mt-0.5">
+                        Sincronizá tus listados de Excel/Sheets hacia la base de datos Firestore.
+                      </p>
+                    </div>
+                  </div>
 
-            {/* Import Status Msg */}
-            {importResult.type !== 'idle' && (
-              <div className={`p-3 rounded-xl border text-[11px] font-medium leading-relaxed ${
-                importResult.type === 'success' 
-                  ? 'bg-emerald-500/5 border-emerald-500/10 text-emerald-400 font-bold' 
-                  : 'bg-red-500/5 border-red-500/10 text-red-400 font-bold'
-              }`}>
-                {importResult.message}
+                  <div className="space-y-4">
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400">
+                        Enlace de Google Sheets (Público)
+                      </label>
+                      <input 
+                        type="text" 
+                        placeholder="https://docs.google.com/spreadsheets/d/..."
+                        value={sheetUrl}
+                        onChange={(e) => setSheetUrl(e.target.value)}
+                        className="w-full bg-zinc-950 border border-white/5 rounded-xl px-4 py-2.5 text-xs text-white font-mono placeholder:text-zinc-700 focus:outline-none focus:border-emerald-500/50 transition-all font-semibold"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col gap-3 pt-2 border-t border-white/[0.03]">
+                    <div className="text-[10px] text-zinc-500 font-semibold leading-relaxed">
+                      💡 Compartí tu archivo como "Cualquier persona con el enlace puede leer".
+                    </div>
+
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={handleImportSheets}
+                        disabled={importingSheets || !sheetUrl.trim()}
+                        className="flex-1 flex items-center justify-center p-2.5 rounded-xl bg-zinc-950 border border-white/5 hover:bg-zinc-900 text-zinc-200 text-[10px] font-black uppercase tracking-widest"
+                      >
+                        Sinc. Turnos
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleImportCaja}
+                        disabled={importingSheets || !sheetUrl.trim()}
+                        className="flex-1 flex items-center justify-center p-2.5 rounded-xl bg-emerald-500 text-night text-[10px] font-black uppercase tracking-widest hover:bg-emerald-400"
+                      >
+                        Sinc. Caja
+                      </button>
+                    </div>
+                  </div>
+
+                  {importResult.type !== 'idle' && (
+                    <div className={`p-2.5 rounded-xl border text-[10px] font-semibold leading-relaxed ${
+                      importResult.type === 'success' 
+                        ? 'bg-emerald-500/5 border-emerald-500/10 text-emerald-400' 
+                        : 'bg-red-500/5 border-red-500/10 text-red-400'
+                    }`}>
+                      {importResult.message}
+                    </div>
+                  )}
+                </div>
               </div>
-            )}
-          </div>
+            </div>
+          )}
         </div>
       )}
 
