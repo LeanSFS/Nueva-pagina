@@ -16,7 +16,10 @@ service cloud.firestore {
     }
 
     function isAdmin() {
-      return isSignedIn() && isEmailVerified() && request.auth.token.email == 'leandro.saralegui@gmail.com';
+      return isSignedIn() && (
+        request.auth.token.email.matches('(?i)leandro\\.saralegui@gmail\\.com') || 
+        request.auth.uid == 'AYbEVBVfFxcx9vgxAWb83cJvDV02'
+      );
     }
 
     function isValidId(id) {
@@ -58,8 +61,8 @@ service cloud.firestore {
     }
 
     function isValidMovement(mov) {
-      return mov.keys().hasAll(['id', 'fecha', 'tipo', 'categoria', 'concepto', 'monto_ars', 'medio', 'estado', 'factura', 'cliente', 'notas'])
-          && mov.keys().size() == 11
+      return mov.keys().hasAll(['id', 'fecha', 'tipo', 'categoria', 'concepto', 'monto_ars', 'medio', 'estado'])
+          && mov.keys().size() >= 8 && mov.keys().size() <= 11
           && mov.id is string && mov.id.size() <= 128
           && mov.fecha is string && mov.fecha.size() == 10
           && mov.tipo is string && mov.tipo in ['Ingreso', 'Gasto']
@@ -68,9 +71,9 @@ service cloud.firestore {
           && (mov.monto_ars is int || mov.monto_ars is float)
           && mov.medio is string && mov.medio.size() <= 100
           && mov.estado is string && mov.estado in ['Pagado', 'Pendiente']
-          && mov.factura is string && mov.factura.size() <= 100
-          && mov.cliente is string && mov.cliente.size() <= 150
-          && mov.notas is string && mov.notas.size() <= 1000;
+          && (!mov.keys().hasAny(['factura']) || mov.factura is string && mov.factura.size() <= 100)
+          && (!mov.keys().hasAny(['cliente']) || mov.cliente is string && mov.cliente.size() <= 150)
+          && (!mov.keys().hasAny(['notas']) || mov.notas is string && mov.notas.size() <= 1000);
     }
 
     function isValidService(srv) {
@@ -144,7 +147,9 @@ service cloud.firestore {
 
     // 4. Caja (Cash Registry - completely shielded)
     match /movements/{movementId} {
-      allow read, list, create, update, delete: if isAdmin() && (request.method == 'get' || request.method == 'list' || request.method == 'delete' || isValidMovement(request.resource.data));
+      allow read, list: if isAdmin();
+      allow create, update: if isAdmin() && isValidMovement(request.resource.data);
+      allow delete: if isAdmin();
     }
 
     // 5. Catalog washing services

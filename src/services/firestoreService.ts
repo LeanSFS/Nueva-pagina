@@ -59,6 +59,7 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
     path
   };
   console.error('Firestore Error Detailed: ', JSON.stringify(errInfo));
+  throw error instanceof Error ? error : new Error(String(error));
 }
 
 // --- Timeout Promise Wrapper ---
@@ -337,8 +338,33 @@ export const firestoreService = {
       snap.forEach(d => {
         list.push(d.data() as Movement);
       });
-      setLocalCache('lys_cache_movements', list);
-      return list;
+
+      // If remote list is empty, but cache has items, salvage them into unsynced
+      if (list.length === 0) {
+        const locals = getLocalCache<Movement[]>('lys_cache_movements', []);
+        if (locals.length > 0) {
+          const unsynced = getLocalCache<Movement[]>('lys_unsynced_movements', []);
+          const merged = [...unsynced];
+          locals.forEach(l => {
+            if (!merged.some(m => m.id === l.id)) {
+              merged.push(l);
+            }
+          });
+          setLocalCache('lys_unsynced_movements', merged);
+        }
+      }
+
+      // Merge remote list with local unsynced so they don't disappear from the UI
+      const unsynced = getLocalCache<Movement[]>('lys_unsynced_movements', []);
+      const mergedList = [...list];
+      unsynced.forEach(u => {
+        if (!mergedList.some(m => m.id === u.id)) {
+          mergedList.push(u);
+        }
+      });
+
+      setLocalCache('lys_cache_movements', mergedList);
+      return mergedList;
     } catch (e) {
       console.warn("Firestore getMovements error/timeout, using local cache:", e);
       return getLocalCache<Movement[]>('lys_cache_movements', []);
@@ -354,8 +380,18 @@ export const firestoreService = {
     filtered.push(movement);
     setLocalCache('lys_cache_movements', filtered);
 
+    // Save to unsynced queue
+    const unsynced = getLocalCache<Movement[]>('lys_unsynced_movements', []);
+    const filteredUnsynced = unsynced.filter(m => m.id !== movement.id);
+    filteredUnsynced.push(movement);
+    setLocalCache('lys_unsynced_movements', filteredUnsynced);
+
     try {
       await withTimeout(setDoc(doc(db, colPath, movement.id), movement), 2500);
+      
+      // Successfully saved to Firestore! Remove from unsynced queue
+      const updatedUnsynced = getLocalCache<Movement[]>('lys_unsynced_movements', []).filter(m => m.id !== movement.id);
+      setLocalCache('lys_unsynced_movements', updatedUnsynced);
     } catch (e) {
       handleFirestoreError(e, OperationType.WRITE, `${colPath}/${movement.id}`);
     }
@@ -369,11 +405,37 @@ export const firestoreService = {
     const filtered = localMovements.filter(m => m.id !== id);
     setLocalCache('lys_cache_movements', filtered);
 
+    // Remove from unsynced queue
+    const unsynced = getLocalCache<Movement[]>('lys_unsynced_movements', []);
+    const filteredUnsynced = unsynced.filter(m => m.id !== id);
+    setLocalCache('lys_unsynced_movements', filteredUnsynced);
+
     try {
       await withTimeout(deleteDoc(doc(db, colPath, id)), 2500);
     } catch (e) {
       handleFirestoreError(e, OperationType.DELETE, `${colPath}/${id}`);
     }
+  },
+
+  async syncUnsyncedMovements(): Promise<number> {
+    const unsynced = getLocalCache<Movement[]>('lys_unsynced_movements', []);
+    if (unsynced.length === 0) return 0;
+    
+    let count = 0;
+    const colPath = 'movements';
+    
+    for (const m of unsynced) {
+      try {
+        await withTimeout(setDoc(doc(db, colPath, m.id), m), 2500);
+        count++;
+        // Remove from queue
+        const current = getLocalCache<Movement[]>('lys_unsynced_movements', []);
+        setLocalCache('lys_unsynced_movements', current.filter(x => x.id !== m.id));
+      } catch (err) {
+        console.warn(`Could not sync movement ${m.id} to Firestore:`, err);
+      }
+    }
+    return count;
   },
 
   // ------------------ 4. SERVICES CATALOG ------------------

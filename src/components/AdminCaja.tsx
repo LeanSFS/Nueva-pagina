@@ -21,17 +21,41 @@ import {
   BarChart3 as BarChartIcon,
   Activity,
   Sparkles,
-  Loader2
+  Loader2,
+  ShieldCheck,
+  Lock,
+  AlertTriangle
 } from 'lucide-react';
 import AdminAgenda from './AdminAgenda.tsx';
 import AdminRendimientos from './AdminRendimientos.tsx';
 import AdminMetrics from './AdminMetrics.tsx';
 import { firestoreService, Movement, Booking } from '../services/firestoreService.ts';
+import { auth } from '../services/firebase.ts';
+import { signInWithPopup, signInWithRedirect, getRedirectResult, GoogleAuthProvider, signOut, User as FirebaseUser } from 'firebase/auth';
 
 const CATS_INGRESO = ['Lavado', 'Extra', 'Propina', 'Otros'];
 const CATS_GASTO = ['Insumos', 'Herramientas', 'Mantenimiento', 'Publicidad', 'Impuestos', 'Otros'];
 
 export default function AdminCaja({ onBack }: { onBack: () => void }) {
+  const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
+  const [authChecking, setAuthChecking] = useState(true);
+  const [preferredMethod, setPreferredMethod] = useState<'popup' | 'redirect'>('popup');
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [isIframe, setIsIframe] = useState(false);
+  const [submittingGoogleAuth, setSubmittingGoogleAuth] = useState(false);
+
+  const [unsyncedCount, setUnsyncedCount] = useState(0);
+  const [syncingNow, setSyncingNow] = useState(false);
+
+  const updateUnsyncedCount = () => {
+    try {
+      const unsynced = JSON.parse(localStorage.getItem('lys_unsynced_movements') || '[]');
+      setUnsyncedCount(unsynced.length);
+    } catch (e) {
+      setUnsyncedCount(0);
+    }
+  };
+
   const [activeTab, setActiveTab] = useState<'agenda' | 'caja' | 'stats' | 'metrics' | 'catalog' | 'gallery'>('agenda');
   const [allMovements, setAllMovements] = useState<Movement[]>([]);
   const [bookings, setBookings] = useState<Booking[]>([]);
@@ -117,6 +141,7 @@ export default function AdminCaja({ onBack }: { onBack: () => void }) {
       console.error('Error loading movements:', err);
       setError('Error al acceder a Caja en Firestore. Verifique sus permisos de administrador.');
     } finally {
+      updateUnsyncedCount();
       setLoading(false);
     }
   };
@@ -129,11 +154,6 @@ export default function AdminCaja({ onBack }: { onBack: () => void }) {
       console.error('Error fetching bookings:', e);
     }
   };
-
-  useEffect(() => {
-    fetchRows();
-    fetchBookings();
-  }, []);
 
   const handleAdd = async () => {
     if (!newMovement.concepto || !newMovement.monto) {
@@ -310,10 +330,96 @@ export default function AdminCaja({ onBack }: { onBack: () => void }) {
   };
 
   useEffect(() => {
-    fetchRows();
-    fetchBookings();
-    loadCatalogAndGallery();
+    updateUnsyncedCount();
+
+    const unsubscribe = auth.onAuthStateChanged((user) => {
+      setCurrentUser(user);
+      setAuthChecking(false);
+      if (user && user.email === 'leandro.saralegui@gmail.com') {
+        // Auto-synchronize any offline/local movements upon successful login
+        firestoreService.syncUnsyncedMovements()
+          .then((syncedCount) => {
+            if (syncedCount > 0) {
+              console.log(`Auto-sincronizados ${syncedCount} movimientos locales.`);
+            }
+            updateUnsyncedCount();
+            fetchRows();
+            fetchBookings();
+            loadCatalogAndGallery();
+          })
+          .catch((err) => {
+            console.error("Auto-sincronización fallida:", err);
+            updateUnsyncedCount();
+            fetchRows();
+            fetchBookings();
+            loadCatalogAndGallery();
+          });
+      }
+    });
+
+    getRedirectResult(auth)
+      .then((result) => {
+        if (result?.user) {
+          setCurrentUser(result.user);
+        }
+      })
+      .catch((err) => {
+        console.error("Redirect sign-in error in AdminCaja:", err);
+        setAuthError(err.code || err.message || "No se pudo completar el redireccionamiento para Google.");
+      });
+
+    return () => unsubscribe();
   }, []);
+
+  const loginWithGoogle = async () => {
+    setSubmittingGoogleAuth(true);
+    setAuthError(null);
+    try {
+      const provider = new GoogleAuthProvider();
+      provider.setCustomParameters({ prompt: 'select_account' });
+      if (preferredMethod === 'redirect') {
+        await signInWithRedirect(auth, provider);
+      } else {
+        await signInWithPopup(auth, provider);
+      }
+    } catch (err: any) {
+      console.error("Error signing in with Google:", err);
+      setAuthError(err.code || err.message || "Error al conectar con Google");
+    } finally {
+      setSubmittingGoogleAuth(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    setSubmittingGoogleAuth(true);
+    try {
+      await signOut(auth);
+    } catch (err) {
+      console.error("Error logging out:", err);
+    } finally {
+      setSubmittingGoogleAuth(false);
+    }
+  };
+
+  const handleManualSync = async () => {
+    setSyncingNow(true);
+    setError(null);
+    try {
+      const count = await firestoreService.syncUnsyncedMovements();
+      if (count > 0) {
+        setAltaSuccess(true);
+        await fetchRows();
+      } else {
+        setError("No se encontraron movimientos locales adicionales para sincronizar.");
+      }
+    } catch (err: any) {
+      console.error("Manual sync failed:", err);
+      setError(err.message || "Error al sincronizar datos locales.");
+    } finally {
+      setSyncingNow(false);
+      updateUnsyncedCount();
+    }
+  };
 
   const handleSaveCatalog = async () => {
     setSavingCatalog(true);
@@ -377,14 +483,158 @@ export default function AdminCaja({ onBack }: { onBack: () => void }) {
     }
   };
 
+  if (authChecking) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-white flex flex-col items-center justify-center p-6 text-center font-sans">
+        <div className="space-y-4 max-w-md">
+          <Loader2 className="w-10 h-10 animate-spin text-emerald-500 mx-auto" />
+          <h3 className="font-display font-black uppercase tracking-wider text-sm text-zinc-300">
+            Verificando Acceso de Administrador
+          </h3>
+          <p className="text-zinc-500 text-xs italic">
+            Conectando de forma segura con los servicios de Google Firebase...
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!currentUser || currentUser.email !== 'leandro.saralegui@gmail.com') {
+    return (
+      <div className="min-h-screen bg-slate-950 text-white p-4 md:p-8 flex items-center justify-center font-sans">
+        <div className="max-w-md w-full bg-zinc-900/50 border border-white/5 rounded-3xl p-6 md:p-8 space-y-6 shadow-2xl relative overflow-hidden">
+          {/* Subtle glowing light or decorative element */}
+          <div className="absolute top-0 left-1/2 -translate-x-1/2 w-48 h-1 bg-gradient-to-r from-transparent via-emerald-500/40 to-transparent blur-md"></div>
+          
+          <button 
+            onClick={onBack} 
+            className="flex items-center gap-2 text-zinc-500 hover:text-white transition-colors text-xs font-black uppercase tracking-widest"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            <span>Volver al Inicio</span>
+          </button>
+
+          <div className="text-center space-y-2">
+            <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center mx-auto text-emerald-400 mb-2">
+              <Lock className="w-6 h-6" />
+            </div>
+            <h2 className="text-xl font-display font-black text-white uppercase tracking-tight md:text-2xl">
+              Panel Administrativo Cerrado
+            </h2>
+            <p className="text-xs text-zinc-400 leading-relaxed max-w-sm mx-auto">
+              Esta sección está restringida exclusivamente para los administradores de LyS Lavados. Se requiere autenticación segura con Google.
+            </p>
+          </div>
+
+          {currentUser && currentUser.email !== 'leandro.saralegui@gmail.com' && (
+            <div className="bg-amber-500/5 border border-amber-500/15 rounded-2xl p-4 text-xs space-y-2">
+              <div className="flex items-center gap-1.5 text-amber-400 font-bold uppercase tracking-wider text-[10px]">
+                <AlertTriangle className="w-4 h-4" /> Cuenta Incorrecta Detectada
+              </div>
+              <p className="text-zinc-400 font-semibold leading-normal">
+                Has iniciado sesión como <span className="text-white font-mono">{currentUser.email}</span>, pero este correo no está registrado como administrador.
+              </p>
+              <button 
+                onClick={handleLogout}
+                disabled={submittingGoogleAuth}
+                className="w-full text-center text-[10px] font-black uppercase tracking-widest text-[#f87171] bg-red-500/5 hover:bg-red-500/10 border border-red-500/10 py-2 rounded-xl transition-all"
+              >
+                Cerrar Sesión Actual
+              </button>
+            </div>
+          )}
+
+          <div className="space-y-4">
+            <div className="space-y-1">
+              <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 block">
+                Método de Conexión Google
+              </label>
+              <div className="flex bg-zinc-950 border border-white/5 p-1 rounded-xl text-[10px] uppercase font-black tracking-widest">
+                <button
+                  type="button"
+                  onClick={() => setPreferredMethod('popup')}
+                  className={`flex-1 text-center py-2 rounded-lg transition-all ${preferredMethod === 'popup' ? 'bg-emerald-500 text-night' : 'text-zinc-500 hover:text-zinc-200'}`}
+                >
+                  Popup (Emergente)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPreferredMethod('redirect')}
+                  className={`flex-1 text-center py-2 rounded-lg transition-all ${preferredMethod === 'redirect' ? 'bg-emerald-500 text-night' : 'text-zinc-500 hover:text-zinc-200'}`}
+                >
+                  Redirect (Redirección)
+                </button>
+              </div>
+              {isIframe && (
+                <p className="text-[10px] text-amber-400 leading-normal pt-1 flex items-center gap-1">
+                  <span className="text-xs">⚠️</span> Se detectó visualizador (Iframe): usá Redirect o abrí en pestaña nueva.
+                </p>
+              )}
+            </div>
+
+            <button
+              onClick={loginWithGoogle}
+              disabled={submittingGoogleAuth}
+              className="w-full flex items-center justify-center gap-3 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-night shadow-lg shadow-emerald-500/10 py-3.5 rounded-2xl text-xs font-black uppercase tracking-widest active:scale-98 transition-all"
+            >
+              {submittingGoogleAuth ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin text-night" />
+                  <span>Conectando...</span>
+                </>
+              ) : (
+                <>
+                  <Sparkles className="w-4 h-4 animate-pulse" />
+                  <span>Iniciar Sesión con Google</span>
+                </>
+              )}
+            </button>
+          </div>
+
+          {authError && (
+            <div className="bg-red-500/5 border border-red-500/10 p-4 rounded-2xl text-[11px] leading-relaxed select-text space-y-1 text-red-300">
+              <div className="font-bold uppercase tracking-wider text-[9px] text-red-400">
+                Detalles del Error:
+              </div>
+              <p className="font-mono bg-zinc-950 p-2 rounded text-[10px] border border-white/5 truncate">
+                {authError}
+              </p>
+            </div>
+          )}
+
+          {isIframe && (
+            <div className="text-center pt-2">
+              <a
+                href={window.location.href}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex shrink-0 items-center justify-center gap-1.5 text-zinc-500 hover:text-white text-[10px] uppercase font-black tracking-widest transition-all"
+              >
+                Abrir en nueva pestaña ↗
+              </a>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-950 text-white p-4 md:p-8 font-sans">
       <div className="max-w-6xl mx-auto">
         <div className="flex flex-col md:flex-row items-center justify-between gap-6 mb-12">
-          <button onClick={onBack} className="flex items-center gap-2 text-zinc-500 hover:text-white transition-colors">
-            <ArrowLeft className="w-5 h-5" />
-            <span>Salir del Panel</span>
-          </button>
+          <div className="flex flex-col sm:flex-row items-center gap-4">
+            <button onClick={onBack} className="flex items-center gap-2 text-zinc-500 hover:text-white transition-colors">
+              <ArrowLeft className="w-5 h-5" />
+              <span>Salir del Panel</span>
+            </button>
+            <div className="hidden sm:block text-zinc-700 font-black">|</div>
+            <div className="flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/20 px-3.5 py-1.5 rounded-full select-none text-[10px] font-black uppercase tracking-widest text-emerald-400">
+              <ShieldCheck className="w-3.5 h-3.5 animate-pulse" />
+              <span>Sincronizado</span>
+              <span className="hidden md:inline text-zinc-500 font-normal">({currentUser?.email})</span>
+            </div>
+          </div>
           
           <div className="flex bg-zinc-900/50 p-1 rounded-2xl border border-white/5 overflow-x-auto max-w-full">
             <button 
@@ -636,6 +886,27 @@ export default function AdminCaja({ onBack }: { onBack: () => void }) {
           <AdminMetrics />
         ) : (
           <>
+            {unsyncedCount > 0 && (
+              <div className="bg-amber-500/10 border border-amber-500/20 text-amber-300 p-5 rounded-3xl text-xs flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
+                <div className="space-y-1">
+                  <p className="font-bold uppercase tracking-wider text-[10px] text-amber-400 flex items-center gap-1.5">
+                    <span className="inline-block w-2 bg-amber-500 rounded-full h-2 animate-ping" /> Sincronización Pendiente
+                  </p>
+                  <p className="text-zinc-300 font-semibold leading-relaxed">
+                    Hay <strong className="text-white font-black font-mono">{unsyncedCount}</strong> movimientos de caja guardados localmente. Al iniciar sesión, podés subirlos todos de golpe para que se consoliden en Firestore.
+                  </p>
+                </div>
+                <button
+                  onClick={handleManualSync}
+                  disabled={syncingNow}
+                  className="bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 px-5 py-2.5 rounded-2xl font-display font-black text-[11px] uppercase tracking-widest transition-all self-start sm:self-auto cursor-pointer flex items-center gap-2"
+                >
+                  {syncingNow && <Loader2 className="w-4 h-4 animate-spin text-slate-950" />}
+                  <span>{syncingNow ? 'SINCRONIZANDO...' : 'SUBIR A LA NUBE'}</span>
+                </button>
+              </div>
+            )}
+
             {/* Stats Grid */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
           <div className="bg-zinc-900 border border-white/5 p-6 rounded-2xl">
