@@ -91,6 +91,13 @@ function setLocalCache<T>(key: string, value: T): void {
   } catch (e) {}
 }
 
+function isUserAdmin(): boolean {
+  const user = auth.currentUser;
+  if (!user) return false;
+  const email = user.email?.toLowerCase();
+  return email === 'leandro.saralegui@gmail.com' || user.uid === 'AYbEVBVfFxcx9vgxAWb83cJvDV02';
+}
+
 // --- Validate Connection on boot ---
 async function testConnection() {
   try {
@@ -461,12 +468,19 @@ export const firestoreService = {
           };
         });
         
-        // Write defaults to cloud
-        const batch = writeBatch(db);
-        initialServices.forEach(srv => {
-          batch.set(doc(db, colPath, srv.id), srv);
-        });
-        await withTimeout(batch.commit(), 3000);
+        // Only write defaults if signed in as admin
+        if (isUserAdmin()) {
+          try {
+            const batch = writeBatch(db);
+            initialServices.forEach(srv => {
+              batch.set(doc(db, colPath, srv.id), srv);
+            });
+            await withTimeout(batch.commit(), 3000);
+          } catch (writeErr) {
+            console.warn("Bootstrap services write skipped/failed:", writeErr);
+          }
+        }
+        
         setLocalCache('lys_cache_services', initialServices);
         return initialServices;
       }
@@ -546,12 +560,19 @@ export const firestoreService = {
           };
         });
 
-        // Write defaults
-        const batch = writeBatch(db);
-        initialVehicles.forEach(veh => {
-          batch.set(doc(db, colPath, veh.id), veh);
-        });
-        await withTimeout(batch.commit(), 3000);
+        // Only write defaults if signed in as admin
+        if (isUserAdmin()) {
+          try {
+            const batch = writeBatch(db);
+            initialVehicles.forEach(veh => {
+              batch.set(doc(db, colPath, veh.id), veh);
+            });
+            await withTimeout(batch.commit(), 3000);
+          } catch (writeErr) {
+            console.warn("Bootstrap vehicles write skipped/failed:", writeErr);
+          }
+        }
+        
         setLocalCache('lys_cache_vehicles', initialVehicles);
         return initialVehicles;
       }
@@ -622,12 +643,19 @@ export const firestoreService = {
           }
         ];
 
-        // Seed
-        const batch = writeBatch(db);
-        defaultPhotos.forEach(p => {
-          batch.set(doc(db, colPath, p.id), p);
-        });
-        await withTimeout(batch.commit(), 3000);
+        // Only write defaults if signed in as admin
+        if (isUserAdmin()) {
+          try {
+            const batch = writeBatch(db);
+            defaultPhotos.forEach(p => {
+              batch.set(doc(db, colPath, p.id), p);
+            });
+            await withTimeout(batch.commit(), 3000);
+          } catch (writeErr) {
+            console.warn("Bootstrap gallery write skipped/failed:", writeErr);
+          }
+        }
+        
         setLocalCache('lys_cache_gallery', defaultPhotos);
         return defaultPhotos;
       }

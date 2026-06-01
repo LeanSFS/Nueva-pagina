@@ -47,6 +47,11 @@ export default function AdminCaja({ onBack }: { onBack: () => void }) {
   const [unsyncedCount, setUnsyncedCount] = useState(0);
   const [syncingNow, setSyncingNow] = useState(false);
 
+  const isUserAdmin = (user: any) => {
+    if (!user) return false;
+    return user.email?.toLowerCase() === 'leandro.saralegui@gmail.com' || user.uid === 'AYbEVBVfFxcx9vgxAWb83cJvDV02';
+  };
+
   const updateUnsyncedCount = () => {
     try {
       const unsynced = JSON.parse(localStorage.getItem('lys_unsynced_movements') || '[]');
@@ -335,7 +340,7 @@ export default function AdminCaja({ onBack }: { onBack: () => void }) {
     const unsubscribe = auth.onAuthStateChanged((user) => {
       setCurrentUser(user);
       setAuthChecking(false);
-      if (user && user.email === 'leandro.saralegui@gmail.com') {
+      if (user && isUserAdmin(user)) {
         // Auto-synchronize any offline/local movements upon successful login
         firestoreService.syncUnsyncedMovements()
           .then((syncedCount) => {
@@ -499,7 +504,7 @@ export default function AdminCaja({ onBack }: { onBack: () => void }) {
     );
   }
 
-  if (!currentUser || currentUser.email !== 'leandro.saralegui@gmail.com') {
+  if (!currentUser || !isUserAdmin(currentUser)) {
     return (
       <div className="min-h-screen bg-slate-950 text-white p-4 md:p-8 flex items-center justify-center font-sans">
         <div className="max-w-md w-full bg-zinc-900/50 border border-white/5 rounded-3xl p-6 md:p-8 space-y-6 shadow-2xl relative overflow-hidden">
@@ -526,7 +531,7 @@ export default function AdminCaja({ onBack }: { onBack: () => void }) {
             </p>
           </div>
 
-          {currentUser && currentUser.email !== 'leandro.saralegui@gmail.com' && (
+          {currentUser && !isUserAdmin(currentUser) && (
             <div className="bg-amber-500/5 border border-amber-500/15 rounded-2xl p-4 text-xs space-y-2">
               <div className="flex items-center gap-1.5 text-amber-400 font-bold uppercase tracking-wider text-[10px]">
                 <AlertTriangle className="w-4 h-4" /> Cuenta Incorrecta Detectada

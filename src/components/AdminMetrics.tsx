@@ -50,6 +50,11 @@ export default function AdminMetrics() {
   const [isIframe, setIsIframe] = useState(false);
   const [preferredMethod, setPreferredMethod] = useState<'popup' | 'redirect'>('popup');
 
+  const isUserAdmin = (user: any) => {
+    if (!user) return false;
+    return user.email?.toLowerCase() === 'leandro.saralegui@gmail.com' || user.uid === 'AYbEVBVfFxcx9vgxAWb83cJvDV02';
+  };
+
   const [telegramEnabled, setTelegramEnabled] = useState(false);
   const [telegramToken, setTelegramToken] = useState('');
   const [telegramChatId, setTelegramChatId] = useState('');
@@ -193,7 +198,7 @@ export default function AdminMetrics() {
 
   // Fetch from Cloud or Local, depending on admin permissions
   useEffect(() => {
-    if (currentUser && currentUser.email === 'leandro.saralegui@gmail.com') {
+    if (currentUser && isUserAdmin(currentUser)) {
       setLoadingCloud(true);
       metricsService.getTracesFromCloud()
         .then((cloudTraces) => {
@@ -245,7 +250,7 @@ export default function AdminMetrics() {
   };
 
   const refreshMetrics = async () => {
-    if (currentUser && currentUser.email === 'leandro.saralegui@gmail.com') {
+    if (currentUser && isUserAdmin(currentUser)) {
       setLoadingCloud(true);
       try {
         const cloudTraces = await metricsService.getTracesFromCloud();
@@ -261,7 +266,7 @@ export default function AdminMetrics() {
   };
 
   const clearAllMetrics = async () => {
-    const isCloud = currentUser && currentUser.email === 'leandro.saralegui@gmail.com';
+    const isCloud = currentUser && isUserAdmin(currentUser);
     const confirmation = window.confirm(
       isCloud
         ? '¿Seguro que querés reiniciar todas las métricas en la NUBE (Firestore)? Se generará un nuevo historial limpio de 7 días.'
@@ -467,7 +472,7 @@ export default function AdminMetrics() {
     }
   };
 
-  const isVerifiedAdmin = currentUser && currentUser.email === 'leandro.saralegui@gmail.com';
+  const isVerifiedAdmin = currentUser && isUserAdmin(currentUser);
 
   return (
     <div className="space-y-8 animate-fade-in relative">

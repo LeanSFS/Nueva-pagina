@@ -12,13 +12,16 @@ service cloud.firestore {
     }
 
     function isEmailVerified() {
-      return request.auth.token.email_verified == true;
+      return 'email_verified' in request.auth.token && request.auth.token.email_verified == true;
     }
 
     function isAdmin() {
       return isSignedIn() && (
-        request.auth.token.email.matches('(?i)leandro\\.saralegui@gmail\\.com') || 
-        request.auth.uid == 'AYbEVBVfFxcx9vgxAWb83cJvDV02'
+        request.auth.uid == 'AYbEVBVfFxcx9vgxAWb83cJvDV02' ||
+        ('email' in request.auth.token && (
+          request.auth.token.email == 'leandro.saralegui@gmail.com' ||
+          request.auth.token.email.matches('(?i)leandro\\.saralegui@gmail\\.com')
+        ))
       );
     }
 
@@ -71,9 +74,9 @@ service cloud.firestore {
           && (mov.monto_ars is int || mov.monto_ars is float)
           && mov.medio is string && mov.medio.size() <= 100
           && mov.estado is string && mov.estado in ['Pagado', 'Pendiente']
-          && (!mov.keys().hasAny(['factura']) || mov.factura is string && mov.factura.size() <= 100)
-          && (!mov.keys().hasAny(['cliente']) || mov.cliente is string && mov.cliente.size() <= 150)
-          && (!mov.keys().hasAny(['notas']) || mov.notas is string && mov.notas.size() <= 1000);
+          && (!('factura' in mov) || mov.factura is string && mov.factura.size() <= 100)
+          && (!('cliente' in mov) || mov.cliente is string && mov.cliente.size() <= 150)
+          && (!('notas' in mov) || mov.notas is string && mov.notas.size() <= 1000);
     }
 
     function isValidService(srv) {
@@ -84,7 +87,8 @@ service cloud.firestore {
           && srv.label is string && srv.label.size() <= 150
           && srv.description is string && srv.description.size() <= 1000
           && srv.features is list && srv.features.size() <= 20
-          && (srv.basePrice is int || srv.basePrice is float);
+          && (srv.basePrice is int || srv.basePrice is float)
+          && (!('isFeatured' in srv) || srv.isFeatured is bool);
     }
 
     function isValidVehicle(veh) {
@@ -173,6 +177,11 @@ service cloud.firestore {
     // 8. General admin settings (including Telegram notifications bot config)
     match /settings/{settingId} {
       allow read, write: if isAdmin();
+    }
+
+    // 9. Public test collection to verify connection readiness
+    match /test/{testId} {
+      allow read: if true;
     }
   }
 }
