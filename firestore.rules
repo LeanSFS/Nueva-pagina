@@ -134,8 +134,7 @@ service cloud.firestore {
       allow get: if true;
       // Absolute PII protection: general list searches must go through administrator authentication
       allow list: if isAdmin();
-      allow update: if isAdmin() && isValidBooking(request.resource.data);
-      allow delete: if isAdmin();
+      allow update, delete: if isAdmin();
     }
 
     // 3. Taken Slots (Public availability schedule)
@@ -178,7 +177,8 @@ service cloud.firestore {
 
     // 8. General admin settings (including Telegram notifications bot config)
     match /settings/{settingId} {
-      allow read, write: if isAdmin();
+      allow read: if true;
+      allow write: if isAdmin();
     }
 
     // 9. Public test collection to verify connection readiness

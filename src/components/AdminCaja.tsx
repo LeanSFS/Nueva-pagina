@@ -321,6 +321,7 @@ export default function AdminCaja({ onBack }: { onBack: () => void }) {
   const [newPhoto, setNewPhoto] = useState({ url: '', title: '', description: '' });
   const [savingPhoto, setSavingPhoto] = useState(false);
   const [compressingImage, setCompressingImage] = useState(false);
+  const [deleteConfirmPhotoId, setDeleteConfirmPhotoId] = useState<string | null>(null);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -523,13 +524,13 @@ export default function AdminCaja({ onBack }: { onBack: () => void }) {
   };
 
   const handleDeletePhoto = async (photoId: string) => {
-    if (!window.confirm('¿Seguro que quiere eliminar esta imagen de la galería?')) return;
     setLoading(true);
     setError(null);
     try {
       await firestoreService.deleteGalleryPhoto(photoId);
       // Filter out immediately for instant interactive response
       setDbPhotos(prev => prev.filter(p => p.id !== photoId));
+      setDeleteConfirmPhotoId(null);
     } catch (e: any) {
       setError(e.message || 'Error al eliminar foto');
     } finally {
@@ -974,12 +975,29 @@ export default function AdminCaja({ onBack }: { onBack: () => void }) {
                         className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
                         referrerPolicy="no-referrer"
                       />
-                      <button 
-                        onClick={() => handleDeletePhoto(photo.id)}
-                        className="absolute top-3 right-3 p-2 bg-red-600 hover:bg-red-500 text-white rounded-lg transition-colors shadow-lg cursor-pointer"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      {deleteConfirmPhotoId === photo.id ? (
+                        <div className="absolute top-3 right-3 flex items-center gap-1 bg-zinc-950 p-1.5 rounded-xl border border-red-500/30 shadow-2xl z-20">
+                          <button 
+                            onClick={() => handleDeletePhoto(photo.id)}
+                            className="px-2 py-1 bg-red-600 hover:bg-red-500 text-white rounded-lg text-[9px] font-black uppercase tracking-wider transition-colors cursor-pointer"
+                          >
+                            SÍ
+                          </button>
+                          <button 
+                            onClick={() => setDeleteConfirmPhotoId(null)}
+                            className="px-2 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg text-[9px] font-black uppercase tracking-wider transition-colors cursor-pointer"
+                          >
+                            NO
+                          </button>
+                        </div>
+                      ) : (
+                        <button 
+                          onClick={() => setDeleteConfirmPhotoId(photo.id)}
+                          className="absolute top-3 right-3 p-2 bg-red-600 hover:bg-red-500 text-white rounded-lg transition-colors shadow-lg cursor-pointer z-10"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
                     </div>
                     <div className="p-4 flex flex-col flex-1 pb-5">
                       <h4 className="font-display font-black italic text-base mb-1 truncate text-white">{photo.title}</h4>

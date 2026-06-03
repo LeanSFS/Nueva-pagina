@@ -50,6 +50,7 @@ export default function AdminMetrics() {
   const [authError, setAuthError] = useState<string | null>(null);
   const [isIframe, setIsIframe] = useState(false);
   const [preferredMethod, setPreferredMethod] = useState<'popup' | 'redirect'>('popup');
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
 
   const isUserAdmin = (user: any) => {
     if (!user) return false;
@@ -296,29 +297,22 @@ export default function AdminMetrics() {
 
   const clearAllMetrics = async () => {
     const isCloud = currentUser && isUserAdmin(currentUser);
-    const confirmation = window.confirm(
-      isCloud
-        ? '¿Seguro que querés reiniciar todas las métricas en la NUBE (Firestore)? Se generará un nuevo historial limpio de 7 días.'
-        : '¿Seguro que querés reiniciar todas las métricas de la web? Se generará un nuevo historial local de prueba.'
-    );
-
-    if (confirmation) {
-      if (isCloud) {
-        setLoadingCloud(true);
-        try {
-          await metricsService.clearCloudMetrics();
-          const fresh = await metricsService.getTracesFromCloud();
-          setTraces(fresh);
-        } catch (err) {
-          console.error("Failed clearing cloud metrics:", err);
-        } finally {
-          setLoadingCloud(false);
-        }
-      } else {
-        localStorage.removeItem('lys_web_metrics_v2');
-        setTraces(metricsService.getLocalTraces());
+    if (isCloud) {
+      setLoadingCloud(true);
+      try {
+        await metricsService.clearCloudMetrics();
+        const fresh = await metricsService.getTracesFromCloud();
+        setTraces(fresh);
+      } catch (err) {
+        console.error("Failed clearing cloud metrics:", err);
+      } finally {
+        setLoadingCloud(false);
       }
+    } else {
+      localStorage.removeItem('lys_web_metrics_v2');
+      setTraces(metricsService.getLocalTraces());
     }
+    setShowClearConfirm(false);
   };
 
   // -------------------- DATA COMPUTATIONS --------------------
@@ -908,12 +902,29 @@ export default function AdminMetrics() {
           >
             <RefreshCw className="w-4 h-4" /> Actualizar
           </button>
-          <button 
-            onClick={clearAllMetrics}
-            className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-red-900/20 hover:bg-red-900/40 text-red-400 border border-red-500/10 active:scale-95 px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all"
-          >
-            Reiniciar Historial
-          </button>
+          {showClearConfirm ? (
+            <div className="flex items-center gap-1.5 bg-red-950/30 p-1 rounded-xl border border-red-500/15">
+              <button 
+                onClick={clearAllMetrics}
+                className="bg-red-600 hover:bg-red-500 text-white active:scale-95 px-3 py-2 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer"
+              >
+                SÍ, REINICIAR
+              </button>
+              <button 
+                onClick={() => setShowClearConfirm(false)}
+                className="bg-zinc-805 hover:bg-zinc-700 text-zinc-300 active:scale-95 px-3 py-2 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer"
+              >
+                NO
+              </button>
+            </div>
+          ) : (
+            <button 
+              onClick={() => setShowClearConfirm(true)}
+              className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-red-900/20 hover:bg-red-900/40 text-red-400 border border-red-500/10 active:scale-95 px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all"
+            >
+              Reiniciar Historial
+            </button>
+          )}
         </div>
       </div>
 

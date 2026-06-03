@@ -63,7 +63,7 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
 }
 
 // --- Timeout Promise Wrapper ---
-async function withTimeout<T>(promise: Promise<T>, timeoutMs = 2500): Promise<T> {
+async function withTimeout<T>(promise: Promise<T>, timeoutMs = 10000): Promise<T> {
   let timeoutId: any;
   const timeoutPromise = new Promise<never>((_, reject) => {
     timeoutId = setTimeout(() => {
@@ -220,7 +220,7 @@ export const firestoreService = {
         isBlocked: isBlocked
       });
 
-      await withTimeout(bach.commit(), 3000);
+      await withTimeout(bach.commit(), 10000);
     } catch (e) {
       handleFirestoreError(e, OperationType.WRITE, `bookings_and_slots/${booking.id}`);
     }
@@ -246,7 +246,7 @@ export const firestoreService = {
       bach.delete(bookingRef);
       bach.delete(slotRef);
 
-      await withTimeout(bach.commit(), 3000);
+      await withTimeout(bach.commit(), 10000);
     } catch (e) {
       handleFirestoreError(e, OperationType.DELETE, `bookings_and_slots/${bookingId}`);
     }
@@ -289,7 +289,7 @@ export const firestoreService = {
         });
       }
 
-      await withTimeout(bach.commit(), 3000);
+      await withTimeout(bach.commit(), 10000);
     } catch (e) {
       handleFirestoreError(e, OperationType.UPDATE, `bookings_and_slots/${bookingId}`);
     }

@@ -25,6 +25,7 @@ export default function AdminAgenda({ customerVisits = {} }: { customerVisits?: 
   const [filterDate, setFilterDate] = useState(new Date().toISOString().split('T')[0]);
   const [blockingTime, setBlockingTime] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
   const loadBookings = async () => {
     setLoading(true);
@@ -94,14 +95,13 @@ export default function AdminAgenda({ customerVisits = {} }: { customerVisits?: 
   };
 
   const handleDeleteBooking = async (book: Booking) => {
-    if (!window.confirm(`¿Borrar definitivamente el turno de ${book.nombre} a las ${book.hora}hs?`)) return;
-    
     setLoading(true);
     setActionError(null);
     try {
       await firestoreService.deleteBooking(book.id, book.fecha, book.hora);
       clearCache();
       await loadBookings();
+      setDeleteConfirmId(null);
     } catch (e) {
       setActionError('Error de Firestore al eliminar el turno.');
     } finally {
@@ -295,7 +295,7 @@ export default function AdminAgenda({ customerVisits = {} }: { customerVisits?: 
                                 </div>
                              </div>
                              
-                             <div className="flex gap-2">
+                             <div className="flex gap-2 items-center">
                                 {book.telefono !== '00000000' && (
                                   <a 
                                     href={`https://wa.me/${book.telefono.replace(/\D/g, '')}`} 
@@ -305,12 +305,30 @@ export default function AdminAgenda({ customerVisits = {} }: { customerVisits?: 
                                     <Phone className="w-5 h-5" />
                                   </a>
                                 )}
-                                <button 
-                                  onClick={() => handleDeleteBooking(book)}
-                                  className="p-3 bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white rounded-xl transition-all"
-                                >
-                                  <Trash2 className="w-5 h-5" />
-                                </button>
+                                {deleteConfirmId === book.id ? (
+                                  <div className="flex items-center gap-1.5 bg-red-950/40 p-1.5 rounded-xl border border-red-500/30">
+                                    <button 
+                                      onClick={() => handleDeleteBooking(book)}
+                                      className="px-2.5 py-1.5 bg-red-600 hover:bg-red-500 text-white rounded-lg text-[9px] font-black uppercase tracking-wider transition-colors cursor-pointer"
+                                    >
+                                      ELIMINAR
+                                    </button>
+                                    <button 
+                                      onClick={() => setDeleteConfirmId(null)}
+                                      className="px-2.5 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg text-[9px] font-black uppercase tracking-wider transition-colors cursor-pointer"
+                                    >
+                                      NO
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <button 
+                                    onClick={() => setDeleteConfirmId(book.id)}
+                                    className="p-3 bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white rounded-xl transition-all cursor-pointer"
+                                    title="Eliminar turno"
+                                  >
+                                    <Trash2 className="w-5 h-5" />
+                                  </button>
+                                )}
                              </div>
                            </div>
 

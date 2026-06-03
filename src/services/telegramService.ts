@@ -109,14 +109,14 @@ export const telegramService = {
 
       if (!response.ok) {
         const errText = await response.text();
-        console.error('Telegram Bot API response error:', errText);
+        console.warn('Telegram Bot API response error:', errText);
         return false;
       }
 
       console.log('Telegram notification sent successfully!');
       return true;
     } catch (error) {
-      console.error('Failed to send Telegram notification:', error);
+      console.warn('Failed to send Telegram notification:', error);
       return false;
     }
   },
@@ -170,14 +170,14 @@ export const telegramService = {
 
       if (!response.ok) {
         const errText = await response.text();
-        console.error('Telegram Bot API response error on access send:', errText);
+        console.warn('Telegram Bot API response error on access send:', errText);
         return false;
       }
 
       console.log('Telegram entry notification sent successfully!');
       return true;
     } catch (error) {
-      console.error('Failed to send Telegram access notification:', error);
+      console.warn('Failed to send Telegram access notification:', error);
       return false;
     }
   }
