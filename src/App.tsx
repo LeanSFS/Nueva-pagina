@@ -440,6 +440,9 @@ export default function App() {
     const dbV = activeVehicles.find(v => v.id === vType);
 
     if (dbServices.length > 0 && dbVehicles.length > 0) {
+      if (vType === 'pickup' && service === 'Interior') {
+        return 30000;
+      }
       const basePrice = dbS ? dbS.basePrice : 0;
       const extraPrice = dbV ? dbV.extraPrice : 0;
       return basePrice + extraPrice;
