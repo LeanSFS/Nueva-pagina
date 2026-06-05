@@ -24,7 +24,8 @@ import {
   Loader2,
   ShieldCheck,
   Lock,
-  AlertTriangle
+  AlertTriangle,
+  Link2
 } from 'lucide-react';
 import AdminAgenda from './AdminAgenda.tsx';
 import AdminRendimientos from './AdminRendimientos.tsx';
@@ -319,6 +320,7 @@ export default function AdminCaja({ onBack }: { onBack: () => void }) {
   const [catalogSuccess, setCatalogSuccess] = useState(false);
 
   const [newPhoto, setNewPhoto] = useState({ url: '', title: '', description: '' });
+  const [imageInputMethod, setImageInputMethod] = useState<'url' | 'file'>('url');
   const [savingPhoto, setSavingPhoto] = useState(false);
   const [compressingImage, setCompressingImage] = useState(false);
   const [deleteConfirmPhotoId, setDeleteConfirmPhotoId] = useState<string | null>(null);
@@ -871,46 +873,88 @@ export default function AdminCaja({ onBack }: { onBack: () => void }) {
                   />
                 </div>
                 <div className="md:col-span-8 flex flex-col justify-end">
-                  <span className="text-[8px] font-black uppercase text-zinc-500 mb-1 block">Imagen del Trabajo (Elegir Archivo o URL)</span>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {/* Native File Selector for Mobile Gallery */}
-                    <div>
-                      <input 
-                        type="file" 
-                        id="phone-image-upload" 
-                        accept="image/*" 
-                        onChange={handleFileChange} 
-                        className="hidden" 
-                      />
-                      <label 
-                        htmlFor="phone-image-upload"
-                        className="w-full bg-zinc-900 hover:bg-zinc-800 border-2 border-dashed border-emerald-500/20 hover:border-emerald-500/40 rounded-xl p-3 text-xs font-black text-center text-emerald-400 uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer select-none transition-all active:scale-[0.98] h-full min-h-[46px]"
-                      >
-                        {compressingImage ? (
-                          <>
-                            <Loader2 className="w-4 h-4 animate-spin text-emerald-400" />
-                            PROCESANDO...
-                          </>
-                        ) : (
-                          <>
-                            <Plus className="w-4 h-4 text-emerald-400" />
-                            SUBIR DESDE CELULAR
-                          </>
-                        )}
-                      </label>
-                    </div>
+                  <span className="text-[8px] font-black uppercase text-zinc-500 mb-2 block">Imagen del Trabajo (Seleccioná método)</span>
+                  
+                  {/* Selector de Método */}
+                  <div className="flex bg-zinc-900 p-1 rounded-xl border border-white/5 mb-3 select-none">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setImageInputMethod('url');
+                        if (newPhoto.url.startsWith('data:')) {
+                          setNewPhoto(prev => ({ ...prev, url: '' }));
+                        }
+                      }}
+                      className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+                        imageInputMethod === 'url'
+                          ? 'bg-emerald-500 text-night shadow-lg font-black'
+                          : 'text-zinc-400 hover:text-white'
+                      }`}
+                    >
+                      <Link2 className="w-3.5 h-3.5" /> Pegar Link (Calidad Original HD)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setImageInputMethod('file');
+                        if (newPhoto.url && !newPhoto.url.startsWith('data:')) {
+                          setNewPhoto(prev => ({ ...prev, url: '' }));
+                        }
+                      }}
+                      className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+                        imageInputMethod === 'file'
+                          ? 'bg-emerald-500 text-night shadow-lg font-black'
+                          : 'text-zinc-400 hover:text-white'
+                      }`}
+                    >
+                      <Plus className="w-3.5 h-3.5" /> Subir Archivo (Comprimido)
+                    </button>
+                  </div>
 
-                    {/* Fallback to Paste a Web URL directly */}
-                    <div>
-                      <input 
-                        type="text" 
-                        placeholder="O pegar URL de imagen..." 
-                        value={newPhoto.url.startsWith('data:') ? 'Imagen Cargada ✓' : newPhoto.url} 
-                        onChange={e => setNewPhoto({...newPhoto, url: e.target.value})}
-                        disabled={newPhoto.url.startsWith('data:')}
-                        className="w-full bg-zinc-900 border border-white/10 rounded-xl p-3 text-sm focus:border-emerald-500 outline-none placeholder:text-zinc-600 disabled:opacity-50 disabled:bg-black/30"
-                      />
-                    </div>
+                  <div>
+                    {imageInputMethod === 'url' ? (
+                      <div>
+                        <input 
+                          type="text" 
+                          placeholder="Pegar URL definitivo de la imagen (ej. https://i.imgur.com/...)" 
+                          value={newPhoto.url.startsWith('data:') ? '' : newPhoto.url} 
+                          onChange={e => setNewPhoto({...newPhoto, url: e.target.value})}
+                          className="w-full bg-zinc-900 border border-white/10 rounded-xl p-3 text-sm focus:border-emerald-500 outline-none placeholder:text-zinc-600 text-white"
+                        />
+                        <span className="text-[9px] text-zinc-500 mt-1.5 block leading-relaxed">
+                          💡 <strong>Recomendado:</strong> Para subir fotos en <strong>alta calidad original (Full HD)</strong>, subí la foto a servidores gratuitos como Imgur, PostIMG, o similares y pegá su enlace directo de archivo acá.
+                        </span>
+                      </div>
+                    ) : (
+                      <div>
+                        <input 
+                          type="file" 
+                          id="phone-image-upload" 
+                          accept="image/*" 
+                          onChange={handleFileChange} 
+                          className="hidden" 
+                        />
+                        <label 
+                          htmlFor="phone-image-upload"
+                          className="w-full bg-zinc-900 hover:bg-zinc-800 border-2 border-dashed border-emerald-500/20 hover:border-emerald-500/40 rounded-xl p-4 text-xs font-black text-center text-emerald-400 uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer select-none transition-all active:scale-[0.98] min-h-[46px]"
+                        >
+                          {compressingImage ? (
+                            <>
+                              <Loader2 className="w-4 h-4 animate-spin text-emerald-400" />
+                              PROCESANDO...
+                            </>
+                          ) : (
+                            <>
+                              <Plus className="w-4 h-4 text-emerald-400" />
+                              SELECCIONAR ARCHIVO DESDE DISPOSITIVO
+                            </>
+                          )}
+                        </label>
+                        <span className="text-[9px] text-zinc-500 mt-1.5 block leading-relaxed">
+                          ⚠️ Al subir archivos locales, la web los comprime y reduce de resolución automáticamente para ahorrar espacio de almacenamiento y que la página mantenga una carga rápida para el resto de los usuarios.
+                        </span>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
