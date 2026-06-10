@@ -122,6 +122,7 @@ export interface Booking {
   servicio: string;
   estado: 'pendiente' | 'confirmado' | 'hecho' | 'cancelado';
   direccion: string;
+  blockedSlots?: string[];
 }
 
 export interface TakenSlot {
@@ -153,6 +154,12 @@ export interface CatalogService {
   features: string[];
   isFeatured?: boolean;
   basePrice: number;
+  prices?: {
+    auto: number;
+    suv: number;
+    pickup: number;
+  };
+  duration?: number;
 }
 
 export interface CatalogVehicle {
@@ -192,8 +199,10 @@ export const firestoreService = {
   },
 
   async createBooking(booking: Booking, isBlocked = false): Promise<void> {
-    const slotId = `${booking.fecha}_${booking.hora}`;
-    
+    const hoursToBlock = booking.blockedSlots && booking.blockedSlots.length > 0
+      ? booking.blockedSlots
+      : [booking.hora];
+
     // Save to local cache first
     const localBookings = getLocalCache<Booking[]>('lys_cache_bookings', []);
     if (!localBookings.some(b => b.id === booking.id)) {
@@ -202,23 +211,29 @@ export const firestoreService = {
     }
 
     const localTaken = getLocalCache<TakenSlot[]>('lys_cache_taken_slots', []);
-    if (!localTaken.some(ts => ts.id === slotId)) {
-      localTaken.push({ id: slotId, fecha: booking.fecha, hora: booking.hora, isBlocked });
-      setLocalCache('lys_cache_taken_slots', localTaken);
+    for (const h of hoursToBlock) {
+      const sId = `${booking.fecha}_${h}`;
+      if (!localTaken.some(ts => ts.id === sId)) {
+        localTaken.push({ id: sId, fecha: booking.fecha, hora: h, isBlocked });
+      }
     }
+    setLocalCache('lys_cache_taken_slots', localTaken);
 
     try {
       const bach = writeBatch(db);
       const bookingRef = doc(db, 'bookings', booking.id);
-      const slotRef = doc(db, 'taken_slots', slotId);
-
       bach.set(bookingRef, booking);
-      bach.set(slotRef, {
-        id: slotId,
-        fecha: booking.fecha,
-        hora: booking.hora,
-        isBlocked: isBlocked
-      });
+
+      for (const h of hoursToBlock) {
+        const sId = `${booking.fecha}_${h}`;
+        const slotRef = doc(db, 'taken_slots', sId);
+        bach.set(slotRef, {
+          id: sId,
+          fecha: booking.fecha,
+          hora: h,
+          isBlocked: isBlocked
+        });
+      }
 
       await withTimeout(bach.commit(), 10000);
     } catch (e) {
@@ -227,24 +242,32 @@ export const firestoreService = {
   },
 
   async deleteBooking(bookingId: string, fecha: string, hora: string): Promise<void> {
-    const slotId = `${fecha}_${hora}`;
+    const localBookings = getLocalCache<Booking[]>('lys_cache_bookings', []);
+    const bk = localBookings.find(b => b.id === bookingId);
+    
+    const hoursToBlock = bk && bk.blockedSlots && bk.blockedSlots.length > 0
+      ? bk.blockedSlots
+      : [hora];
 
     // Update local cache
-    const localBookings = getLocalCache<Booking[]>('lys_cache_bookings', []);
     const filteredBookings = localBookings.filter(b => b.id !== bookingId);
     setLocalCache('lys_cache_bookings', filteredBookings);
 
     const localTaken = getLocalCache<TakenSlot[]>('lys_cache_taken_slots', []);
-    const filteredTaken = localTaken.filter(ts => ts.id !== slotId);
+    const hoursToBlockSet = new Set(hoursToBlock.map(h => `${fecha}_${h}`));
+    const filteredTaken = localTaken.filter(ts => !hoursToBlockSet.has(ts.id));
     setLocalCache('lys_cache_taken_slots', filteredTaken);
 
     try {
       const bach = writeBatch(db);
       const bookingRef = doc(db, 'bookings', bookingId);
-      const slotRef = doc(db, 'taken_slots', slotId);
-
       bach.delete(bookingRef);
-      bach.delete(slotRef);
+
+      for (const h of hoursToBlock) {
+        const sId = `${fecha}_${h}`;
+        const slotRef = doc(db, 'taken_slots', sId);
+        bach.delete(slotRef);
+      }
 
       await withTimeout(bach.commit(), 10000);
     } catch (e) {
@@ -253,7 +276,9 @@ export const firestoreService = {
   },
 
   async updateBookingStatus(bookingId: string, booking: Booking, newStatus: Booking['estado']): Promise<void> {
-    const slotId = `${booking.fecha}_${booking.hora}`;
+    const hoursToBlock = booking.blockedSlots && booking.blockedSlots.length > 0
+      ? booking.blockedSlots
+      : [booking.hora];
 
     // Update local cache
     const localBookings = getLocalCache<Booking[]>('lys_cache_bookings', []);
@@ -262,31 +287,39 @@ export const firestoreService = {
 
     const localTaken = getLocalCache<TakenSlot[]>('lys_cache_taken_slots', []);
     let updatedTaken = localTaken;
+    const hoursToBlockSet = new Set(hoursToBlock.map(h => `${booking.fecha}_${h}`));
+
     if (newStatus === 'cancelado') {
-      updatedTaken = localTaken.filter(ts => ts.id !== slotId);
+      updatedTaken = localTaken.filter(ts => !hoursToBlockSet.has(ts.id));
     } else {
-      if (!localTaken.some(ts => ts.id === slotId)) {
-        updatedTaken.push({ id: slotId, fecha: booking.fecha, hora: booking.hora, isBlocked: booking.nombre.includes('BLOQUEADO') });
+      for (const h of hoursToBlock) {
+        const sId = `${booking.fecha}_${h}`;
+        if (!updatedTaken.some(ts => ts.id === sId)) {
+          updatedTaken.push({ id: sId, fecha: booking.fecha, hora: h, isBlocked: booking.nombre.includes('BLOQUEADO') });
+        }
       }
     }
     setLocalCache('lys_cache_taken_slots', updatedTaken);
 
     try {
       const bookingRef = doc(db, 'bookings', bookingId);
-      const slotRef = doc(db, 'taken_slots', slotId);
       const bach = writeBatch(db);
       
       bach.update(bookingRef, { estado: newStatus });
 
-      if (newStatus === 'cancelado') {
-        bach.delete(slotRef);
-      } else {
-        bach.set(slotRef, {
-          id: slotId,
-          fecha: booking.fecha,
-          hora: booking.hora,
-          isBlocked: booking.nombre.includes('BLOQUEADO')
-        });
+      for (const h of hoursToBlock) {
+        const sId = `${booking.fecha}_${h}`;
+        const slotRef = doc(db, 'taken_slots', sId);
+        if (newStatus === 'cancelado') {
+          bach.delete(slotRef);
+        } else {
+          bach.set(slotRef, {
+            id: sId,
+            fecha: booking.fecha,
+            hora: h,
+            isBlocked: booking.nombre.includes('BLOQUEADO')
+          });
+        }
       }
 
       await withTimeout(bach.commit(), 10000);
@@ -454,9 +487,6 @@ export const firestoreService = {
       if (snap.empty) {
         // Self-bootstrap initial items from local constants to save setup time
         const initialServices: CatalogService[] = SERVICES.map(s => {
-          let basePrice = 20000;
-          if (s.id === 'Interior') basePrice = 25000;
-          if (s.id === 'Full') basePrice = 40000;
           return {
             id: s.id,
             name: s.name,
@@ -464,7 +494,9 @@ export const firestoreService = {
             description: s.description,
             features: s.features,
             isFeatured: s.isFeatured ?? false,
-            basePrice
+            basePrice: s.basePrice || 15000,
+            prices: s.prices || { auto: 15000, suv: 20000, pickup: 30000 },
+            duration: s.duration || 60
           };
         });
         
@@ -500,7 +532,9 @@ export const firestoreService = {
         description: s.description,
         features: s.features,
         isFeatured: s.isFeatured ?? false,
-        basePrice: s.id === 'Interior' ? 25000 : (s.id === 'Full' ? 40000 : 20000)
+        basePrice: s.basePrice || 15000,
+        prices: s.prices || { auto: 15000, suv: 20000, pickup: 30000 },
+        duration: s.duration || 60
       })));
     }
   },

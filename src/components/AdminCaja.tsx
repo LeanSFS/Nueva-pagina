@@ -25,13 +25,15 @@ import {
   ShieldCheck,
   Lock,
   AlertTriangle,
-  Link2
+  Link2,
+  Clock
 } from 'lucide-react';
 import AdminAgenda from './AdminAgenda.tsx';
 import AdminRendimientos from './AdminRendimientos.tsx';
 import AdminMetrics from './AdminMetrics.tsx';
 import { firestoreService, Movement, Booking } from '../services/firestoreService.ts';
 import { auth } from '../services/firebase.ts';
+import { SERVICES } from '../constants.ts';
 import { signInWithPopup, signInWithRedirect, getRedirectResult, GoogleAuthProvider, signOut, User as FirebaseUser } from 'firebase/auth';
 
 const CATS_INGRESO = ['Lavado', 'Extra', 'Propina', 'Otros'];
@@ -376,7 +378,37 @@ export default function AdminCaja({ onBack }: { onBack: () => void }) {
   const loadCatalogAndGallery = async () => {
     try {
       const srvs = await firestoreService.getServices();
-      setDbServices(srvs);
+      // Ensure all 6 new highly detailed services from constants are included
+      const cleanDb = srvs.filter(s => s.id !== 'Exterior' && s.id !== 'Interior' && s.id !== 'Full');
+      const list = [...cleanDb];
+      SERVICES.forEach(staticSrv => {
+        const exists = list.some(item => item.id === staticSrv.id);
+        if (!exists) {
+          list.push({
+            id: staticSrv.id,
+            name: staticSrv.name,
+            label: staticSrv.label,
+            description: staticSrv.description,
+            features: staticSrv.features,
+            isFeatured: staticSrv.isFeatured ?? false,
+            basePrice: staticSrv.basePrice || 15000,
+            prices: staticSrv.prices || { auto: 15000, suv: 20000, pickup: 30000 },
+            duration: staticSrv.duration || 60
+          });
+        }
+      });
+      // Sort in precisely the requested order:
+      // lavado exterior - detallado interior - tapizados de tela - tapizados de cuero - limpieza de techo - tratamiento de vidrios
+      const order = ['lavado_exterior', 'detallado_interior', 'tapizados_tela', 'tapizados_cuero', 'limpieza_techo', 'tratamiento_vidrios'];
+      list.sort((a, b) => {
+        const idxA = order.indexOf(a.id);
+        const idxB = order.indexOf(b.id);
+        if (idxA === -1 && idxB === -1) return 0;
+        if (idxA === -1) return 1;
+        if (idxB === -1) return -1;
+        return idxA - idxB;
+      });
+      setDbServices(list);
       const vehs = await firestoreService.getVehicles();
       setDbVehicles(vehs);
       const phts = await firestoreService.getGallery();
@@ -742,99 +774,140 @@ export default function AdminCaja({ onBack }: { onBack: () => void }) {
         ) : activeTab === 'stats' ? (
           <AdminRendimientos bookings={bookings} movements={allMovements} />
         ) : activeTab === 'catalog' ? (
-          <div className="bg-zinc-900 border border-white/5 rounded-[2.5rem] p-8 md:p-12 space-y-8 animate-fade-in">
+          <div className="bg-zinc-900 border border-white/5 rounded-2xl md:rounded-[2.5rem] p-4 md:p-12 space-y-6 md:space-y-8 animate-fade-in">
             <div>
-              <h2 className="text-2xl font-display font-black italic text-white tracking-tight flex items-center gap-3">
-                <Sparkles className="w-6 h-6 text-emerald-500" /> CATALOGO Y PRECIOS
+              <h2 className="text-xl md:text-2xl font-display font-black italic text-white tracking-tight flex items-center gap-2.5 md:gap-3">
+                <Sparkles className="w-5 h-5 md:w-6 md:h-6 text-emerald-500" /> CATÁLOGO Y PRECIOS
               </h2>
-              <p className="text-zinc-500 text-[10px] font-black uppercase tracking-widest mt-1">Configuración dinámica del sitio web</p>
+              <p className="text-zinc-500 text-[9px] md:text-[10px] font-black uppercase tracking-widest mt-1">Configuración dinámica del sitio web</p>
             </div>
 
             {catalogSuccess && (
-              <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-2xl text-xs font-bold uppercase tracking-widest flex items-center gap-3">
-                <CheckCircle2 className="w-5 h-5 animate-bounce" /> ¡Precios y servicios actualizados con éxito en la Nube!
+              <div className="p-3.5 md:p-4 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-xl md:rounded-2xl text-[10px] md:text-xs font-bold uppercase tracking-widest flex items-center gap-2.5 md:gap-3">
+                <CheckCircle2 className="w-4 h-4 md:w-5 md:h-5 animate-bounce shrink-0" /> ¡Precios y servicios actualizados con éxito en la Nube!
               </div>
             )}
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-              {/* Services pricing modification */}
-              <div className="space-y-6">
-                <h3 className="text-sm font-black uppercase tracking-widest text-emerald-500">Servicios Base</h3>
-                <div className="space-y-4">
-                  {dbServices.map((srv, idx) => (
-                    <div key={srv.id} className="p-6 bg-slate-950 border border-white/10 rounded-2xl relative overflow-hidden">
-                      <div className="flex flex-wrap items-center justify-between gap-4">
-                        <div>
-                          <div className="text-[9px] font-black uppercase text-zinc-500 tracking-widest">{srv.label}</div>
-                          <div className="font-display font-black italic text-lg text-white uppercase">{srv.name}</div>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-zinc-500 font-bold">$</span>
-                          <input 
-                            type="number" 
-                            value={srv.basePrice} 
-                            onChange={(e) => {
-                              const copy = [...dbServices];
-                              copy[idx].basePrice = Number(e.target.value) || 0;
-                              setDbServices(copy);
-                            }}
-                            className="bg-zinc-900 border border-white/10 text-emerald-400 font-display font-black italic text-lg rounded-xl p-3 w-31 outline-none focus:border-emerald-500 text-right font-black"
-                          />
-                        </div>
-                      </div>
-                      <div className="mt-4">
-                        <label className="text-[8px] font-black uppercase text-zinc-650 block mb-1">Descripción corta</label>
-                        <input 
-                          type="text" 
-                          value={srv.description} 
-                          onChange={(e) => {
-                            const copy = [...dbServices];
-                            copy[idx].description = e.target.value;
-                            setDbServices(copy);
-                          }}
-                          className="bg-zinc-900 border border-white/5 text-zinc-350 text-xs rounded-xl p-2.5 w-full outline-none focus:border-emerald-500"
-                        />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Vehicles multiplier modifications */}
-              <div className="space-y-6">
-                <h3 className="text-sm font-black uppercase tracking-widest text-emerald-500">Adicionales por Vehículo</h3>
-                <div className="space-y-4">
-                  {dbVehicles.map((veh, idx) => (
-                    <div key={veh.id} className="p-6 bg-slate-950 border border-white/10 rounded-2xl flex items-center justify-between gap-4">
+            <div className="space-y-4 md:space-y-6">
+              <h3 className="text-xs md:text-sm font-black uppercase tracking-widest text-emerald-500">Configuración Detallada del Menú de Servicios</h3>
+              <p className="text-zinc-400 text-[10.5px] md:text-xs font-medium leading-relaxed">
+                Aquí puedes ajustar las descripciones, las duraciones estimadas (importantes para bloquear consecutivamente los turnos del calendario) y los precios exactos para cada tipo de vehículo. El simulador de turnos adoptará estos cambios al instante.
+              </p>
+              
+              <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 md:gap-6">
+                {dbServices.map((srv, idx) => (
+                  <div key={srv.id} className="p-4 md:p-6 bg-slate-950 border border-white/10 rounded-2xl relative overflow-hidden space-y-4">
+                    <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/5 pb-3">
                       <div>
-                        <div className="text-[9px] font-black uppercase text-zinc-500 tracking-widest">Ejemplos: {veh.examples}</div>
-                        <div className="font-display font-black italic text-lg text-white uppercase">{veh.name}</div>
+                        <div className="text-[8.5px] font-black uppercase text-zinc-500 tracking-widest">{srv.label || 'Servicio'}</div>
+                        <div className="font-display font-black italic text-base md:text-lg text-white uppercase">{srv.name}</div>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-zinc-500 font-bold">+$</span>
+                      <div className="flex items-center gap-1.5 bg-zinc-900 border border-white/5 px-2.5 py-1.5 rounded-xl">
+                        <Clock className="w-4 h-4 text-emerald-500 shrink-0" />
                         <input 
                           type="number" 
-                          value={veh.extraPrice} 
+                          value={srv.duration || 60} 
                           onChange={(e) => {
-                            const copy = [...dbVehicles];
-                            copy[idx].extraPrice = Number(e.target.value) || 0;
-                            setDbVehicles(copy);
+                            const copy = [...dbServices];
+                            copy[idx].duration = Number(e.target.value) || 0;
+                            setDbServices(copy);
                           }}
-                          className="bg-zinc-900 border border-white/10 text-emerald-400 font-display font-black italic text-lg rounded-xl p-3 w-31 outline-none focus:border-emerald-500 text-right font-black"
+                          className="bg-transparent text-emerald-400 font-display font-black italic text-xs md:text-sm w-9 md:w-12 text-center outline-none"
                         />
+                        <span className="text-[8.5px] text-zinc-500 font-black">MIN</span>
                       </div>
                     </div>
-                  ))}
-                </div>
 
-                <div className="p-6 bg-emerald-500/5 border border-emerald-500/10 rounded-2xl">
-                  <h4 className="flex items-center gap-2 text-emerald-500 mb-2 font-display text-sm font-black italic">¿CÓMO AFECTA ESTO?</h4>
-                  <p className="text-zinc-500 text-xs leading-relaxed">
-                    Al actualizar estos importes, el simulador de precio de la página de inicio recalculará automáticamente:
-                    <br />
-                    <span className="text-white font-bold">Precio Final = Precio Base de Lavado + Adicional según Tipo de Vehículo.</span>
-                  </p>
-                </div>
+                    <div>
+                      <label className="text-[7.5px] md:text-[8px] font-black uppercase text-zinc-400 block mb-1">Descripción del Servicio</label>
+                      <textarea 
+                        rows={2}
+                        value={srv.description || ''} 
+                        onChange={(e) => {
+                          const copy = [...dbServices];
+                          copy[idx].description = e.target.value;
+                          setDbServices(copy);
+                        }}
+                        className="bg-zinc-900 border border-white/5 text-zinc-300 text-xs rounded-xl p-2.5 w-full outline-none focus:border-emerald-500 resize-none whitespace-normal break-words"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-[10px] md:text-xs font-black uppercase text-zinc-400 block mb-2 md:mb-3">Precios por Tipo de Vehículo</label>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 sm:gap-3">
+                        {/* Auto */}
+                        <div className="bg-zinc-900/80 border border-white/10 p-2.5 sm:p-3 rounded-xl hover:border-emerald-500/20 transition-all flex sm:flex-col items-center sm:items-stretch justify-between gap-3 sm:gap-2">
+                          <div className="text-xs sm:text-[10px] font-black text-zinc-300 uppercase tracking-wider font-sans flex items-center gap-1.5">
+                            <span className="text-sm">🚗</span> Auto
+                          </div>
+                          <div className="relative flex-1 sm:w-full max-w-[140px] sm:max-w-none">
+                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs md:text-sm text-zinc-500 font-bold">$</span>
+                            <input 
+                              type="number"
+                              value={srv.prices?.auto ?? srv.basePrice}
+                              onChange={(e) => {
+                                const copy = [...dbServices];
+                                if (!copy[idx].prices) {
+                                  copy[idx].prices = { auto: srv.basePrice || 15000, suv: (srv.basePrice || 15000) + 5000, pickup: (srv.basePrice || 15000) + 15000 };
+                                }
+                                copy[idx].prices.auto = Number(e.target.value) || 0;
+                                copy[idx].basePrice = Number(e.target.value) || 0; // maintain fallback
+                                setDbServices(copy);
+                              }}
+                              className="w-full bg-zinc-950/60 border border-white/5 focus:border-emerald-500/40 rounded-lg py-1.5 pl-7 pr-3 text-emerald-400 font-display font-black italic text-xs md:text-sm text-right outline-none transition-all"
+                            />
+                          </div>
+                        </div>
+
+                        {/* SUV */}
+                        <div className="bg-zinc-900/80 border border-white/10 p-2.5 sm:p-3 rounded-xl hover:border-emerald-500/20 transition-all flex sm:flex-col items-center sm:items-stretch justify-between gap-3 sm:gap-2">
+                          <div className="text-xs sm:text-[10px] font-black text-zinc-300 uppercase tracking-wider font-sans flex items-center gap-1.5">
+                            <span className="text-sm">🚙</span> SUV
+                          </div>
+                          <div className="relative flex-1 sm:w-full max-w-[140px] sm:max-w-none">
+                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs md:text-sm text-zinc-500 font-bold">$</span>
+                            <input 
+                              type="number"
+                              value={srv.prices?.suv ?? (srv.basePrice + 5000)}
+                              onChange={(e) => {
+                                const copy = [...dbServices];
+                                if (!copy[idx].prices) {
+                                  copy[idx].prices = { auto: srv.basePrice || 15000, suv: (srv.basePrice || 15000) + 5000, pickup: (srv.basePrice || 15000) + 15000 };
+                                }
+                                copy[idx].prices.suv = Number(e.target.value) || 0;
+                                setDbServices(copy);
+                              }}
+                              className="w-full bg-zinc-950/60 border border-white/5 focus:border-emerald-500/40 rounded-lg py-1.5 pl-7 pr-3 text-emerald-400 font-display font-black italic text-xs md:text-sm text-right outline-none transition-all"
+                            />
+                          </div>
+                        </div>
+
+                        {/* Pickup */}
+                        <div className="bg-zinc-900/80 border border-white/10 p-2.5 sm:p-3 rounded-xl hover:border-emerald-500/20 transition-all flex sm:flex-col items-center sm:items-stretch justify-between gap-3 sm:gap-2">
+                          <div className="text-xs sm:text-[10px] font-black text-zinc-300 uppercase tracking-wider font-sans flex items-center gap-1.5">
+                            <span className="text-sm">🛻</span> Pickup
+                          </div>
+                          <div className="relative flex-1 sm:w-full max-w-[140px] sm:max-w-none">
+                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs md:text-sm text-zinc-500 font-bold">$</span>
+                            <input 
+                              type="number"
+                              value={srv.prices?.pickup ?? (srv.basePrice + 15000)}
+                              onChange={(e) => {
+                                const copy = [...dbServices];
+                                if (!copy[idx].prices) {
+                                  copy[idx].prices = { auto: srv.basePrice || 15000, suv: (srv.basePrice || 15000) + 5000, pickup: (srv.basePrice || 15000) + 15000 };
+                                }
+                                copy[idx].prices.pickup = Number(e.target.value) || 0;
+                                setDbServices(copy);
+                              }}
+                              className="w-full bg-zinc-950/60 border border-white/5 focus:border-emerald-500/40 rounded-lg py-1.5 pl-7 pr-3 text-emerald-400 font-display font-black italic text-xs md:text-sm text-right outline-none transition-all"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
 

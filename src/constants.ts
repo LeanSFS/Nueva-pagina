@@ -7,45 +7,119 @@ import { Service } from './types.ts';
 
 export const SERVICES: Service[] = [
   {
-    id: 'Exterior',
+    id: 'lavado_exterior',
     name: 'Lavado Exterior',
-    label: 'Opción 1 • Brillo Básico',
-    description: 'Limpieza profunda de carrocería, ruedas, llantas y pasaruedas. Lavado manual de contacto con PH neutro Koch Chemie Gentle Snow Foam, secado técnico libre de rayas y acondicionado de cubiertas con PSS Plast Star sin siliconas.',
+    label: 'Carrocería de Precisión • Brillo',
+    description: 'Limpieza meticulosa de carrocería, ruedas, llantas y pasaruedas. Lavado manual con espuma activa de pH neutro, secado por soplado libre de rayas y sellado spray hidrofóbico con brillo prolongado.',
     features: [
       'Llantas y Pasaruedas',
       'Gentle Snow Foam neutro',
-      'Acondicionador PSS de Cubiertas',
-      'Secado Técnico Seguro'
-    ]
+      'Secado Técnico sin Rayas',
+      'Cera rápida protectora'
+    ],
+    basePrice: 15000,
+    prices: {
+      auto: 15000,
+      suv: 20000,
+      pickup: 30000
+    },
+    duration: 60
   },
   {
-    id: 'Interior',
+    id: 'detallado_interior',
     name: 'Detallado Interior',
-    label: 'Opción 2 • Cabina Premium',
-    description: 'Aspirado profundo completo, detallado de plásticos de consola, paneles de puertas, rejillas de ventilación y grietas. Acondicionado de plásticos internos con Koch Chemie Top Star (protección UV y efecto antiestático).',
+    label: 'Habitáculo Libre de Polvo • Antibacterial',
+    description: 'Aspirado profundo de butacas, alfombras y baúl. Detallado artesanal de consola, rejillas de ventilación, plásticos y acondicionador con protección UV y acabado mate original.',
     features: [
-      'Aspirado Detallado',
-      'Limpieza de Consola y Paneles',
-      'Koch Chemie Top Star UV',
-      'Repelente de Polvo',
-      'Vidrios sin Vetas'
-    ]
+      'Aspirado Ultra-Detallado',
+      'Limpieza de Consola y Grietas',
+      'Protector UV de plásticos',
+      'Acondicionador sin silicona',
+      'Vidrios sin marcas'
+    ],
+    basePrice: 20000,
+    prices: {
+      auto: 20000,
+      suv: 25000,
+      pickup: 30000
+    },
+    duration: 60
   },
   {
-    id: 'Full',
-    name: 'Lavado Full',
-    label: 'Opción 3 • Máxima Protección',
-    isFeatured: true,
-    description: 'El tratamiento definitivo que combina el Detallado de Cabina premium (con Top Star) con un Lavado de Carrocería de la más alta gama. Incluye la aplicación del sellador hidrofóbico Koch Chemie Protector Wax que brinda protección de hasta 3 meses, brillo extremo "efecto lotus" de autolimpieza y acondicionado exterior PSS Plast Star.',
+    id: 'limpieza_techo',
+    name: 'Limpieza de Techo',
+    label: 'Tratamiento Artesanal • Sin Hundimiento',
+    description: 'Remoción cuidadosa de manchas de suciedad, hollín e impurezas del revestimiento de techo. Limpieza manual controlada mediante espumas secas para resguardar el adhesivo y evitar desprendimientos.',
     features: [
-      'Detallado Interior Premium',
-      'Lavado de Carrocería Completo',
-      'Sellador Hydro Protector Wax',
-      'Efecto Lotus Autolimpiante',
-      'Protección de Pintura (3 Meses)',
-      'Acondicionador PSS Plast Star',
-      'Vidrios Internos y Externos'
-    ]
+      'Tratamiento de manchas',
+      'Espuma seca controlada',
+      'Remoción de hollín',
+      'Cuidado del pegamento'
+    ],
+    basePrice: 10000,
+    prices: {
+      auto: 10000,
+      suv: 12000,
+      pickup: 15000
+    },
+    duration: 60
+  },
+  {
+    id: 'tapizados_tela',
+    name: 'Tapizados de Tela',
+    label: 'Extracción Profunda • Lavado Químico',
+    description: 'Inyección y extracción de alto poder en butacas de tela. Desinfecta fibras, remueve manchas profundas del uso, halos de agua, derrames de líquidos y neutraliza olores de raíz.',
+    features: [
+      'Inyección y Extracción',
+      'Eliminación de manchas',
+      'Desinfección de ácaros',
+      'Neutralizador de olores'
+    ],
+    basePrice: 40000,
+    prices: {
+      auto: 40000,
+      suv: 45000,
+      pickup: 50000
+    },
+    duration: 120
+  },
+  {
+    id: 'tapizados_cuero',
+    name: 'Tapizados de Cuero',
+    label: 'Nutrición Humectante • Protección Mate',
+    description: 'Lavado suave con cepillo de cerdas naturales para remover oleosidad del roce. Nutrición intensiva con cremas humectantes orgánicas para evitar grietas, resequedad y rigidez.',
+    features: [
+      'Limpieza suave de poros',
+      'Crema humectante premium',
+      'Prevención de grietas',
+      'Terminación mate original'
+    ],
+    basePrice: 15000,
+    prices: {
+      auto: 15000,
+      suv: 18000,
+      pickup: 20000
+    },
+    duration: 60
+  },
+  {
+    id: 'tratamiento_vidrios',
+    name: 'Tratamiento de Vidrios',
+    label: 'Descontaminación • Hidrofóbico y Antiempaño',
+    description: 'Pulido leve para remover marcas de lluvia ácida y sarro. Aplicación de sellador repelente de agua por fuera (mejora visibilidad bajo la lluvia) y revestimiento antiempañante por dentro.',
+    features: [
+      'Repelente de agua externo',
+      'Antiempañante interno',
+      'Elimina sarro y lluvia ácida',
+      'Visibilidad segura'
+    ],
+    basePrice: 10000,
+    prices: {
+      auto: 10000,
+      suv: 12000,
+      pickup: 15000
+    },
+    duration: 60
   }
 ];
 
@@ -56,9 +130,12 @@ export const VEHICLES = [
 ];
 
 export const BASE_PRICES: Record<string, number> = {
-  Exterior: 20000,
-  Interior: 25000,
-  Full: 40000
+  lavado_exterior: 15000,
+  detallado_interior: 20000,
+  limpieza_techo: 10000,
+  tapizados_tela: 40000,
+  tapizados_cuero: 15000,
+  tratamiento_vidrios: 10000
 };
 
 export const TYPE_EXTRA: Record<string, number> = {

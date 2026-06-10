@@ -42,16 +42,17 @@ service cloud.firestore {
 
     function isValidBooking(booking) {
       return booking.keys().hasAll(['id', 'fecha', 'hora', 'tipo', 'servicio', 'nombre', 'telefono', 'direccion', 'estado'])
-          && booking.keys().size() == 9
+          && booking.keys().size() >= 9 && booking.keys().size() <= 10
           && booking.id is string && booking.id.size() <= 128
           && booking.fecha is string && booking.fecha.size() == 10
           && booking.hora is string && booking.hora.size() == 5
           && booking.tipo is string && booking.tipo.size() <= 150
-          && booking.servicio is string && booking.servicio.size() <= 150
+          && booking.servicio is string && booking.servicio.size() <= 500
           && booking.nombre is string && booking.nombre.size() <= 150
           && booking.telefono is string && booking.telefono.size() <= 50
           && booking.direccion is string && booking.direccion.size() <= 500
-          && booking.estado is string && booking.estado in ['pendiente', 'confirmado', 'hecho', 'cancelado'];
+          && booking.estado is string && booking.estado in ['pendiente', 'confirmado', 'hecho', 'cancelado']
+          && (!('blockedSlots' in booking) || booking.blockedSlots is list);
     }
 
     function isValidTakenSlot(slot) {
@@ -82,14 +83,16 @@ service cloud.firestore {
 
     function isValidService(srv) {
       return srv.keys().hasAll(['id', 'name', 'label', 'description', 'features', 'basePrice'])
-          && srv.keys().size() >= 6 && srv.keys().size() <= 7 // isFeatured can be optional
+          && srv.keys().size() >= 6 && srv.keys().size() <= 10 // features, isFeatured, duration, prices
           && srv.id is string && srv.id.size() <= 100
           && srv.name is string && srv.name.size() <= 150
           && srv.label is string && srv.label.size() <= 150
           && srv.description is string && srv.description.size() <= 1000
           && srv.features is list && srv.features.size() <= 20
           && (srv.basePrice is int || srv.basePrice is float)
-          && (!('isFeatured' in srv) || srv.isFeatured is bool);
+          && (!('isFeatured' in srv) || srv.isFeatured is bool)
+          && (!('duration' in srv) || srv.duration is int)
+          && (!('prices' in srv) || srv.prices is map);
     }
 
     function isValidVehicle(veh) {

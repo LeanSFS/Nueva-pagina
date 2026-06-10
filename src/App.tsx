@@ -172,7 +172,27 @@ export default function App() {
   }, [view]);
 
   const activeServices = useMemo(() => {
-    return dbServices.length > 0 ? dbServices : SERVICES;
+    // Filter legacy service records (e.g. 'Exterior', 'Interior', 'Full') if they exist in DB
+    const cleanDb = dbServices.filter(s => s.id !== 'Exterior' && s.id !== 'Interior' && s.id !== 'Full');
+    const list = [...cleanDb];
+    // Ensure all 6 new highly detailed services from constants are included
+    SERVICES.forEach(staticSrv => {
+      const exists = list.some(item => item.id === staticSrv.id);
+      if (!exists) {
+        list.push(staticSrv);
+      }
+    });
+    // Sort in precisely the requested order:
+    // lavado exterior - detallado interior - tapizados de tela - tapizados de cuero - limpieza de techo - tratamiento de vidrios
+    const order = ['lavado_exterior', 'detallado_interior', 'tapizados_tela', 'tapizados_cuero', 'limpieza_techo', 'tratamiento_vidrios'];
+    return list.sort((a, b) => {
+      const idxA = order.indexOf(a.id);
+      const idxB = order.indexOf(b.id);
+      if (idxA === -1 && idxB === -1) return 0;
+      if (idxA === -1) return 1;
+      if (idxB === -1) return -1;
+      return idxA - idxB;
+    });
   }, [dbServices]);
 
   const activeVehicles = useMemo(() => {
@@ -191,7 +211,12 @@ export default function App() {
   const [adminPassword, setAdminPassword] = useState('');
   const [showPasswordPrompt, setShowPasswordPrompt] = useState(false);
   const [vehicle, setVehicle] = useState<VehicleType | null>(null);
-  const [selectedService, setSelectedService] = useState<ServiceKey | null>(null);
+  const [selectedServices, setSelectedServices] = useState<string[]>([]);
+  const [currentBookingStep, setCurrentBookingStep] = useState<number>(1);
+  const selectedService = selectedServices[0] || null;
+  const setSelectedService = (srv: string | null) => {
+    setSelectedServices(srv ? [srv] : []);
+  };
   
   // Availability state
   const [slotsData, setSlotsData] = useState<TimeSlot[]>(() => {
@@ -249,26 +274,108 @@ export default function App() {
     }
   }, [view]);
 
-  // Handle selections with explicit scroll triggers
-  const handleVehicleSelect = (type: VehicleType) => {
-    setVehicle(type);
-    setSelectedService(null);
-    setSelectedDateStr(null);
-    setSelectedTime(null);
-    setTimeout(() => scrollToSection(step2Ref), 600);
+  const PACKS = [
+    {
+      id: 'full' as const,
+      name: 'PACK FULL 💫',
+      label: 'EL FAVORITO',
+      description: 'Lavado Exterior + Detallado Interior. El combo definitivo.',
+      services: ['lavado_exterior', 'detallado_interior'],
+      isFeatured: true
+    },
+    {
+      id: 'interior_tela' as const,
+      name: 'INTERIOR COMPLETO (TELA) 🧼',
+      label: 'REVIVE TEXTILES',
+      description: 'Detallado Interior + Limpieza de Techo + Tapizados de Tela impecables.',
+      services: ['detallado_interior', 'limpieza_techo', 'tapizados_tela'],
+      isFeatured: false
+    },
+    {
+      id: 'interior_cuero' as const,
+      name: 'INTERIOR COMPLETO (CUERO) ✨',
+      label: 'CUIDADO SUPREMO',
+      description: 'Detallado Interior + Limpieza de Techo + Tratamiento Nutritivo de Cuero.',
+      services: ['detallado_interior', 'limpieza_techo', 'tapizados_cuero'],
+      isFeatured: false
+    }
+  ];
+
+  const getSelectedPackId = () => {
+    const sortedSel = [...selectedServices].sort().join(',');
+    if (sortedSel === ['lavado_exterior', 'detallado_interior'].sort().join(',')) return 'full';
+    if (sortedSel === ['detallado_interior', 'limpieza_techo', 'tapizados_tela'].sort().join(',')) return 'interior_tela';
+    if (sortedSel === ['detallado_interior', 'limpieza_techo', 'tapizados_cuero'].sort().join(',')) return 'interior_cuero';
+    return null;
   };
 
-  const handleServiceSelect = (service: ServiceKey) => {
-    setSelectedService(service);
+  const handleSelectPack = (packType: 'full' | 'interior_tela' | 'interior_cuero') => {
+    let packServices: string[] = [];
+    if (packType === 'full') {
+      packServices = ['lavado_exterior', 'detallado_interior'];
+    } else if (packType === 'interior_tela') {
+      packServices = ['detallado_interior', 'limpieza_techo', 'tapizados_tela'];
+    } else if (packType === 'interior_cuero') {
+      packServices = ['detallado_interior', 'limpieza_techo', 'tapizados_cuero'];
+    }
+    
+    setSelectedServices(packServices);
     setSelectedDateStr(null);
     setSelectedTime(null);
     metricsService.logAction('click_servicios');
-    setTimeout(() => scrollToSection(step3Ref), 600);
+    setTimeout(() => {
+      setCurrentBookingStep(3);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }, 450);
+  };
+
+  const handleToggleService = (sId: string) => {
+    let nextServices = [...selectedServices];
+    if (nextServices.includes(sId)) {
+      nextServices = nextServices.filter(id => id !== sId);
+    } else {
+      if (sId === 'tapizados_tela') {
+        nextServices = nextServices.filter(id => id !== 'tapizados_cuero');
+      } else if (sId === 'tapizados_cuero') {
+        nextServices = nextServices.filter(id => id !== 'tapizados_tela');
+      }
+      nextServices.push(sId);
+    }
+    setSelectedServices(nextServices);
+    setSelectedDateStr(null);
+    setSelectedTime(null);
+    metricsService.logAction('click_servicios');
+  };
+
+  // Handle selections with explicit scroll triggers
+  const handleVehicleSelect = (type: VehicleType) => {
+    setVehicle(type);
+    setSelectedServices([]);
+    setSelectedDateStr(null);
+    setSelectedTime(null);
+    setTimeout(() => {
+      setCurrentBookingStep(2);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }, 450);
+  };
+
+  const handleServiceSelect = (service: ServiceKey) => {
+    setSelectedServices([service]);
+    setSelectedDateStr(null);
+    setSelectedTime(null);
+    metricsService.logAction('click_servicios');
+    setTimeout(() => {
+      setCurrentBookingStep(3);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }, 450);
   };
 
   const handleTimeSelect = (time: string) => {
     setSelectedTime(time);
-    setTimeout(() => scrollToSection(step4Ref), 600);
+    setTimeout(() => {
+      setCurrentBookingStep(4);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }, 450);
   };
 
   // Navigation handles
@@ -278,6 +385,7 @@ export default function App() {
     setSelectedService(null);
     setSelectedDateStr(null);
     setSelectedTime(null);
+    setCurrentBookingStep(1);
     setView('booking');
     metricsService.logAction('inicio_reserva');
   };
@@ -398,11 +506,50 @@ export default function App() {
       .filter(item => item.date.getDay() !== 0); // 0 is Sunday
   }, [filteredSlotsData]);
 
+  const totalDuration = useMemo(() => {
+    return selectedServices.reduce((total, sId) => {
+      const srv = activeServices.find(s => s.id === sId);
+      return total + (srv?.duration || 60);
+    }, 0);
+  }, [selectedServices, activeServices]);
+
+  const getBlockedSlotsList = (startHour: string, duration: number, isSaturday: boolean) => {
+    const list = [startHour];
+    if (duration > 120) {
+      if (startHour === '09:00') {
+        list.push('11:00');
+      } else if (startHour === '15:00' && isSaturday) {
+        list.push('17:00');
+      }
+    }
+    return list;
+  };
+
   const availableTimes = useMemo(() => {
     if (!selectedDateStr) return [];
     const dayData = filteredSlotsData.find(s => s && s.fecha === selectedDateStr);
-    return dayData ? (dayData.slots || []) : [];
-  }, [selectedDateStr, filteredSlotsData]);
+    if (!dayData) return [];
+    
+    const allSlots = dayData.slots || [];
+    
+    // Check if we need consecutive slots
+    if (totalDuration > 120) {
+      const dateParts = selectedDateStr.split('-').map(Number);
+      const dateObj = new Date(dateParts[0], dateParts[1] - 1, dateParts[2]);
+      const isSaturday = dateObj.getDay() === 6;
+
+      return allSlots.filter((time: string) => {
+        if (time === '09:00') {
+          return allSlots.includes('11:00');
+        }
+        if (time === '15:00' && isSaturday) {
+          return allSlots.includes('17:00');
+        }
+        return false;
+      });
+    }
+    return allSlots;
+  }, [selectedDateStr, filteredSlotsData, totalDuration]);
 
   // --- Weather Logic ---
   const [weatherData, setWeatherData] = useState<Record<string, { isRainy: boolean, code: number }>>({});
@@ -433,42 +580,24 @@ export default function App() {
 
   // --- Support Components ---
   
-  const calculatePrice = (service: ServiceKey | null, vType: VehicleType | null) => {
-    if (!service || !vType) return 0;
-
-    const dbS = activeServices.find(s => s.id === service);
-    const dbV = activeVehicles.find(v => v.id === vType);
-
-    if (dbServices.length > 0 && dbVehicles.length > 0) {
-      if (vType === 'pickup' && service === 'Interior') {
-        return 30000;
+  const calculatePrice = (srvOrIds: string | string[] | null, vType: VehicleType | null) => {
+    if (!srvOrIds || !vType) return 0;
+    const ids = Array.isArray(srvOrIds) ? srvOrIds : [srvOrIds];
+    return ids.reduce((total, id) => {
+      const srv = activeServices.find(s => s.id === id);
+      if (!srv) return total;
+      if (srv.prices && srv.prices[vType] !== undefined) {
+        return total + srv.prices[vType];
       }
-      const basePrice = dbS ? dbS.basePrice : 0;
-      const extraPrice = dbV ? dbV.extraPrice : 0;
-      return basePrice + extraPrice;
-    }
-    
-    // Exact overrides per user request (Updated with +$5k across all services)
-    if (vType === 'pickup') {
-      if (service === 'Exterior') return 30000;
-      if (service === 'Interior') return 30000;
-      if (service === 'Full') return 55000;
-    }
-    
-    if (vType === 'suv') {
-      if (service === 'Interior') return 25000;
-      // Exterior SUV is 20000 + 5000 = 25000 based on constants
-      // Full SUV is 40000 + 5000 = 45000 based on constants
-    }
-
-    const base = BASE_PRICES[service] || 0;
-    const extra = TYPE_EXTRA[vType] || 0;
-    return base + extra;
+      const base = srv.basePrice || 15000;
+      const extra = vType === 'pickup' ? 15000 : (vType === 'suv' ? 5000 : 0);
+      return total + base + extra;
+    }, 0);
   };
   
   const currentPrice = useMemo(() => {
-    return calculatePrice(selectedService, vehicle);
-  }, [vehicle, selectedService]);
+    return calculatePrice(selectedServices, vehicle);
+  }, [vehicle, selectedServices]);
 
   const firstAvailableInfo = useMemo(() => {
     if (isLoadingSlots) return { day: 'Cargando...', times: 'Buscando horarios disponibles...' };
@@ -494,11 +623,14 @@ export default function App() {
   }, [availableDates, filteredSlotsData, isLoadingSlots]);
 
   const handleFinalBooking = async () => {
-    if (!selectedDateStr || !selectedTime || !vehicle || !selectedService || !clientName || !clientPhone || !clientConfirmedLocation) return;
+    if (!selectedDateStr || !selectedTime || !vehicle || selectedServices.length === 0 || !clientName || !clientPhone || !clientConfirmedLocation) return;
 
     setIsSubmitting(true);
-    const serviceName = activeServices.find(s => s.id === selectedService)?.name || selectedService;
+    const serviceName = selectedServices.map(sId => activeServices.find(s => s.id === sId)?.name || sId).join(' + ');
     const vehicleName = activeVehicles.find(v => v.id === vehicle)?.name || vehicle;
+    
+    const isSaturday = availableDates.find(d => d.str === selectedDateStr)?.date.getDay() === 6;
+    const blocked = getBlockedSlotsList(selectedTime, totalDuration, isSaturday);
 
     const result = await createBooking({
       fecha: selectedDateStr,
@@ -507,7 +639,8 @@ export default function App() {
       servicio: `${serviceName} – $${currentPrice}`,
       nombre: clientName,
       telefono: clientPhone,
-      direccion: "Venezuela 1659 (Domicilio)"
+      direccion: "Venezuela 1659 (Domicilio)",
+      blockedSlots: blocked
     });
 
     if (result.ok) {
@@ -547,6 +680,68 @@ export default function App() {
       alert('Error en la reserva: ' + (result.error || 'Intente nuevamente'));
     }
     setIsSubmitting(false);
+  };
+
+  const renderServiceCard = (s: typeof activeServices[0]) => {
+    const isSelected = selectedServices.includes(s.id);
+    const isOtherUpholsterySelected = 
+      (s.id === 'tapizados_tela' && selectedServices.includes('tapizados_cuero')) ||
+      (s.id === 'tapizados_cuero' && selectedServices.includes('tapizados_tela'));
+    
+    const itemPrice = calculatePrice([s.id], vehicle);
+    
+    return (
+      <div
+        key={s.id}
+        onClick={() => handleToggleService(s.id)}
+        className={`p-4 md:p-5 rounded-2xl border transition-all duration-200 relative flex flex-col justify-between h-auto sm:h-full select-none cursor-pointer ${
+          isSelected
+            ? 'bg-zinc-950 border-emerald-500 shadow-[0_2px_15px_rgba(16,185,129,0.12)] scale-[1.01]'
+            : isOtherUpholsterySelected
+              ? 'bg-zinc-900/30 border-white/[0.05] opacity-60 hover:opacity-100 hover:border-emerald-500/30 transition-all duration-250'
+              : 'bg-zinc-900/40 border-white/[0.04] hover:border-white/10 hover:bg-zinc-900/60 active:bg-zinc-900/80'
+        }`}
+      >
+        <div>
+          <div className="flex justify-between items-start gap-2 mb-2 md:mb-3">
+            <div className="flex items-center gap-2.5 min-w-0">
+              {/* Checkbox indicator */}
+              <div className={`w-4 h-4 md:w-5 md:h-5 rounded-md border flex items-center justify-center transition-all shrink-0 ${
+                isSelected ? 'bg-emerald-500 border-emerald-400 text-night shadow-[0_0_10px_rgba(16,185,129,0.3)]' : 'border-white/20 bg-zinc-950/50'
+              }`}>
+                {isSelected && (
+                  <svg className="w-2.5 h-2.5 md:w-3.5 md:h-3.5 stroke-[4.5]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                     <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                  </svg>
+                )}
+              </div>
+              <div className="min-w-0">
+                <h6 className="font-display font-black italic text-xs md:text-sm text-white uppercase tracking-tight flex items-center gap-1.5 flex-wrap">
+                  {s.name}
+                  {isOtherUpholsterySelected && (
+                    <span className="text-[7.5px] md:text-[8px] text-emerald-400 font-extrabold tracking-wider bg-emerald-500/10 border border-emerald-500/15 px-1.5 py-0.5 rounded uppercase">
+                      Tap para alternar
+                    </span>
+                  )}
+                </h6>
+              </div>
+            </div>
+            <span className="text-[9px] md:text-[10px] text-zinc-500 font-extrabold uppercase shrink-0 whitespace-nowrap bg-white/[0.02] border border-white/[0.04] px-1.5 py-0.5 rounded-md">
+              ⏱️ {s.duration || 60} min
+            </span>
+          </div>
+          
+          <p className="text-[9.5px] md:text-xs text-zinc-400 leading-relaxed font-semibold pl-6.5 md:pl-7.5 whitespace-normal break-words">
+            {s.description}
+          </p>
+        </div>
+
+        <div className="flex justify-between items-center mt-3 pt-3 border-t border-white/[0.04] pl-6.5 md:pl-7.5">
+          <span className="text-[8px] md:text-[9px] font-black uppercase text-zinc-500 tracking-wider">Inversión:</span>
+          <span className="text-xs md:text-sm font-display font-black text-emerald-400">${itemPrice.toLocaleString('es-AR')}</span>
+        </div>
+      </div>
+    );
   };
 
   return (
@@ -1278,169 +1473,435 @@ export default function App() {
                   Volver al Inicio
                 </button>
                 
-                <SectionHeader kicker="Calculador" title="Personaliza tu <span class='text-emerald-500'>Cuidado</span>" number="01" />
+                <SectionHeader 
+                  kicker="Calculador" 
+                  title={
+                    currentBookingStep === 1 
+                      ? "Selecciona tu <span class='text-emerald-500'>Vehículo</span>" 
+                      : currentBookingStep === 2 
+                        ? "Elige tus <span class='text-emerald-500'>Servicios</span>" 
+                        : currentBookingStep === 3 
+                          ? "Elige tu <span class='text-emerald-500'>Turno</span>" 
+                          : "Confirma tus <span class='text-emerald-500'>Datos</span>"
+                  } 
+                  number={`0${currentBookingStep}`} 
+                />
 
-                <div ref={step1Ref} className="mb-20 md:mb-32 scroll-mt-32">
-                  <div className="flex flex-col mb-10 md:mb-16 relative">
-                     <span className="text-emerald-500 font-display font-black italic text-6xl md:text-[10rem] leading-none mb-2 select-none opacity-[0.07] absolute -top-10 md:-top-20 -left-4 md:-left-12">01</span>
-                     <div className="relative z-10">
-                        <h3 className="text-2xl md:text-5xl font-display font-black uppercase tracking-tighter flex items-center gap-4 text-white">
-                           <span className="bg-emerald-500 text-night px-5 py-2 rounded-2xl italic tracking-tighter shadow-[0_0_30px_rgba(16,185,129,0.3)]">1.</span>
-                           SELECCIONA TU VEHÍCULO
-                        </h3>
-                        <div className="w-32 md:w-48 h-2 bg-emerald-500 mt-6 rounded-full" />
-                        <p className="text-zinc-500 text-xs md:text-sm font-bold uppercase tracking-[0.2em] mt-4 ml-1">Elegí la categoría que mejor describa tu auto</p>
-                     </div>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-6">
-                    {activeVehicles.map((v) => (
-                      <button
-                        key={v.id}
-                        onClick={() => handleVehicleSelect(v.id as VehicleType)}
-                        className={`p-6 md:p-10 rounded-2xl md:rounded-3xl text-left transition-all relative overflow-hidden group ${
-                          vehicle === v.id 
-                          ? 'bg-emerald-500 text-night shadow-[0_15px_40px_rgba(16,185,129,0.2)]' 
-                          : 'bg-zinc-900 border border-white/[0.04] hover:bg-zinc-800'
-                        }`}
-                      >
-                        <div className="flex items-center gap-4 md:gap-6 relative z-10">
-                          <span className="text-3xl md:text-5xl group-hover:scale-110 transition-transform">{v.icon}</span>
-                          <div>
-                            <div className="font-display font-black text-sm md:text-xl md:mb-1">{v.name}</div>
-                            <div className={`text-[9px] md:text-[11px] font-black uppercase tracking-tighter opacity-60 leading-tight`}>
-                              {v.examples.split(',')
-                                .map(ex => ex.trim())
-                                .sort(() => 0.5 - Math.random())
-                                .slice(0, 8)
-                                .join(', ')}...
+                {/* Visual Step Wizard Progress Bar */}
+                <div className="mb-8 md:mb-14 bg-zinc-900/40 border border-white/[0.05] rounded-2xl md:rounded-[2rem] p-3 md:p-5 mt-6 md:mt-8">
+                  <div className="grid grid-cols-4 gap-1.5 md:gap-4">
+                    {[
+                      { num: 1, label: 'Vehículo', desc: 'Categoría' },
+                      { num: 2, label: 'Servicios', desc: 'Qué hacemos' },
+                      { num: 3, label: 'Turno', desc: 'Fecha y hora' },
+                      { num: 4, label: 'Tus Datos', desc: 'Confirmar' }
+                    ].map((st) => {
+                      const isCompleted = st.num < currentBookingStep;
+                      const isActive = st.num === currentBookingStep;
+                      const isLocked = (st.num === 2 && !vehicle) ||
+                                       (st.num === 3 && selectedServices.length === 0) ||
+                                       (st.num === 4 && (!selectedDateStr || !selectedTime));
+                                       
+                      return (
+                        <button
+                          key={st.num}
+                          disabled={isLocked}
+                          onClick={() => {
+                            setCurrentBookingStep(st.num);
+                            window.scrollTo({ top: 0, behavior: 'smooth' });
+                          }}
+                          className={`relative text-left p-2.5 md:p-4 rounded-xl md:rounded-2xl transition-all duration-300 flex flex-col md:flex-row items-center md:items-start gap-1.5 md:gap-3 outline-none border text-left ${
+                            isActive 
+                              ? 'bg-emerald-500/10 border-emerald-500/30' 
+                              : isCompleted
+                                ? 'bg-zinc-950/40 border-white/[0.02] opacity-80 hover:opacity-100 cursor-pointer'
+                                : 'bg-transparent border-transparent opacity-30 cursor-not-allowed'
+                          }`}
+                        >
+                          <div className={`w-6 h-6 md:w-8 md:h-8 rounded-lg md:rounded-xl font-display font-black italic flex items-center justify-center shrink-0 text-xs md:text-sm tracking-tighter transition-all ${
+                            isActive 
+                              ? 'bg-emerald-500 text-night shadow-[0_0_15px_rgba(16,185,129,0.25)]' 
+                              : isCompleted
+                                ? 'bg-emerald-500/20 text-emerald-400'
+                                : 'bg-zinc-800 text-zinc-500'
+                          }`}>
+                            {isCompleted ? '✓' : st.num}
+                          </div>
+                          
+                          <div className="text-left hidden md:block">
+                            <div className={`text-[10px] md:text-xs font-black uppercase tracking-wider ${
+                              isActive ? 'text-emerald-400' : isCompleted ? 'text-zinc-200' : 'text-zinc-500'
+                            }`}>
+                              {st.label}
+                            </div>
+                            <div className="text-[7.5px] md:text-[9.5px] font-bold text-zinc-500 uppercase tracking-widest mt-0.5 opacity-60">
+                              {st.desc}
                             </div>
                           </div>
-                        </div>
-                        {vehicle === v.id && (
-                          <motion.div layoutId="v-pill" className="absolute top-4 right-4 md:top-6 md:right-6">
-                             <CheckCircle2 className="w-4 h-4 md:w-5 md:h-5 opacity-90" />
-                          </motion.div>
-                        )}
-                      </button>
-                    ))}
+                          
+                          <div className="text-center md:hidden block">
+                            <div className={`text-[8px] font-black uppercase tracking-wider leading-none ${
+                              isActive ? 'text-emerald-400' : isCompleted ? 'text-zinc-350' : 'text-zinc-500'
+                            }`}>
+                              {st.label}
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
 
-                {/* Stepper 2: Service */}
-                <AnimatePresence>
-                  {vehicle && (
+                <AnimatePresence mode="wait">
+                  {currentBookingStep === 1 && (
                     <motion.div
-                      ref={step2Ref}
-                      initial={{ opacity: 0, height: 0, marginTop: 0 }}
-                      animate={{ opacity: 1, height: 'auto', marginTop: 80 }}
-                      exit={{ opacity: 0, height: 0, marginTop: 0 }}
-                      className="overflow-hidden scroll-mt-32 pb-20"
+                      key="step1"
+                      initial={{ opacity: 0, x: -10 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      exit={{ opacity: 0, x: 10 }}
+                      transition={{ duration: 0.3 }}
+                      className="space-y-6"
                     >
-                      <div className="flex flex-col mb-10 md:mb-16 relative">
-                         <span className="text-emerald-500 font-display font-black italic text-6xl md:text-[10rem] leading-none mb-2 select-none opacity-[0.07] absolute -top-10 md:-top-20 -left-4 md:-left-12">02</span>
+                      <div className="flex flex-col mb-6 md:mb-12 relative">
+                         <span className="text-emerald-500 font-display font-black italic text-4xl md:text-[8rem] leading-none mb-1 select-none opacity-[0.07] absolute -top-6 md:-top-16 -left-2 md:-left-12">01</span>
                          <div className="relative z-10">
-                            <h3 className="text-2xl md:text-5xl font-display font-black uppercase tracking-tighter flex items-center gap-4 text-white">
-                               <span className="bg-emerald-500 text-night px-5 py-2 rounded-2xl italic tracking-tighter shadow-[0_0_30px_rgba(16,185,129,0.3)]">2.</span>
-                               ELIGE TU SERVICIO
+                            <h3 className="text-lg md:text-4xl font-display font-black uppercase tracking-tighter flex items-center gap-2 md:gap-4 text-white">
+                               <span className="bg-emerald-500 text-night px-3 py-1 md:px-5 md:py-2 rounded-xl md:rounded-2xl italic tracking-tighter shadow-[0_0_20px_rgba(16,185,129,0.25)] text-sm md:text-xl">1.</span>
+                               SELECCIONA TU VEHÍCULO
                             </h3>
-                            <div className="w-32 md:w-48 h-2 bg-emerald-500 mt-6 rounded-full" />
-                            <p className="text-zinc-500 text-xs md:text-sm font-bold uppercase tracking-[0.2em] mt-4 ml-1">Selecciona el nivel de detalle que buscas</p>
+                            <div className="w-16 md:w-48 h-1 md:h-1.5 bg-emerald-500 mt-2.5 rounded-full" />
+                            <p className="text-zinc-500 text-[10px] md:text-sm font-bold uppercase tracking-widest mt-2 ml-0.5">Elegí la categoría que mejor describa tu auto</p>
                          </div>
                       </div>
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-2 md:gap-4 lg:gap-6">
-                        {activeServices.map((s) => (
-                          <motion.div
-                            key={s.id}
-                            initial={{ opacity: 0, y: 10 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            onClick={() => handleServiceSelect(s.id)}
-                            className={`p-6 md:p-8 rounded-3xl cursor-pointer border-2 transition-all duration-300 relative group flex flex-col h-full ${
-                              selectedService === s.id 
-                              ? 'bg-zinc-950 border-emerald-500 shadow-[0_0_50px_rgba(16,185,129,0.25)] ring-2 ring-emerald-500/20 scale-[1.02] md:scale-[1.03]' 
-                              : s.id === 'Full'
-                                ? 'bg-zinc-900/90 border-emerald-500/30 hover:border-emerald-500/60 shadow-[0_4px_30px_rgba(16,185,129,0.06)] hover:scale-[1.01]'
-                                : 'bg-zinc-900/40 border-white/[0.05] hover:border-white/10 hover:scale-[1.01]'
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5 md:gap-6">
+                        {activeVehicles.map((v) => (
+                          <button
+                            key={v.id}
+                            onClick={() => handleVehicleSelect(v.id as VehicleType)}
+                            className={`p-3.5 md:p-8 rounded-xl md:rounded-3xl text-left transition-all relative overflow-hidden group ${
+                              vehicle === v.id 
+                              ? 'bg-emerald-500 text-night shadow-[0_10px_30px_rgba(16,185,129,0.2)]' 
+                              : 'bg-zinc-900 border border-white/[0.04] hover:bg-zinc-800'
                             }`}
                           >
-                            <div className="flex justify-between items-start mb-6">
-                              <div className="flex flex-col gap-1 w-[calc(100%-32px)]">
-                                 <div className={`text-[8px] md:text-[9px] font-black uppercase tracking-[0.4em] ${selectedService === s.id ? 'text-emerald-500' : s.id === 'Full' ? 'text-emerald-500/70' : 'text-zinc-600'}`}>{s.label}</div>
-                                 <h4 className={`font-display font-black italic text-xl md:text-3xl ${selectedService === s.id ? 'text-emerald-400' : s.id === 'Full' ? 'text-emerald-400/90' : 'text-white'}`}>{s.name}</h4>
+                            <div className="flex items-center gap-3 md:gap-5 relative z-10">
+                              <span className="text-2xl md:text-4xl group-hover:scale-110 transition-transform">{v.icon}</span>
+                              <div>
+                                <div className="font-display font-black text-xs md:text-lg md:mb-1 uppercase tracking-tight">{v.name}</div>
+                                <div className={`text-[8px] md:text-[10px] font-bold uppercase tracking-tight opacity-65 leading-tight`}>
+                                  {v.examples.split(',')
+                                    .map(ex => ex.trim())
+                                    .sort(() => 0.5 - Math.random())
+                                    .slice(0, 8)
+                                    .join(', ')}...
+                                </div>
                               </div>
-                              {/* Visual Radio/Checkmark Indicator */}
-                              <div className={`w-6 h-6 rounded-full flex items-center justify-center border-2 transition-all duration-300 shrink-0 ${
-                                selectedService === s.id 
-                                  ? 'bg-emerald-500 border-emerald-500 text-night' 
-                                  : s.id === 'Full'
-                                    ? 'border-emerald-500/40 bg-zinc-950/50 group-hover:border-emerald-500/60'
-                                    : 'border-white/10 bg-zinc-950/20 group-hover:border-white/20'
-                              }`}>
-                                {selectedService === s.id && (
-                                  <svg className="w-3.5 h-3.5 stroke-[3]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-                                  </svg>
+                            </div>
+                            {vehicle === v.id && (
+                              <motion.div layoutId="v-pill" className="absolute top-4 right-4 md:top-6 md:right-6">
+                                 <CheckCircle2 className="w-4 h-4 md:w-5 md:h-5 opacity-90" />
+                              </motion.div>
+                            )}
+                          </button>
+                        ))}
+                      </div>
+
+                      {vehicle && (
+                        <div className="flex justify-end mt-8 border-t border-white/[0.03] pt-6">
+                          <button
+                            onClick={() => {
+                              setCurrentBookingStep(2);
+                              window.scrollTo({ top: 0, behavior: 'smooth' });
+                            }}
+                            className="bg-emerald-500 text-night font-display font-black italic px-5 py-3 rounded-xl hover:bg-emerald-400 transition-all text-xs tracking-wider uppercase cursor-pointer shadow-lg shadow-emerald-500/10 flex items-center gap-1.5"
+                          >
+                            Continuar a Servicios <ArrowRight className="w-4 h-4" />
+                          </button>
+                        </div>
+                      )}
+                    </motion.div>
+                  )}
+
+                  {currentBookingStep === 2 && vehicle && (
+                    <motion.div
+                      key="step2"
+                      initial={{ opacity: 0, x: -10 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      exit={{ opacity: 0, x: 10 }}
+                      transition={{ duration: 0.3 }}
+                      className="space-y-6 md:space-y-10"
+                    >
+                      <div className="flex flex-col mb-6 md:mb-12 relative">
+                         <span className="text-emerald-500 font-display font-black italic text-4xl md:text-[8rem] leading-none mb-1 select-none opacity-[0.07] absolute -top-6 md:-top-16 -left-2 md:-left-12">02</span>
+                         <div className="relative z-10">
+                            <h3 className="text-lg md:text-4xl font-display font-black uppercase tracking-tighter flex items-center gap-2 md:gap-4 text-white">
+                               <span className="bg-emerald-500 text-night px-3 py-1 md:px-5 md:py-2 rounded-xl md:rounded-2xl italic tracking-tighter shadow-[0_0_20px_rgba(16,185,129,0.25)] text-sm md:text-xl">2.</span>
+                               ELIGE TU SERVICIO
+                            </h3>
+                            <div className="w-16 md:w-48 h-1 md:h-1.5 bg-emerald-500 mt-2.5 rounded-full" />
+                            <p className="text-zinc-500 text-[10px] md:text-sm font-bold uppercase tracking-widest mt-2 ml-0.5">Selecciona el nivel de detalle que buscas</p>
+                         </div>
+                      </div>
+
+                      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-white/[0.04] pb-4">
+                        <div>
+                          <h4 className="text-xs md:text-sm font-black uppercase text-emerald-500 tracking-wider flex items-center gap-1.5">
+                            <span>🎛️</span> LISTADO DE SERVICIOS
+                          </h4>
+                          <p className="text-zinc-500 text-[8px] md:text-[10px] font-black uppercase tracking-widest mt-0.5">Combina servicios y activa importantes packs recomendados al instante</p>
+                        </div>
+                        {selectedServices.length > 0 && (
+                          <button 
+                            onClick={() => setSelectedServices([])}
+                            className="text-[8px] md:text-[9px] font-black uppercase tracking-widest text-zinc-500 hover:text-rose-455 transition-colors self-start md:self-auto py-1 px-3 border border-zinc-800 rounded-lg hover:border-rose-500/25"
+                          >
+                            ✕ Limpiar Selección
+                          </button>
+                        )}
+                      </div>
+
+                      <div className="space-y-6 md:space-y-8">
+                        {/* FRAME 1: PACK FULL */}
+                        {(() => {
+                          const packFullSrvs = activeServices.filter(s => ['lavado_exterior', 'detallado_interior'].includes(s.id));
+                          const isFullPackActive = selectedServices.includes('lavado_exterior') && selectedServices.includes('detallado_interior');
+                          
+                          return (
+                            <div className={`p-4 md:p-8 rounded-2xl md:rounded-[2.5rem] border-2 transition-all duration-300 relative ${
+                              isFullPackActive 
+                                ? 'bg-zinc-950/60 border-emerald-500 shadow-[0_0_35px_rgba(16,185,129,0.18)] scale-[1.005]' 
+                                : 'bg-zinc-900/10 border-white/[0.04]'
+                            }`}>
+                              {isFullPackActive && (
+                                <div className="absolute -top-3 left-6 md:left-10 bg-gradient-to-r from-emerald-500 to-teal-500 text-night px-3 py-0.5 rounded-full text-[8px] md:text-[9px] font-black uppercase tracking-wider shadow-lg shadow-emerald-500/10 animate-pulse flex items-center gap-1 z-10">
+                                  <span>🎉</span> ¡PACK FULL ACTIVADO! 💫
+                                </div>
+                              )}
+                              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4 md:mb-6">
+                                <div>
+                                  <h5 className="font-display font-black italic text-sm md:text-xl text-white uppercase tracking-tight flex items-center gap-2">
+                                    {isFullPackActive ? '🔥' : '⚙️'} COMBO ESTÉTICA COMPLETA
+                                  </h5>
+                                  <p className="text-zinc-500 text-[8.5px] md:text-xs font-semibold leading-relaxed mt-0.5">
+                                    Lavado Exterior meticuloso + Detallado Interior profundo. El cuidado favorito para lucir como nuevo.
+                                  </p>
+                                </div>
+                                {!isFullPackActive && (
+                                  <button 
+                                    onClick={() => {
+                                      let next = [...selectedServices];
+                                      if (!next.includes('lavado_exterior')) next.push('lavado_exterior');
+                                      if (!next.includes('detallado_interior')) next.push('detallado_interior');
+                                      setSelectedServices(next);
+                                      setSelectedDateStr(null);
+                                      setSelectedTime(null);
+                                      metricsService.logAction('click_servicios');
+                                    }}
+                                    className="text-[8px] md:text-[9px] font-black uppercase tracking-widest text-emerald-400 border border-emerald-500/20 px-3 py-1.5 rounded-xl bg-emerald-500/5 hover:bg-emerald-500/15 hover:border-emerald-500/50 transition-all self-start sm:self-auto cursor-pointer"
+                                  >
+                                    ⚡ ACTIVAR PACK FULL
+                                  </button>
                                 )}
                               </div>
-                            </div>
-                            
-                            <p className="text-[11px] md:text-sm text-zinc-400 leading-relaxed mb-6 font-medium">{s.description}</p>
-                            
-                            <div className="mt-auto flex flex-wrap gap-x-3 gap-y-2 pt-5 border-t border-white/[0.04]">
-                              {s.features.map((f, i) => (
-                                <div key={i} className="flex items-center gap-1 text-[8px] md:text-[10px] text-zinc-400 font-bold uppercase tracking-widest bg-white/[0.02] px-2 py-0.5 rounded-md border border-white/[0.02]">
-                                  <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                                  {f}
-                                </div>
-                              ))}
-                            </div>
 
-                            <div className="mt-4 text-lg md:text-2xl font-display font-black text-white self-end">
-                              ${calculatePrice(s.id, vehicle).toLocaleString('es-AR')}
-                            </div>
-
-                            {s.isFeatured && (
-                              <div className="absolute -top-3.5 left-6 bg-gradient-to-r from-emerald-500 to-teal-500 text-night px-3 py-1 rounded-full text-[8.5px] font-black uppercase tracking-[0.05em] shadow-[0_10px_20px_rgba(16,185,129,0.35)] flex items-center gap-1">
-                                <span>✨</span> EL MÁS ELEGIDO • 93% DE CLIENTES
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
+                                {packFullSrvs.map(renderServiceCard)}
                               </div>
-                            )}
-                          </motion.div>
-                        ))}
+                            </div>
+                          );
+                        })()}
+
+                        {/* FRAME 2: INTERIOR COMPLETO */}
+                        {(() => {
+                          const packInteriorSrvs = activeServices.filter(s => ['tapizados_tela', 'tapizados_cuero', 'limpieza_techo'].includes(s.id));
+                          const hasDetallado = selectedServices.includes('detallado_interior');
+                          const hasTecho = selectedServices.includes('limpieza_techo');
+                          const hasTapizados = selectedServices.includes('tapizados_tela') || selectedServices.includes('tapizados_cuero');
+                          const isInteriorPackActive = hasDetallado && hasTecho && hasTapizados;
+                          const isInteriorPartiallyActive = hasTecho && hasTapizados;
+
+                          return (
+                            <div className={`p-4 md:p-8 rounded-2xl md:rounded-[2.5rem] border-2 transition-all duration-300 relative ${
+                              isInteriorPackActive 
+                                ? 'bg-zinc-950/60 border-teal-500 shadow-[0_0_35px_rgba(20,184,166,0.18)] scale-[1.005]' 
+                                : 'bg-zinc-900/10 border-white/[0.04]'
+                            }`}>
+                              {isInteriorPackActive && (
+                                <div className="absolute -top-3 left-6 md:left-10 bg-gradient-to-r from-teal-500 to-emerald-500 text-night px-3 py-0.5 rounded-full text-[8px] md:text-[9px] font-black uppercase tracking-wider shadow-lg shadow-teal-500/10 animate-pulse flex items-center gap-1 z-10">
+                                  <span>🎉</span> ¡PACK INTERIOR COMPLETO ACTIVADO! 🧼
+                                </div>
+                              )}
+                              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4 md:mb-6">
+                                <div>
+                                  <h5 className="font-display font-black italic text-sm md:text-xl text-white uppercase tracking-tight flex items-center gap-2">
+                                    {isInteriorPackActive ? '🔥' : '🧽'} COMBO RENOVACIÓN DE HABITÁCULO
+                                  </h5>
+                                  <p className="text-zinc-500 text-[8.5px] md:text-xs font-semibold leading-relaxed mt-0.5">
+                                    Limpieza profunda de Tapizados + Techo. {isInteriorPartiallyActive && !hasDetallado ? (
+                                      <span className="text-amber-400">💡 Tip: ¡Si sumas "Detallado Interior" completas el Pack!</span>
+                                    ) : 'Adiciona "Detallado Interior" para completar el nivel supremo de habitáculo.'}
+                                  </p>
+                                </div>
+                                {!isInteriorPackActive && (
+                                  <button 
+                                    onClick={() => {
+                                      let next = [...selectedServices];
+                                      if (!next.includes('detallado_interior')) next.push('detallado_interior');
+                                      if (!next.includes('limpieza_techo')) next.push('limpieza_techo');
+                                      
+                                      // Choose cloth by default, unless they have leather selected
+                                      if (!next.includes('tapizados_tela') && !next.includes('tapizados_cuero')) {
+                                        next.push('tapizados_tela');
+                                      }
+                                      setSelectedServices(next);
+                                      setSelectedDateStr(null);
+                                      setSelectedTime(null);
+                                      metricsService.logAction('click_servicios');
+                                    }}
+                                    className="text-[8px] md:text-[9px] font-black uppercase tracking-widest text-teal-400 border border-teal-500/20 px-3 py-1.5 rounded-xl bg-teal-500/5 hover:bg-teal-500/15 hover:border-teal-500/50 transition-all self-start sm:self-auto cursor-pointer"
+                                  >
+                                    ⚡ ACTIVAR INTERIOR COMPLETO
+                                  </button>
+                                )}
+                              </div>
+
+                              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-4">
+                                {packInteriorSrvs.map(renderServiceCard)}
+                              </div>
+                            </div>
+                          );
+                        })()}
+
+                        {/* FRAME 3: DETALLES ADICIONALES */}
+                        {(() => {
+                          const packAdditionalSrvs = activeServices.filter(s => ['tratamiento_vidrios'].includes(s.id));
+                          const isAdicSelected = selectedServices.includes('tratamiento_vidrios');
+
+                          return (
+                            <div className={`p-4 md:p-8 rounded-2xl md:rounded-[2.5rem] border-2 transition-all duration-300 ${
+                              isAdicSelected 
+                                ? 'bg-zinc-950/60 border-zinc-600 shadow-[0_0_25px_rgba(255,255,255,0.05)] scale-[1.002]' 
+                                : 'bg-zinc-900/10 border-white/[0.04]'
+                            }`}>
+                              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4 md:mb-6">
+                                  <div>
+                                    <h5 className="font-display font-black italic text-sm md:text-xl text-white uppercase tracking-tight flex items-center gap-2">
+                                      💎 PROTECCIÓN COMPLEMENTARIA DE CRISTALES
+                                    </h5>
+                                    <p className="text-zinc-500 text-[8.5px] md:text-xs font-semibold leading-relaxed mt-0.5">
+                                      Mejora la seguridad de manejo con el Tratamiento de lluvia y Antiempañamiento.
+                                    </p>
+                                  </div>
+                              </div>
+
+                              <div className="grid grid-cols-1 gap-3">
+                                {packAdditionalSrvs.map(renderServiceCard)}
+                              </div>
+                            </div>
+                          );
+                        })()}
+                      </div>
+
+                      {/* Combined Selection dynamic details */}
+                      {selectedServices.length > 0 && (
+                        <motion.div 
+                          initial={{ opacity: 0, scale: 0.95 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          className="p-4 md:p-6 bg-emerald-500/5 border border-emerald-500/10 rounded-xl md:rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-4 md:gap-6"
+                        >
+                          <div className="space-y-0.5" id="selection-details-box">
+                            <div className="text-[7px] md:text-[8px] font-black uppercase text-emerald-500 tracking-[0.2em]">RESUMEN DE TU SELECCIÓN</div>
+                            <h5 className="text-white font-display font-black italic uppercase tracking-tight text-sm md:text-xl text-left">
+                              {getSelectedPackId() 
+                                ? PACKS.find(p => p.id === getSelectedPackId())?.name 
+                                : selectedServices.map(i => activeServices.find(s => s.id === i)?.name).join(' + ')
+                              }
+                            </h5>
+                            <p className="text-[8px] md:text-[10px] text-zinc-550 font-bold uppercase tracking-wider text-left">
+                              ⏱️ Duración: <span className="text-white font-black">{totalDuration} min</span> {totalDuration > 120 && '• Requiere 2 módulos de tiempo'}
+                            </p>
+                          </div>
+                          <div className="flex items-center justify-between md:justify-end gap-4 border-t border-white/[0.04] md:border-0 pt-3 md:pt-0">
+                            <div className="text-left md:text-right">
+                              <div className="text-[7px] md:text-[8px] font-black text-zinc-500 uppercase tracking-widest">INVERSIÓN TOTAL</div>
+                              <div className="text-lg md:text-3xl font-display font-black text-white italic tracking-tighter">
+                                ${currentPrice.toLocaleString('es-AR')}
+                              </div>
+                            </div>
+                            <button 
+                              onClick={() => {
+                                setCurrentBookingStep(3);
+                                window.scrollTo({ top: 0, behavior: 'smooth' });
+                              }}
+                              className="bg-emerald-500 text-night font-display font-black italic px-4 py-2.5 md:px-6 md:py-3 rounded-lg md:rounded-xl hover:bg-emerald-400 transition-all text-[10px] md:text-xs tracking-wider uppercase cursor-pointer shrink-0 shadow-lg shadow-emerald-500/10 flex items-center gap-1.5"
+                            >
+                              Continuar <ArrowRight className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </motion.div>
+                      )}
+
+                      {/* Step 2 Bottom Navigation */}
+                      <div className="flex items-center justify-between border-t border-white/[0.05] pt-6 md:pt-10">
+                        <button
+                          onClick={() => {
+                            setCurrentBookingStep(1);
+                            window.scrollTo({ top: 0, behavior: 'smooth' });
+                          }}
+                          className="text-[10px] md:text-xs font-black uppercase tracking-widest text-zinc-500 hover:text-white transition-all flex items-center gap-1.5 py-2.5 px-4 border border-zinc-800 rounded-xl hover:border-white/10 active:scale-95"
+                        >
+                          🡴 Volver
+                        </button>
+                        
+                        {selectedServices.length > 0 ? (
+                          <button
+                            onClick={() => {
+                              setCurrentBookingStep(3);
+                              window.scrollTo({ top: 0, behavior: 'smooth' });
+                            }}
+                            className="bg-emerald-500 text-night font-display font-black italic px-5 py-3 rounded-xl hover:bg-emerald-400 transition-all text-xs tracking-wider uppercase cursor-pointer shadow-lg shadow-emerald-500/10 flex items-center gap-1.5"
+                          >
+                            Continuar a Turno <ArrowRight className="w-4 h-4" />
+                          </button>
+                        ) : (
+                          <div className="text-[10px] uppercase font-bold text-zinc-500 tracking-wider">
+                            Selecciona al menos 1 servicio para continuar
+                          </div>
+                        )}
                       </div>
                     </motion.div>
                   )}
-                </AnimatePresence>
 
-                {/* Stepper 3: Availability */}
-                <AnimatePresence>
-                  {selectedService && (
+                  {currentBookingStep === 3 && selectedServices.length > 0 && (
                     <motion.div 
-                      ref={step3Ref}
-                      initial={{ opacity: 0, height: 0, marginTop: 0 }}
-                      animate={{ opacity: 1, height: 'auto', marginTop: 80 }}
-                      exit={{ opacity: 0, height: 0, marginTop: 0 }}
-                      className="overflow-hidden scroll-mt-32 pb-20"
+                      key="step3"
+                      initial={{ opacity: 0, x: -10 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      exit={{ opacity: 0, x: 10 }}
+                      transition={{ duration: 0.3 }}
+                      className="space-y-6 md:space-y-10"
                     >
-                      <div className="flex flex-col mb-10 md:mb-16 relative">
-                         <span className="text-emerald-500 font-display font-black italic text-6xl md:text-[10rem] leading-none mb-2 select-none opacity-[0.07] absolute -top-10 md:-top-20 -left-4 md:-left-12">03</span>
+                      <div className="flex flex-col mb-6 md:mb-12 relative">
+                         <span className="text-emerald-500 font-display font-black italic text-4xl md:text-[8rem] leading-none mb-1 select-none opacity-[0.07] absolute -top-6 md:-top-16 -left-2 md:-left-12">03</span>
                          <div className="relative z-10">
-                            <h3 className="text-2xl md:text-5xl font-display font-black uppercase tracking-tighter flex items-center gap-4 text-white">
-                               <span className="bg-emerald-500 text-night px-5 py-2 rounded-2xl italic tracking-tighter shadow-[0_0_30px_rgba(16,185,129,0.3)]">3.</span>
+                            <h3 className="text-lg md:text-4xl font-display font-black uppercase tracking-tighter flex items-center gap-2 md:gap-4 text-white">
+                               <span className="bg-emerald-500 text-night px-3 py-1 md:px-5 md:py-2 rounded-xl md:rounded-2xl italic tracking-tighter shadow-[0_0_20px_rgba(16,185,129,0.25)] text-sm md:text-xl">3.</span>
                                FECHA Y HORARIO
                             </h3>
-                            <div className="w-32 md:w-48 h-2 bg-emerald-500 mt-6 rounded-full" />
-                            <p className="text-zinc-500 text-xs md:text-sm font-bold uppercase tracking-[0.2em] mt-4 ml-1">Encontrá el momento perfecto para el cuidado de tu auto</p>
-                         </div>
+                            <div className="w-16 md:w-48 h-1 md:h-1.5 bg-emerald-500 mt-2.5 rounded-full" />
+                            <p className="text-zinc-500 text-[10px] md:text-sm font-bold uppercase tracking-widest mt-2 ml-0.5">Encontrá el momento perfecto para el cuidado de tu auto</p>
+                          </div>
                       </div>
                       
-                      <div className="flex flex-col gap-8">
+                      <div className="flex flex-col gap-4 md:gap-8">
                         {/* Horizontal Date Picker */}
                         <div className="overflow-x-auto pb-4 -mx-5 px-5 md:mx-0 md:px-0 no-scrollbar">
-                          <div className="flex gap-3">
+                          <div className="flex gap-2">
                             {isLoadingSlots ? (
                               Array.from({ length: 6 }).map((_, i) => (
                                 <div 
                                   key={i} 
-                                  className="flex-shrink-0 w-16 md:w-20 p-4 md:p-5 rounded-2xl border border-white/[0.05] bg-zinc-900/50 animate-pulse flex flex-col items-center gap-2"
+                                  className="flex-shrink-0 w-14 md:w-20 p-2.5 md:p-5 rounded-xl md:rounded-2xl border border-white/[0.05] bg-zinc-900/50 animate-pulse flex flex-col items-center gap-2"
                                 >
                                   <div className="w-8 h-2 bg-white/10 rounded" />
                                   <div className="w-6 h-6 bg-white/10 rounded" />
@@ -1457,16 +1918,16 @@ export default function App() {
                                     key={i}
                                     disabled={isFull}
                                     onClick={() => { setSelectedDateStr(str); setSelectedTime(null); }}
-                                    className={`flex-shrink-0 w-16 md:w-20 p-4 md:p-5 rounded-2xl border transition-all flex flex-col items-center gap-1 relative overflow-hidden ${
+                                    className={`flex-shrink-0 w-14 md:w-20 p-2.5 md:p-5 rounded-xl md:rounded-2xl border transition-all flex flex-col items-center gap-1 relative overflow-hidden ${
                                       isSelected 
                                       ? 'bg-emerald-500 border-emerald-400 text-night shadow-lg' 
                                       : isFull
-                                        ? 'bg-zinc-900 border-white/[0.03] text-zinc-600 cursor-not-allowed'
-                                        : 'bg-zinc-900 border-white/[0.05] text-zinc-500 hover:border-white/10'
+                                        ? 'bg-zinc-900 border-white/[0.03] text-zinc-650 cursor-not-allowed'
+                                        : 'bg-zinc-900 border-white/[0.05] text-white hover:border-white/10'
                                     }`}
                                   >
                                     <div className="flex flex-col items-center gap-0.5">
-                                      <span className={`text-[8px] md:text-[9px] font-black uppercase tracking-widest ${isSelected ? 'opacity-70' : 'opacity-40'}`}>
+                                      <span className={`text-[7.5px] md:text-[9px] font-black uppercase tracking-widest ${isSelected ? 'opacity-70' : 'opacity-40'}`}>
                                         {date.toLocaleDateString('es-AR', { weekday: 'short' }).replace('.', '')}
                                       </span>
                                       {(() => {
@@ -1475,7 +1936,7 @@ export default function App() {
                                         return <CloudRain className={`w-3 h-3 ${isSelected ? 'text-night/60' : 'text-blue-400'} animate-pulse`} />;
                                       })()}
                                     </div>
-                                    <span className="text-lg md:text-xl font-display font-black leading-none">{date.getDate()}</span>
+                                    <span className="text-base md:text-xl font-display font-black leading-none">{date.getDate()}</span>
                                     
                                     {!isSelected && (
                                       <div className={`absolute bottom-2 w-1 h-1 rounded-full ${
@@ -1495,212 +1956,260 @@ export default function App() {
 
                         {/* Time Slots */}
                         {selectedDateStr && (
-                          <div className="space-y-6">
+                          <div className="space-y-4">
                             {weatherForSelected && weatherForSelected.isRainy && (
                               <motion.div 
                                 initial={{ opacity: 0, y: -10 }}
                                 animate={{ opacity: 1, y: 0 }}
-                                className="bg-amber-500/10 border border-amber-500/20 p-6 rounded-2xl flex items-start gap-4 mb-4"
+                                className="bg-amber-500/10 border border-amber-500/20 p-4 md:p-6 rounded-xl md:rounded-2xl flex items-start gap-3 md:gap-4 mb-2 md:mb-4"
                               >
-                                <div className="w-12 h-12 rounded-xl bg-amber-500 text-night flex items-center justify-center flex-shrink-0 animate-pulse">
-                                  <Droplets className="w-6 h-6" />
+                                <div className="w-8 h-8 md:w-12 md:h-12 rounded-lg md:rounded-xl bg-amber-500 text-night flex items-center justify-center flex-shrink-0 animate-pulse">
+                                  <Droplets className="w-4 h-4 md:w-6 md:h-6" />
                                 </div>
-                                <div>
-                                  <h4 className="text-amber-500 font-display font-black italic text-lg uppercase tracking-tight">¡Ojo con el clima!</h4>
-                                  <p className="text-zinc-400 text-xs font-medium leading-relaxed mt-1">
-                                    Hay <span className="text-amber-400">probabilidad de lluvia</span> para este día. Si lavás el auto y llueve, recordá que no podemos garantizar que se mantenga limpio. ¡Te recomendamos chequear bien o elegir otro día!
+                                <div className="min-w-0 text-left">
+                                  <h4 className="text-amber-500 font-display font-black italic text-sm md:text-lg uppercase tracking-tight">¡Ojo con el clima!</h4>
+                                  <p className="text-zinc-400 text-[10px] md:text-xs font-semibold leading-relaxed mt-0.5">
+                                    Hay <span className="text-amber-400">probabilidad de lluvia</span> para este día. Si lavás el auto y llueve, recordá que no podemos garantizar que se mantenga limpio.
                                   </p>
                                 </div>
                               </motion.div>
                             )}
 
-                            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                            {isLoadingSlots ? (
-                              Array.from({ length: 4 }).map((_, i) => (
-                                <div key={i} className="p-4 md:p-6 rounded-2xl border border-white/[0.05] bg-zinc-900/50 animate-pulse h-16 md:h-20" />
-                              ))
-                            ) : availableTimes.length > 0 ? (
-                              availableTimes.map((time) => {
-                                const isSelected = selectedTime === time;
-                                return (
-                                  <button
-                                    key={time}
-                                    onClick={() => handleTimeSelect(time)}
-                                    className={`p-4 md:p-6 rounded-2xl border font-display font-black text-sm md:text-xl flex items-center justify-center gap-2 transition-all ${
-                                      isSelected 
-                                      ? 'bg-emerald-500 border-emerald-400 text-night' 
-                                      : 'bg-zinc-900 border-white/[0.05] text-white hover:bg-zinc-800'
-                                    }`}
-                                  >
-                                    <Clock className="w-3.5 h-3.5 md:w-5 md:h-5 opacity-60" />
-                                    {time}
-                                  </button>
-                                );
-                              })
-                            ) : (
-                              <div className="col-span-full p-8 text-center text-zinc-500 font-medium">
-                                <CalendarDays className="w-8 h-8 mx-auto mb-3 opacity-20" />
-                                Lo sentimos, no hay turnos disponibles para este día.
-                              </div>
-                            )}
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 md:gap-3">
+                              {isLoadingSlots ? (
+                                Array.from({ length: 4 }).map((_, i) => (
+                                  <div key={i} className="p-3 md:p-6 rounded-xl md:rounded-2xl border border-white/[0.05] bg-zinc-900/50 animate-pulse h-12 md:h-20" />
+                                ))
+                              ) : availableTimes.length > 0 ? (
+                                availableTimes.map((time) => {
+                                  const isSelected = selectedTime === time;
+                                  return (
+                                    <button
+                                      key={time}
+                                      onClick={() => handleTimeSelect(time)}
+                                      className={`p-3 md:p-6 rounded-xl md:rounded-2xl border font-display font-black text-xs md:text-xl flex items-center justify-center gap-1.5 md:gap-2 transition-all ${
+                                        isSelected 
+                                        ? 'bg-emerald-500 border-emerald-400 text-night shadow-[0_0_20px_rgba(16,185,129,0.15)]' 
+                                        : 'bg-zinc-900 border-white/[0.05] text-white hover:bg-zinc-800'
+                                      }`}
+                                    >
+                                      <Clock className="w-3.5 h-3.5 md:w-5 md:h-5 opacity-60" />
+                                      {time}
+                                    </button>
+                                  );
+                                })
+                              ) : (
+                                <div className="col-span-full p-6 md:p-8 text-center text-zinc-500 font-semibold text-xs md:text-sm">
+                                  <CalendarDays className="w-6 h-6 md:w-8 md:h-8 mx-auto mb-2 md:mb-3 opacity-20" />
+                                  Lo sentimos, no hay turnos disponibles para este día.
+                                </div>
+                              )}
+                            </div>
                           </div>
-                        </div>
-                      )}
+                        )}
                       </div>
 
-                      {/* Stepper 4: Client Data */}
-                      <AnimatePresence>
-                        {selectedTime && (
-                          <motion.div
-                            ref={step4Ref}
-                            initial={{ opacity: 0, height: 0, marginTop: 0 }}
-                            animate={{ opacity: 1, height: 'auto', marginTop: 80 }}
-                            className="overflow-hidden scroll-mt-32 pb-20"
+                      {/* Step 3 Bottom Navigation */}
+                      <div className="flex items-center justify-between border-t border-white/[0.05] pt-6 md:pt-10 mt-6">
+                        <button
+                          onClick={() => {
+                            setCurrentBookingStep(2);
+                            window.scrollTo({ top: 0, behavior: 'smooth' });
+                          }}
+                          className="text-[10px] md:text-xs font-black uppercase tracking-widest text-zinc-500 hover:text-white transition-all flex items-center gap-1.5 py-2.5 px-4 border border-zinc-800 rounded-xl hover:border-white/10 active:scale-95"
+                        >
+                          🡴 Volver
+                        </button>
+                        
+                        {selectedDateStr && selectedTime ? (
+                          <button
+                            onClick={() => {
+                              setCurrentBookingStep(4);
+                              window.scrollTo({ top: 0, behavior: 'smooth' });
+                            }}
+                            className="bg-emerald-500 text-night font-display font-black italic px-5 py-3 rounded-xl hover:bg-emerald-400 transition-all text-xs tracking-wider uppercase cursor-pointer shadow-lg shadow-emerald-500/10 flex items-center gap-1.5 animate-pulse"
                           >
-                            <div className="flex flex-col mb-10 md:mb-16 relative">
-                               <span className="text-emerald-500 font-display font-black italic text-6xl md:text-[10rem] leading-none mb-2 select-none opacity-[0.07] absolute -top-10 md:-top-20 -left-4 md:-left-12">04</span>
-                               <div className="relative z-10">
-                                  <h3 className="text-2xl md:text-5xl font-display font-black uppercase tracking-tighter flex items-center gap-4 text-white">
-                                     <span className="bg-emerald-500 text-night px-5 py-2 rounded-2xl italic tracking-tighter shadow-[0_0_30px_rgba(16,185,129,0.3)]">4.</span>
-                                     TUS DATOS
-                                  </h3>
-                                  <div className="w-32 md:w-48 h-2 bg-emerald-500 mt-6 rounded-full" />
-                                  <p className="text-zinc-500 text-xs md:text-sm font-bold uppercase tracking-[0.2em] mt-4 ml-1">Confirma tu turno y nuestra ubicación para el servicio</p>
-                               </div>
-                            </div>
-                            
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                              <div className="space-y-3">
-                                <label className="text-xs md:text-sm font-extrabold uppercase tracking-wider text-zinc-200 ml-1 flex items-center gap-2">
-                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                                  Tu Nombre y Apellido
-                                </label>
-                                <div className="relative group">
-                                  <User className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-zinc-400 group-focus-within:text-emerald-500 transition-colors" />
-                                  <input 
-                                    ref={nameInputRef}
-                                    type="text" 
-                                    value={clientName}
-                                    onChange={(e) => setClientName(e.target.value)}
-                                    placeholder="Ej: Juan Pérez"
-                                    enterKeyHint="next"
-                                    onKeyDown={(e) => {
-                                      if (e.key === 'Enter') {
-                                        e.preventDefault();
-                                        phoneInputRef.current?.focus();
-                                      }
-                                    }}
-                                    className="w-full bg-zinc-900 border border-white/20 rounded-xl py-4.5 pl-12 pr-4 text-white placeholder-zinc-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 transition-all font-semibold text-base md:text-lg shadow-inner"
-                                  />
-                                </div>
-                              </div>
-
-                              <div className="space-y-3">
-                                <label className="text-xs md:text-sm font-extrabold uppercase tracking-wider text-zinc-200 ml-1 flex items-center gap-2">
-                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                                  Tu WhatsApp / Celular
-                                </label>
-                                <div className="relative group">
-                                  <Smartphone className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-zinc-400 group-focus-within:text-emerald-500 transition-colors" />
-                                  <input 
-                                    ref={phoneInputRef}
-                                    type="tel" 
-                                    value={clientPhone}
-                                    onChange={(e) => setClientPhone(e.target.value)}
-                                    placeholder="Ej: 2995123456"
-                                    enterKeyHint="done"
-                                    onKeyDown={(e) => {
-                                      if (e.key === 'Enter') {
-                                        e.preventDefault();
-                                        phoneInputRef.current?.blur();
-                                        // Scroll to location checkbox smoothly so they can see and tap it easily
-                                        setTimeout(() => {
-                                          const element = document.getElementById('location-confirm-box');
-                                          if (element) {
-                                            element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                                          }
-                                        }, 150);
-                                      }
-                                    }}
-                                    className="w-full bg-zinc-900 border border-white/20 rounded-xl py-4.5 pl-12 pr-4 text-white placeholder-zinc-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 transition-all font-semibold text-base md:text-lg shadow-inner"
-                                  />
-                                </div>
-                              </div>
-
-                              <div className="space-y-4 md:col-span-2">
-                                <label className="text-xs md:text-sm font-extrabold uppercase tracking-wider text-zinc-200 ml-1 flex items-center gap-2">
-                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                                  Confirmar la Ubicación de entrega
-                                </label>
-                                <div className="space-y-4">
-                                  {/* Location confirmation button placed ABOVE the map */}
-                                  <div 
-                                    id="location-confirm-box"
-                                    onClick={() => setClientConfirmedLocation(!clientConfirmedLocation)}
-                                    className={`p-6 rounded-2xl border-3 transition-all cursor-pointer flex items-center gap-5 group relative overflow-hidden ${
-                                      clientConfirmedLocation 
-                                      ? 'bg-emerald-500/15 border-emerald-500 shadow-[0_0_30px_rgba(16,185,129,0.2)] scale-[1.01]' 
-                                      : 'bg-zinc-900 border-zinc-700 hover:border-emerald-500 hover:bg-zinc-800/80 shadow-[0_0_20px_rgba(16,185,129,0.05)]'
-                                    }`}
-                                  >
-                                    <div className={`shrink-0 w-12 h-12 rounded-xl border-2 flex items-center justify-center transition-all duration-300 ${
-                                      clientConfirmedLocation 
-                                      ? 'bg-emerald-500 border-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.5)] rotate-0 scale-110' 
-                                      : 'border-emerald-500/50 bg-zinc-950 group-hover:border-emerald-500 animate-pulse rotate-[-3deg]'
-                                    }`}>
-                                      {clientConfirmedLocation ? (
-                                        <CheckCircle2 className="w-7 h-7 text-night" />
-                                      ) : (
-                                        <div className="w-4 h-4 rounded-full bg-emerald-500 animate-ping" />
-                                      )}
-                                    </div>
-                                    
-                                    <div className="flex-1">
-                                      <p className={`text-lg md:text-xl font-display font-black italic tracking-tight leading-none mb-1 transition-colors ${
-                                        clientConfirmedLocation ? 'text-emerald-400' : 'text-zinc-100 group-hover:text-emerald-400'
-                                      }`}>
-                                        {clientConfirmedLocation ? 'Ubicación confirmada ✓' : 'Haz clic AQUÍ para confirmar ubicación'}
-                                      </p>
-                                      <p className={`text-xs font-semibold leading-tight transition-colors ${
-                                        clientConfirmedLocation ? 'text-zinc-300' : 'text-zinc-400'
-                                      }`}>
-                                        Entiendo que debo traer mi vehículo a <span className="text-white underline decoration-emerald-500 decoration-2 font-bold">Venezuela 1659</span> (Cipolletti).
-                                      </p>
-                                    </div>
-
-                                    {!clientConfirmedLocation && (
-                                      <div className="absolute right-4 animate-bounce-horizontal hidden md:block">
-                                        <ArrowRight className="w-6 h-6 text-emerald-500" />
-                                      </div>
-                                    )}
-                                  </div>
-
-                                  <div className="bg-red-500/10 border border-red-500/35 rounded-xl p-4 flex items-start gap-3">
-                                    <div className="w-6 h-6 rounded-full bg-red-500/20 flex items-center justify-center shrink-0 mt-0.5">
-                                      <span className="text-red-400 text-xs font-black italic">!</span>
-                                    </div>
-                                    <p className="text-xs text-zinc-300 font-semibold leading-relaxed">
-                                      Por favor ten en cuenta: <span className="text-red-400 font-black uppercase tracking-tight">no realizo servicios a domicilio</span>. Los lavados se realizan únicamente trayendo el auto a la dirección indicada arriba.
-                                    </p>
-                                  </div>
-
-                                  <div className="aspect-video w-full rounded-2xl overflow-hidden border border-white/10 grayscale-[0.2] contrast-[1.05] hover:grayscale-0 transition-all">
-                                    <iframe 
-                                      src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3102.13456789!2d-68.010!3d-38.932!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x960a3162383c9b7f%3A0xc6cb1c986c757c4c!2sVenezuela%201659%2C%20Cipolletti%2C%20R%C3%ADo%20Negro!5e0!3m2!1ses!2sar!4v1713965211234!5m2!1ses!2sar" 
-                                      width="100%" 
-                                      height="100%" 
-                                      style={{ border: 0 }} 
-                                      allowFullScreen={false} 
-                                      loading="lazy" 
-                                      referrerPolicy="no-referrer-when-downgrade"
-                                    />
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
-                          </motion.div>
+                            Continuar a tus Datos <ArrowRight className="w-4 h-4" />
+                          </button>
+                        ) : (
+                          <div className="text-[10px] uppercase font-bold text-zinc-500 tracking-wider">
+                            Selecciona Fecha y Hora para continuar
+                          </div>
                         )}
-                      </AnimatePresence>
+                      </div>
+                    </motion.div>
+                  )}
+
+                  {currentBookingStep === 4 && selectedDateStr && selectedTime && (
+                    <motion.div
+                      key="step4"
+                      initial={{ opacity: 0, x: -10 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      exit={{ opacity: 0, x: 10 }}
+                      transition={{ duration: 0.3 }}
+                      className="space-y-6 md:space-y-10"
+                    >
+                      <div className="flex flex-col mb-6 md:mb-12 relative">
+                         <span className="text-emerald-500 font-display font-black italic text-4xl md:text-[8rem] leading-none mb-1 select-none opacity-[0.07] absolute -top-6 md:-top-16 -left-2 md:-left-12">04</span>
+                         <div className="relative z-10">
+                            <h3 className="text-lg md:text-4xl font-display font-black uppercase tracking-tighter flex items-center gap-2 md:gap-4 text-white">
+                               <span className="bg-emerald-500 text-night px-3 py-1 md:px-5 md:py-2 rounded-xl md:rounded-2xl italic tracking-tighter shadow-[0_0_20px_rgba(16,185,129,0.25)] text-sm md:text-xl">4.</span>
+                               TUS DATOS Y UBICACIÓN
+                            </h3>
+                            <div className="w-16 md:w-48 h-1 md:h-1.5 bg-emerald-500 mt-2.5 rounded-full" />
+                            <p className="text-zinc-500 text-[10px] md:text-sm font-bold uppercase tracking-widest mt-2 ml-0.5">Confirma tu turno y nuestra ubicación para el servicio</p>
+                         </div>
+                      </div>
+                      
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-8">
+                        <div className="space-y-2">
+                          <label className="text-[10px] md:text-sm font-extrabold uppercase tracking-wider text-zinc-200 ml-1 flex items-center gap-2">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                            Tu Nombre y Apellido
+                          </label>
+                          <div className="relative group">
+                            <User className="absolute left-3.5 md:left-4 top-1/2 -translate-y-1/2 w-4.5 h-4.5 md:w-5 md:h-5 text-zinc-400 group-focus-within:text-emerald-500 transition-colors" />
+                            <input 
+                              ref={nameInputRef}
+                              type="text" 
+                              value={clientName}
+                              onChange={(e) => setClientName(e.target.value)}
+                              placeholder="Ej: Juan Pérez"
+                              enterKeyHint="next"
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault();
+                                  phoneInputRef.current?.focus();
+                                }
+                              }}
+                              className="w-full bg-zinc-900 border border-white/25 rounded-xl py-3 md:py-4 pl-10 md:pl-12 pr-4 text-white placeholder-zinc-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 transition-all font-semibold text-sm md:text-lg shadow-inner"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="space-y-2">
+                          <label className="text-[10px] md:text-sm font-extrabold uppercase tracking-wider text-zinc-200 ml-1 flex items-center gap-2">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                            Tu WhatsApp / Celular
+                          </label>
+                          <div className="relative group">
+                            <Smartphone className="absolute left-3.5 md:left-4 top-1/2 -translate-y-1/2 w-4.5 h-4.5 md:w-5 md:h-5 text-zinc-400 group-focus-within:text-emerald-500 transition-colors" />
+                            <input 
+                              ref={phoneInputRef}
+                              type="tel" 
+                              value={clientPhone}
+                              onChange={(e) => setClientPhone(e.target.value)}
+                              placeholder="Ej: 2995123456"
+                              enterKeyHint="done"
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault();
+                                  phoneInputRef.current?.blur();
+                                }
+                              }}
+                              className="w-full bg-zinc-900 border border-white/25 rounded-xl py-3 md:py-4 pl-10 md:pl-12 pr-4 text-white placeholder-zinc-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 transition-all font-semibold text-sm md:text-lg shadow-inner"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="space-y-4 md:col-span-2">
+                          <label className="text-xs md:text-sm font-extrabold uppercase tracking-wider text-zinc-200 ml-1 flex items-center gap-2">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                            Confirmar la Ubicación de entrega
+                          </label>
+                          <div className="space-y-4">
+                            {/* Location confirmation button placed ABOVE the map */}
+                            <div 
+                              id="location-confirm-box"
+                              onClick={() => setClientConfirmedLocation(!clientConfirmedLocation)}
+                              className={`p-4 md:p-6 rounded-xl md:rounded-2xl border-2 transition-all cursor-pointer flex items-center gap-3.5 md:gap-5 group relative overflow-hidden text-left ${
+                                clientConfirmedLocation 
+                                ? 'bg-emerald-500/15 border-emerald-500 shadow-[0_0_30px_rgba(16,185,129,0.25)] scale-[1.01]' 
+                                : 'bg-zinc-900 border-zinc-700 hover:border-emerald-500 hover:bg-zinc-800/80 shadow-[0_0_20px_rgba(16,185,129,0.05)]'
+                              }`}
+                            >
+                              <div className={`shrink-0 w-10 h-10 md:w-12 md:h-12 rounded-lg md:rounded-xl border-2 flex items-center justify-center transition-all duration-300 ${
+                                clientConfirmedLocation 
+                                ? 'bg-emerald-500 border-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.5)] rotate-0 scale-110' 
+                                : 'border-emerald-500/50 bg-zinc-950 group-hover:border-emerald-500 animate-pulse rotate-[-3deg]'
+                              }`}>
+                                {clientConfirmedLocation ? (
+                                  <CheckCircle2 className="w-5.5 h-5.5 md:w-7 md:h-7 text-night" />
+                                ) : (
+                                  <div className="w-3.5 h-3.5 rounded-full bg-emerald-500 animate-ping" />
+                                )}
+                              </div>
+                              
+                              <div className="flex-1 min-w-0">
+                                <p className={`text-sm md:text-xl font-display font-black italic tracking-tight leading-none mb-1 transition-colors uppercase truncate ${
+                                  clientConfirmedLocation ? 'text-emerald-400' : 'text-zinc-100 group-hover:text-emerald-400'
+                                }`}>
+                                  {clientConfirmedLocation ? 'Ubicación confirmada ✓' : 'Clic para confirmar ubicación'}
+                                </p>
+                                <p className={`text-[10px] md:text-xs font-semibold leading-snug transition-colors ${
+                                  clientConfirmedLocation ? 'text-zinc-300' : 'text-zinc-400'
+                                }`}>
+                                  Debo traer mi auto a <span className="text-white underline decoration-emerald-500 decoration-2 font-bold">Venezuela 1659</span>.
+                                </p>
+                              </div>
+
+                              {!clientConfirmedLocation && (
+                                <div className="absolute right-4 animate-bounce-horizontal hidden md:block">
+                                  <ArrowRight className="w-6 h-6 text-emerald-500" />
+                                </div>
+                              )}
+                            </div>
+
+                            <div className="bg-red-500/10 border border-red-500/35 rounded-xl p-4 flex items-start gap-3">
+                              <div className="w-6 h-6 rounded-full bg-red-500/20 flex items-center justify-center shrink-0 mt-0.5">
+                                <span className="text-red-400 text-xs font-black italic">!</span>
+                              </div>
+                              <p className="text-xs text-zinc-300 font-semibold leading-relaxed text-left">
+                                Por favor ten en cuenta: <span className="text-red-400 font-black uppercase tracking-tight">no realizo servicios a domicilio</span>. Los lavados se realizan únicamente trayendo el auto a la dirección indicada arriba.
+                              </p>
+                            </div>
+
+                            <div className="aspect-video w-full rounded-2xl overflow-hidden border border-white/10 grayscale-[0.2] contrast-[1.05] hover:grayscale-0 transition-all">
+                              <iframe 
+                                src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3102.13456789!2d-68.010!3d-38.932!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x960a3162383c9b7f%3A0xc6cb1c986c757c4c!2sVenezuela%201659%2C%20Cipolletti%2C%20R%C3%ADo%20Negro!5e0!3m2!1ses!2sar!4v1713965211234!5m2!1ses!2sar" 
+                                width="100%" 
+                                height="100%" 
+                                style={{ border: 0 }} 
+                                allowFullScreen={false} 
+                                loading="lazy" 
+                                referrerPolicy="no-referrer-when-downgrade"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Step 4 Bottom Navigation & Big Confirm Button */}
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-t border-white/[0.05] pt-6 md:pt-10 mt-6">
+                        <button
+                          onClick={() => {
+                            setCurrentBookingStep(3);
+                            window.scrollTo({ top: 0, behavior: 'smooth' });
+                          }}
+                          className="text-[10px] md:text-xs font-black uppercase tracking-widest text-zinc-500 hover:text-white transition-all flex items-center justify-center gap-1.5 py-3 px-4 border border-zinc-800 rounded-xl active:scale-95"
+                        >
+                          🡴 Volver a Turno
+                        </button>
+                        
+                        {clientName && clientPhone && clientConfirmedLocation ? (
+                          <button
+                            onClick={() => setShowConfirmation(true)}
+                            className="bg-emerald-500 text-night font-display font-black italic px-6 py-4 rounded-xl hover:bg-emerald-400 transition-all text-sm tracking-wider uppercase cursor-pointer shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-2 group shrink-0"
+                          >
+                            CONFIRMAR Y FINALIZAR TURNO 
+                            <ChevronRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
+                          </button>
+                        ) : (
+                          <div className="text-[10px] uppercase font-bold text-zinc-500 tracking-wider text-center sm:text-right">
+                            Completa tu nombre, whatsapp y confirma la ubicación para finalizar
+                          </div>
+                        )}
+                      </div>
                     </motion.div>
                   )}
                 </AnimatePresence>

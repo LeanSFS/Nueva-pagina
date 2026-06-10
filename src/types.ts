@@ -5,7 +5,7 @@
 
 export type VehicleType = 'auto' | 'suv' | 'pickup';
 
-export type ServiceKey = 'Exterior' | 'Interior' | 'Completo' | 'Full';
+export type ServiceKey = string;
 
 export interface Service {
   id: ServiceKey;
@@ -14,6 +14,13 @@ export interface Service {
   description: string;
   features: string[];
   isFeatured?: boolean;
+  basePrice?: number;
+  prices?: {
+    auto: number;
+    suv: number;
+    pickup: number;
+  };
+  duration?: number; // duration in minutes
 }
 
 export interface PricingTier {
@@ -25,3 +32,4 @@ export interface PricingMap {
   suv: PricingTier;
   pickup: PricingTier;
 }
+
