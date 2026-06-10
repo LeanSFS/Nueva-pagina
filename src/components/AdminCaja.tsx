@@ -26,7 +26,9 @@ import {
   Lock,
   AlertTriangle,
   Link2,
-  Clock
+  Clock,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 import AdminAgenda from './AdminAgenda.tsx';
 import AdminRendimientos from './AdminRendimientos.tsx';
@@ -391,6 +393,7 @@ export default function AdminCaja({ onBack }: { onBack: () => void }) {
             description: staticSrv.description,
             features: staticSrv.features,
             isFeatured: staticSrv.isFeatured ?? false,
+            isHidden: (staticSrv as any).isHidden ?? false,
             basePrice: staticSrv.basePrice || 15000,
             prices: staticSrv.prices || { auto: 15000, suv: 20000, pickup: 30000 },
             duration: staticSrv.duration || 60
@@ -796,25 +799,59 @@ export default function AdminCaja({ onBack }: { onBack: () => void }) {
               
               <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 md:gap-6">
                 {dbServices.map((srv, idx) => (
-                  <div key={srv.id} className="p-4 md:p-6 bg-slate-950 border border-white/10 rounded-2xl relative overflow-hidden space-y-4">
+                  <div key={srv.id} className={`p-4 md:p-6 bg-slate-950 border rounded-2xl relative overflow-hidden space-y-4 transition-all duration-300 ${
+                    srv.isHidden 
+                      ? 'border-red-500/20 opacity-70 shadow-[inset_0_0_20px_rgba(239,68,68,0.02)]' 
+                      : 'border-white/10'
+                  }`}>
                     <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/5 pb-3">
                       <div>
-                        <div className="text-[8.5px] font-black uppercase text-zinc-500 tracking-widest">{srv.label || 'Servicio'}</div>
-                        <div className="font-display font-black italic text-base md:text-lg text-white uppercase">{srv.name}</div>
+                        <div className="text-[8.5px] font-black uppercase text-zinc-500 tracking-widest flex items-center gap-1.5">
+                          {srv.label || 'Servicio'}
+                          {srv.isHidden ? (
+                            <span className="bg-red-500/10 text-red-400 px-2 py-0.5 rounded-md font-sans text-[8px] font-black tracking-widest uppercase border border-red-500/20">Oculto</span>
+                          ) : (
+                            <span className="bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded-md font-sans text-[8px] font-black tracking-widest uppercase border border-emerald-500/20">Visible</span>
+                          )}
+                        </div>
+                        <div className={`font-display font-black italic text-base md:text-lg text-white uppercase transition-all duration-300 ${srv.isHidden ? 'text-zinc-500 line-through' : ''}`}>
+                          {srv.name}
+                        </div>
                       </div>
-                      <div className="flex items-center gap-1.5 bg-zinc-900 border border-white/5 px-2.5 py-1.5 rounded-xl">
-                        <Clock className="w-4 h-4 text-emerald-500 shrink-0" />
-                        <input 
-                          type="number" 
-                          value={srv.duration || 60} 
-                          onChange={(e) => {
+                      
+                      <div className="flex items-center gap-3">
+                        {/* Show/Hide Toggle Button */}
+                        <button
+                          type="button"
+                          onClick={() => {
                             const copy = [...dbServices];
-                            copy[idx].duration = Number(e.target.value) || 0;
+                            copy[idx].isHidden = !copy[idx].isHidden;
                             setDbServices(copy);
                           }}
-                          className="bg-transparent text-emerald-400 font-display font-black italic text-xs md:text-sm w-9 md:w-12 text-center outline-none"
-                        />
-                        <span className="text-[8.5px] text-zinc-500 font-black">MIN</span>
+                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-[9px] md:text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+                            srv.isHidden
+                              ? 'bg-red-500/10 border-red-500/35 text-red-400 hover:bg-red-500/25 active:scale-95'
+                              : 'bg-zinc-900 border-white/10 text-zinc-400 hover:text-white hover:border-white/20 active:scale-95'
+                          }`}
+                        >
+                          {srv.isHidden ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                          {srv.isHidden ? 'MOSTRAR' : 'OCULTAR'}
+                        </button>
+
+                        <div className="flex items-center gap-1.5 bg-zinc-900 border border-white/5 px-2.5 py-1.5 rounded-xl">
+                          <Clock className="w-4 h-4 text-emerald-500 shrink-0" />
+                          <input 
+                            type="number" 
+                            value={srv.duration || 60} 
+                            onChange={(e) => {
+                              const copy = [...dbServices];
+                              copy[idx].duration = Number(e.target.value) || 0;
+                              setDbServices(copy);
+                            }}
+                            className="bg-transparent text-emerald-400 font-display font-black italic text-xs md:text-sm w-9 md:w-12 text-center outline-none"
+                          />
+                          <span className="text-[8.5px] text-zinc-500 font-black">MIN</span>
+                        </div>
                       </div>
                     </div>
 

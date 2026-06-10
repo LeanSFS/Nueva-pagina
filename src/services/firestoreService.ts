@@ -153,6 +153,7 @@ export interface CatalogService {
   description: string;
   features: string[];
   isFeatured?: boolean;
+  isHidden?: boolean;
   basePrice: number;
   prices?: {
     auto: number;
@@ -494,6 +495,7 @@ export const firestoreService = {
             description: s.description,
             features: s.features,
             isFeatured: s.isFeatured ?? false,
+            isHidden: (s as any).isHidden ?? false,
             basePrice: s.basePrice || 15000,
             prices: s.prices || { auto: 15000, suv: 20000, pickup: 30000 },
             duration: s.duration || 60
@@ -532,6 +534,7 @@ export const firestoreService = {
         description: s.description,
         features: s.features,
         isFeatured: s.isFeatured ?? false,
+        isHidden: (s as any).isHidden ?? false,
         basePrice: s.basePrice || 15000,
         prices: s.prices || { auto: 15000, suv: 20000, pickup: 30000 },
         duration: s.duration || 60

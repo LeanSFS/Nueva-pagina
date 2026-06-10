@@ -38,6 +38,7 @@ import AdminCaja from './components/AdminCaja.tsx';
 import { metricsService } from './services/metricsService.ts';
 import { firestoreService, CatalogService, CatalogVehicle, GalleryPhoto } from './services/firestoreService.ts';
 import { telegramService } from './services/telegramService.ts';
+import { GlowCard } from './components/GlowCard.tsx';
 
 // --- Internal Components ---
 
@@ -182,10 +183,14 @@ export default function App() {
         list.push(staticSrv);
       }
     });
+
+    // Filter out services marked as hidden
+    const visibleList = list.filter(s => !s.isHidden);
+
     // Sort in precisely the requested order:
     // lavado exterior - detallado interior - tapizados de tela - tapizados de cuero - limpieza de techo - tratamiento de vidrios
     const order = ['lavado_exterior', 'detallado_interior', 'tapizados_tela', 'tapizados_cuero', 'limpieza_techo', 'tratamiento_vidrios'];
-    return list.sort((a, b) => {
+    return visibleList.sort((a, b) => {
       const idxA = order.indexOf(a.id);
       const idxB = order.indexOf(b.id);
       if (idxA === -1 && idxB === -1) return 0;
@@ -268,6 +273,18 @@ export default function App() {
     }
   };
 
+  const scrollToBookingFlow = () => {
+    const element = document.getElementById('booking-flow');
+    if (element) {
+      element.scrollIntoView({ 
+        behavior: 'smooth', 
+        block: 'start'
+      });
+    } else {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  };
+
   useEffect(() => {
     if (view === 'booking') {
       setTimeout(() => scrollToSection(step1Ref), 600);
@@ -325,7 +342,7 @@ export default function App() {
     metricsService.logAction('click_servicios');
     setTimeout(() => {
       setCurrentBookingStep(3);
-      window.scrollTo({ top: 0, behavior: 'smooth' });
+      scrollToBookingFlow();
     }, 450);
   };
 
@@ -335,9 +352,9 @@ export default function App() {
       nextServices = nextServices.filter(id => id !== sId);
     } else {
       if (sId === 'tapizados_tela') {
-        nextServices = nextServices.filter(id => id !== 'tapizados_cuero');
+         nextServices = nextServices.filter(id => id !== 'tapizados_cuero');
       } else if (sId === 'tapizados_cuero') {
-        nextServices = nextServices.filter(id => id !== 'tapizados_tela');
+         nextServices = nextServices.filter(id => id !== 'tapizados_tela');
       }
       nextServices.push(sId);
     }
@@ -355,7 +372,7 @@ export default function App() {
     setSelectedTime(null);
     setTimeout(() => {
       setCurrentBookingStep(2);
-      window.scrollTo({ top: 0, behavior: 'smooth' });
+      scrollToBookingFlow();
     }, 450);
   };
 
@@ -365,8 +382,8 @@ export default function App() {
     setSelectedTime(null);
     metricsService.logAction('click_servicios');
     setTimeout(() => {
-      setCurrentBookingStep(3);
-      window.scrollTo({ top: 0, behavior: 'smooth' });
+       setCurrentBookingStep(3);
+       scrollToBookingFlow();
     }, 450);
   };
 
@@ -374,7 +391,7 @@ export default function App() {
     setSelectedTime(time);
     setTimeout(() => {
       setCurrentBookingStep(4);
-      window.scrollTo({ top: 0, behavior: 'smooth' });
+      scrollToBookingFlow();
     }, 450);
   };
 
@@ -682,7 +699,7 @@ export default function App() {
     setIsSubmitting(false);
   };
 
-  const renderServiceCard = (s: typeof activeServices[0]) => {
+  const renderServiceCard = (s: typeof activeServices[0], index = 0) => {
     const isSelected = selectedServices.includes(s.id);
     const isOtherUpholsterySelected = 
       (s.id === 'tapizados_tela' && selectedServices.includes('tapizados_cuero')) ||
@@ -691,9 +708,13 @@ export default function App() {
     const itemPrice = calculatePrice([s.id], vehicle);
     
     return (
-      <div
+      <GlowCard
         key={s.id}
+        id={s.id}
+        vehicleKey={vehicle || ''}
         onClick={() => handleToggleService(s.id)}
+        delay={index * 0.08}
+        isSelected={isSelected}
         className={`p-4 md:p-5 rounded-2xl border transition-all duration-200 relative flex flex-col justify-between h-auto sm:h-full select-none cursor-pointer ${
           isSelected
             ? 'bg-zinc-950 border-emerald-500 shadow-[0_2px_15px_rgba(16,185,129,0.12)] scale-[1.01]'
@@ -740,7 +761,7 @@ export default function App() {
           <span className="text-[8px] md:text-[9px] font-black uppercase text-zinc-500 tracking-wider">Inversión:</span>
           <span className="text-xs md:text-sm font-display font-black text-emerald-400">${itemPrice.toLocaleString('es-AR')}</span>
         </div>
-      </div>
+      </GlowCard>
     );
   };
 
@@ -1508,7 +1529,7 @@ export default function App() {
                           disabled={isLocked}
                           onClick={() => {
                             setCurrentBookingStep(st.num);
-                            window.scrollTo({ top: 0, behavior: 'smooth' });
+                            scrollToBookingFlow();
                           }}
                           className={`relative text-left p-2.5 md:p-4 rounded-xl md:rounded-2xl transition-all duration-300 flex flex-col md:flex-row items-center md:items-start gap-1.5 md:gap-3 outline-none border text-left ${
                             isActive 
@@ -1574,36 +1595,42 @@ export default function App() {
                          </div>
                       </div>
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5 md:gap-6">
-                        {activeVehicles.map((v) => (
-                          <button
-                            key={v.id}
-                            onClick={() => handleVehicleSelect(v.id as VehicleType)}
-                            className={`p-3.5 md:p-8 rounded-xl md:rounded-3xl text-left transition-all relative overflow-hidden group ${
-                              vehicle === v.id 
-                              ? 'bg-emerald-500 text-night shadow-[0_10px_30px_rgba(16,185,129,0.2)]' 
-                              : 'bg-zinc-900 border border-white/[0.04] hover:bg-zinc-800'
-                            }`}
-                          >
-                            <div className="flex items-center gap-3 md:gap-5 relative z-10">
-                              <span className="text-2xl md:text-4xl group-hover:scale-110 transition-transform">{v.icon}</span>
-                              <div>
-                                <div className="font-display font-black text-xs md:text-lg md:mb-1 uppercase tracking-tight">{v.name}</div>
-                                <div className={`text-[8px] md:text-[10px] font-bold uppercase tracking-tight opacity-65 leading-tight`}>
-                                  {v.examples.split(',')
-                                    .map(ex => ex.trim())
-                                    .sort(() => 0.5 - Math.random())
-                                    .slice(0, 8)
-                                    .join(', ')}...
+                        {activeVehicles.map((v, idx) => {
+                          const isSelected = vehicle === v.id;
+                          return (
+                            <GlowCard
+                              key={v.id}
+                              id={v.id}
+                              isSelected={isSelected}
+                              onClick={() => handleVehicleSelect(v.id as VehicleType)}
+                              delay={idx * 0.05}
+                              className={`p-3.5 md:p-8 rounded-xl md:rounded-3xl text-left transition-all relative cursor-pointer ${
+                                isSelected 
+                                  ? 'bg-emerald-500 text-night shadow-[0_10px_30px_rgba(16,185,129,0.2)]' 
+                                  : 'bg-zinc-900 border border-white/[0.04] hover:bg-zinc-800'
+                              }`}
+                            >
+                              <div className="flex items-center gap-3 md:gap-5 relative z-10 w-full">
+                                <span className="text-2xl md:text-4xl group-hover:scale-110 transition-transform shrink-0">{v.icon}</span>
+                                <div className="min-w-0 flex-1">
+                                  <div className={`font-display font-black text-xs md:text-lg md:mb-1 uppercase tracking-tight ${isSelected ? 'text-zinc-950 font-black' : 'text-white'}`}>{v.name}</div>
+                                  <div className={`text-[8px] md:text-[10px] font-bold uppercase tracking-tight opacity-65 leading-tight ${isSelected ? 'text-zinc-900/80' : 'text-zinc-400'}`}>
+                                    {v.examples.split(',')
+                                      .map(ex => ex.trim())
+                                      .sort(() => 0.5 - Math.random())
+                                      .slice(0, 8)
+                                      .join(', ')}...
+                                  </div>
                                 </div>
                               </div>
-                            </div>
-                            {vehicle === v.id && (
-                              <motion.div layoutId="v-pill" className="absolute top-4 right-4 md:top-6 md:right-6">
-                                 <CheckCircle2 className="w-4 h-4 md:w-5 md:h-5 opacity-90" />
-                              </motion.div>
-                            )}
-                          </button>
-                        ))}
+                              {isSelected && (
+                                <motion.div layoutId="v-pill" className="absolute top-4 right-4 md:top-6 md:right-6 z-20">
+                                   <CheckCircle2 className="w-4 h-4 md:w-5 md:h-5 text-night" />
+                                </motion.div>
+                              )}
+                            </GlowCard>
+                          );
+                        })}
                       </div>
 
                       {vehicle && (
@@ -1611,7 +1638,7 @@ export default function App() {
                           <button
                             onClick={() => {
                               setCurrentBookingStep(2);
-                              window.scrollTo({ top: 0, behavior: 'smooth' });
+                              scrollToBookingFlow();
                             }}
                             className="bg-emerald-500 text-night font-display font-black italic px-5 py-3 rounded-xl hover:bg-emerald-400 transition-all text-xs tracking-wider uppercase cursor-pointer shadow-lg shadow-emerald-500/10 flex items-center gap-1.5"
                           >
@@ -1705,7 +1732,7 @@ export default function App() {
                               </div>
 
                               <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
-                                {packFullSrvs.map(renderServiceCard)}
+                                {packFullSrvs.map((s, idx) => renderServiceCard(s, idx))}
                               </div>
                             </div>
                           );
@@ -1766,7 +1793,7 @@ export default function App() {
                               </div>
 
                               <div className="grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-4">
-                                {packInteriorSrvs.map(renderServiceCard)}
+                                {packInteriorSrvs.map((s, idx) => renderServiceCard(s, idx + 2))}
                               </div>
                             </div>
                           );
@@ -1795,7 +1822,7 @@ export default function App() {
                               </div>
 
                               <div className="grid grid-cols-1 gap-3">
-                                {packAdditionalSrvs.map(renderServiceCard)}
+                                {packAdditionalSrvs.map((s, idx) => renderServiceCard(s, idx + 5))}
                               </div>
                             </div>
                           );
@@ -1831,7 +1858,7 @@ export default function App() {
                             <button 
                               onClick={() => {
                                 setCurrentBookingStep(3);
-                                window.scrollTo({ top: 0, behavior: 'smooth' });
+                                scrollToBookingFlow();
                               }}
                               className="bg-emerald-500 text-night font-display font-black italic px-4 py-2.5 md:px-6 md:py-3 rounded-lg md:rounded-xl hover:bg-emerald-400 transition-all text-[10px] md:text-xs tracking-wider uppercase cursor-pointer shrink-0 shadow-lg shadow-emerald-500/10 flex items-center gap-1.5"
                             >
@@ -1846,7 +1873,7 @@ export default function App() {
                         <button
                           onClick={() => {
                             setCurrentBookingStep(1);
-                            window.scrollTo({ top: 0, behavior: 'smooth' });
+                            scrollToBookingFlow();
                           }}
                           className="text-[10px] md:text-xs font-black uppercase tracking-widest text-zinc-500 hover:text-white transition-all flex items-center gap-1.5 py-2.5 px-4 border border-zinc-800 rounded-xl hover:border-white/10 active:scale-95"
                         >
@@ -1857,7 +1884,7 @@ export default function App() {
                           <button
                             onClick={() => {
                               setCurrentBookingStep(3);
-                              window.scrollTo({ top: 0, behavior: 'smooth' });
+                              scrollToBookingFlow();
                             }}
                             className="bg-emerald-500 text-night font-display font-black italic px-5 py-3 rounded-xl hover:bg-emerald-400 transition-all text-xs tracking-wider uppercase cursor-pointer shadow-lg shadow-emerald-500/10 flex items-center gap-1.5"
                           >
@@ -1894,17 +1921,17 @@ export default function App() {
                       </div>
                       
                       <div className="flex flex-col gap-4 md:gap-8">
-                        {/* Horizontal Date Picker */}
-                        <div className="overflow-x-auto pb-4 -mx-5 px-5 md:mx-0 md:px-0 no-scrollbar">
-                          <div className="flex gap-2">
+                        {/* Intelligent Adaptive Date Picker (No horizontal scrolling on mobile, sleek horizontal flow on tablet/desktop) */}
+                        <div className="w-full">
+                          <div className="grid grid-cols-3 sm:flex sm:flex-wrap md:flex-nowrap gap-2 sm:gap-3">
                             {isLoadingSlots ? (
                               Array.from({ length: 6 }).map((_, i) => (
                                 <div 
                                   key={i} 
-                                  className="flex-shrink-0 w-14 md:w-20 p-2.5 md:p-5 rounded-xl md:rounded-2xl border border-white/[0.05] bg-zinc-900/50 animate-pulse flex flex-col items-center gap-2"
+                                  className="w-full sm:w-20 p-2.5 md:p-5 rounded-xl md:rounded-2xl border border-white/[0.04] bg-zinc-950/70 overflow-hidden flex flex-col items-center gap-3"
                                 >
-                                  <div className="w-8 h-2 bg-white/10 rounded" />
-                                  <div className="w-6 h-6 bg-white/10 rounded" />
+                                  <div className="w-9 h-2.5 rounded-sm animate-shimmer" />
+                                  <div className="w-7 h-7 rounded-md animate-shimmer" />
                                 </div>
                               ))
                             ) : (
@@ -1917,17 +1944,26 @@ export default function App() {
                                   <button
                                     key={i}
                                     disabled={isFull}
-                                    onClick={() => { setSelectedDateStr(str); setSelectedTime(null); }}
-                                    className={`flex-shrink-0 w-14 md:w-20 p-2.5 md:p-5 rounded-xl md:rounded-2xl border transition-all flex flex-col items-center gap-1 relative overflow-hidden ${
+                                    onClick={() => {
+                                      setSelectedDateStr(str);
+                                      setSelectedTime(null);
+                                      setTimeout(() => {
+                                        const element = document.getElementById('time-slots-container-header');
+                                        if (element) {
+                                          element.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                                        }
+                                      }, 150);
+                                    }}
+                                    className={`w-full sm:w-20 p-2.5 md:p-5 rounded-xl md:rounded-2xl border transition-all flex flex-col items-center gap-1.5 relative overflow-hidden ${
                                       isSelected 
-                                      ? 'bg-emerald-500 border-emerald-400 text-night shadow-lg' 
+                                      ? 'bg-emerald-500 border-emerald-400 text-night shadow-[0_4px_20px_rgba(16,185,129,0.25)] scale-[1.02]' 
                                       : isFull
-                                        ? 'bg-zinc-900 border-white/[0.03] text-zinc-650 cursor-not-allowed'
-                                        : 'bg-zinc-900 border-white/[0.05] text-white hover:border-white/10'
+                                        ? 'bg-zinc-950/45 border-white/[0.02] text-zinc-750 cursor-not-allowed opacity-40'
+                                        : 'bg-zinc-900/60 border-white/[0.05] text-white hover:border-emerald-500/30 hover:bg-zinc-900 hover:scale-[1.01]'
                                     }`}
                                   >
                                     <div className="flex flex-col items-center gap-0.5">
-                                      <span className={`text-[7.5px] md:text-[9px] font-black uppercase tracking-widest ${isSelected ? 'opacity-70' : 'opacity-40'}`}>
+                                      <span className={`text-[7.5px] md:text-[9px] font-black uppercase tracking-widest ${isSelected ? 'text-zinc-950/80 font-black' : 'text-zinc-400 font-extrabold'}`}>
                                         {date.toLocaleDateString('es-AR', { weekday: 'short' }).replace('.', '')}
                                       </span>
                                       {(() => {
@@ -1936,7 +1972,7 @@ export default function App() {
                                         return <CloudRain className={`w-3 h-3 ${isSelected ? 'text-night/60' : 'text-blue-400'} animate-pulse`} />;
                                       })()}
                                     </div>
-                                    <span className="text-base md:text-xl font-display font-black leading-none">{date.getDate()}</span>
+                                    <span className={`text-base md:text-xl font-display font-black leading-none ${isSelected ? 'text-zinc-950 font-black' : 'text-white'}`}>{date.getDate()}</span>
                                     
                                     {!isSelected && (
                                       <div className={`absolute bottom-2 w-1 h-1 rounded-full ${
@@ -1956,7 +1992,34 @@ export default function App() {
 
                         {/* Time Slots */}
                         {selectedDateStr && (
-                          <div className="space-y-4">
+                          <div id="time-slots-container-header" className="space-y-6 pt-6 border-t border-white/[0.04] mt-4">
+                            {/* Prominent High-Contrast Call To Action to Select Time */}
+                            <motion.div 
+                              initial={{ opacity: 0, y: 10 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              className="p-4 md:p-6 rounded-2xl border border-emerald-500/20 bg-emerald-500/[0.03] shadow-[0_4px_30px_rgba(16,185,129,0.02)] flex flex-col md:flex-row md:items-center justify-between gap-4"
+                            >
+                              <div className="flex items-center gap-3.5">
+                                <div className="w-10 h-10 md:w-12 md:h-12 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 shrink-0">
+                                  <Clock className="w-5 h-5 md:w-6 md:h-6 animate-pulse" />
+                                </div>
+                                <div className="text-left">
+                                  <div className="flex items-center gap-2">
+                                    <span className="bg-emerald-500 text-night px-2 py-0.5 rounded-md font-display font-black text-[9px] md:text-[10px] uppercase tracking-wider italic">PASO REQUERIDO</span>
+                                    <span className="text-[10px] md:text-xs font-black uppercase text-emerald-400 tracking-widest animate-pulse">¡Elegí tu horario abajo!</span>
+                                  </div>
+                                  <h4 className="text-white font-display font-black italic uppercase text-sm md:text-xl tracking-tight mt-1">
+                                    SELECCIONA LA HORA DE INICIO
+                                  </h4>
+                                </div>
+                              </div>
+                              <div className="text-left md:text-right font-display italic font-black shrink-0 text-emerald-400 text-xs md:text-sm uppercase tracking-wide bg-emerald-500/5 px-3 py-1.5 rounded-lg border border-emerald-500/10 inline-block self-start md:self-auto">
+                                📅 {
+                                  availableDates.find(d => d.str === selectedDateStr)?.date.toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' })
+                                }
+                              </div>
+                            </motion.div>
+
                             {weatherForSelected && weatherForSelected.isRainy && (
                               <motion.div 
                                 initial={{ opacity: 0, y: -10 }}
@@ -1978,7 +2041,9 @@ export default function App() {
                             <div className="grid grid-cols-2 md:grid-cols-4 gap-2 md:gap-3">
                               {isLoadingSlots ? (
                                 Array.from({ length: 4 }).map((_, i) => (
-                                  <div key={i} className="p-3 md:p-6 rounded-xl md:rounded-2xl border border-white/[0.05] bg-zinc-900/50 animate-pulse h-12 md:h-20" />
+                                  <div key={i} className="p-3 md:p-6 rounded-xl md:rounded-2xl border border-white/[0.04] bg-zinc-950/70 overflow-hidden h-12 md:h-18 flex items-center justify-center">
+                                    <div className="w-20 h-4 md:h-6 rounded-md animate-shimmer" />
+                                  </div>
                                 ))
                               ) : availableTimes.length > 0 ? (
                                 availableTimes.map((time) => {
@@ -2014,7 +2079,7 @@ export default function App() {
                         <button
                           onClick={() => {
                             setCurrentBookingStep(2);
-                            window.scrollTo({ top: 0, behavior: 'smooth' });
+                            scrollToBookingFlow();
                           }}
                           className="text-[10px] md:text-xs font-black uppercase tracking-widest text-zinc-500 hover:text-white transition-all flex items-center gap-1.5 py-2.5 px-4 border border-zinc-800 rounded-xl hover:border-white/10 active:scale-95"
                         >
@@ -2025,7 +2090,7 @@ export default function App() {
                           <button
                             onClick={() => {
                               setCurrentBookingStep(4);
-                              window.scrollTo({ top: 0, behavior: 'smooth' });
+                              scrollToBookingFlow();
                             }}
                             className="bg-emerald-500 text-night font-display font-black italic px-5 py-3 rounded-xl hover:bg-emerald-400 transition-all text-xs tracking-wider uppercase cursor-pointer shadow-lg shadow-emerald-500/10 flex items-center gap-1.5 animate-pulse"
                           >
@@ -2189,7 +2254,7 @@ export default function App() {
                         <button
                           onClick={() => {
                             setCurrentBookingStep(3);
-                            window.scrollTo({ top: 0, behavior: 'smooth' });
+                            scrollToBookingFlow();
                           }}
                           className="text-[10px] md:text-xs font-black uppercase tracking-widest text-zinc-500 hover:text-white transition-all flex items-center justify-center gap-1.5 py-3 px-4 border border-zinc-800 rounded-xl active:scale-95"
                         >
@@ -2214,13 +2279,7 @@ export default function App() {
                   )}
                 </AnimatePresence>
 
-                {/* Pricing Info Note */}
-                <div className="mt-8 flex gap-3 p-3.5 bg-white/[0.015] rounded-xl border border-white/[0.03] text-[9px] md:text-[10px] text-zinc-600 italic">
-                  <Info className="w-3.5 h-3.5 text-emerald-500/50 flex-shrink-0" />
-                  <p>
-                    SUV (+ $5k) y Pickups (+ $15k) ajustan por volumen exterior. Precios sujetos a variaciones poe estado del vehículo.
-                  </p>
-                </div>
+
               </div>
             </section>
           </motion.div>
