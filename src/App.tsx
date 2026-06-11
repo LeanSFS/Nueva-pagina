@@ -1513,7 +1513,7 @@ export default function App() {
                         ? "Elige tus <span class='text-emerald-500'>Servicios</span>" 
                         : currentBookingStep === 3 
                           ? "Elige tu <span class='text-emerald-500'>Turno</span>" 
-                          : "Confirma tus <span class='text-emerald-500'>Datos</span>"
+                          : "Completa tus <span class='text-emerald-500'>Datos</span>"
                   } 
                   number={`0${currentBookingStep}`} 
                 />
@@ -1525,7 +1525,7 @@ export default function App() {
                       { num: 1, label: 'Vehículo', desc: 'Categoría' },
                       { num: 2, label: 'Servicios', desc: 'Qué hacemos' },
                       { num: 3, label: 'Turno', desc: 'Fecha y hora' },
-                      { num: 4, label: 'Tus Datos', desc: 'Confirmar' }
+                      { num: 4, label: 'Completa Datos', desc: 'Último Paso' }
                     ].map((st) => {
                       const isCompleted = st.num < currentBookingStep;
                       const isActive = st.num === currentBookingStep;
@@ -2188,16 +2188,47 @@ export default function App() {
                       transition={{ duration: 0.3 }}
                       className="space-y-6 md:space-y-10"
                     >
-                      <div className="flex flex-col mb-6 md:mb-12 relative">
+                      <div className="flex flex-col mb-4 md:mb-8 relative">
                          <span className="text-emerald-500 font-display font-black italic text-4xl md:text-[8rem] leading-none mb-1 select-none opacity-[0.07] absolute -top-6 md:-top-16 -left-2 md:-left-12">04</span>
                          <div className="relative z-10">
-                            <h3 className="text-lg md:text-4xl font-display font-black uppercase tracking-tighter flex items-center gap-2 md:gap-4 text-white">
-                               <span className="bg-emerald-500 text-night px-3 py-1 md:px-5 md:py-2 rounded-xl md:rounded-2xl italic tracking-tighter shadow-[0_0_20px_rgba(16,185,129,0.25)] text-sm md:text-xl">4.</span>
-                               TUS DATOS Y UBICACIÓN
+                            <h3 className="text-lg md:text-3xl font-display font-black uppercase tracking-tighter flex items-center gap-2 md:gap-4 text-white">
+                               <span className="bg-emerald-500 text-night px-2.5 py-1 md:px-4 md:py-1.5 rounded-xl italic tracking-tighter shadow-[0_0_20px_rgba(16,185,129,0.25)] text-xs md:text-base">PASO FINAL</span>
+                               COMPLETA CON TUS DATOS
                             </h3>
                             <div className="w-16 md:w-48 h-1 md:h-1.5 bg-emerald-500 mt-2.5 rounded-full" />
-                            <p className="text-zinc-500 text-[10px] md:text-sm font-bold uppercase tracking-widest mt-2 ml-0.5">Confirma tu turno y nuestra ubicación para el servicio</p>
+                            <p className="text-zinc-500 text-[10px] md:text-xs font-bold uppercase tracking-widest mt-2 ml-0.5">Escribe tus datos, confirma que traes tu auto y finaliza la reserva</p>
                          </div>
+                      </div>
+
+                      {/* Micro Review banner of selected choices */}
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-zinc-900/50 border border-white/[0.04] rounded-2xl p-4 text-left">
+                        <div className="flex items-center gap-3">
+                          <span className="text-lg">🚗</span>
+                          <div>
+                            <div className="text-[8px] font-black uppercase text-zinc-500 tracking-widest">Vehículo</div>
+                            <div className="text-xs font-display font-black text-white uppercase italic">
+                              {activeVehicles.find(v => v.id === vehicle)?.name}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-3 border-t sm:border-t-0 sm:border-l border-white/5 pt-2 sm:pt-0 sm:pl-4">
+                          <span className="text-lg">📅</span>
+                          <div>
+                            <div className="text-[8px] font-black uppercase text-zinc-500 tracking-widest">Fecha Elegida</div>
+                            <div className="text-xs font-display font-black text-white uppercase italic">
+                              {selectedDateStr ? new Date(selectedDateStr + 'T00:00:00').toLocaleDateString('es-AR', { weekday: 'short', day: 'numeric', month: 'short' }) : ''}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-3 border-t sm:border-t-0 sm:border-l border-white/5 pt-2 sm:pt-0 sm:pl-4">
+                          <span className="text-lg">⏰</span>
+                          <div>
+                            <div className="text-[8px] font-black uppercase text-zinc-500 tracking-widest">Hora de Entrega</div>
+                            <div className="text-xs font-display font-black text-white uppercase italic">
+                              {selectedTime} hs
+                            </div>
+                          </div>
+                        </div>
                       </div>
                       
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-8">
@@ -2323,6 +2354,51 @@ export default function App() {
                         </div>
                       </div>
 
+                      {/* Explicit checklists of missing items - extremely easy to understand */}
+                      {!(clientName.trim() && clientPhone.trim() && clientConfirmedLocation) && (
+                        <div className="p-4 md:p-5 bg-amber-500/10 border border-amber-500/20 rounded-2xl text-left space-y-2.5">
+                          <h4 className="text-amber-400 font-display font-black uppercase italic tracking-wider text-xs flex items-center gap-2">
+                            ⚠️ POR FAVOR, COMPLETÁ LOS REQUISITOS EXTRA:
+                          </h4>
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs">
+                            <div className={`p-3 rounded-xl border flex items-center gap-2.5 transition-all duration-300 ${clientName.trim() ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : 'bg-zinc-900 border-red-500/20 text-red-400 font-black uppercase tracking-wide'}`}>
+                              <span className="text-sm">{clientName.trim() ? '✅' : '❌'}</span>
+                              <div>
+                                <div className="text-[8px] uppercase tracking-widest text-zinc-500">REQUISITO 1</div>
+                                <span className="font-bold text-[10.5px]">{clientName.trim() ? 'Nombre ingresado' : 'FALTA TU NOMBRE Y APELLIDO'}</span>
+                              </div>
+                            </div>
+                            
+                            <div className={`p-3 rounded-xl border flex items-center gap-2.5 transition-all duration-300 ${clientPhone.trim() ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : 'bg-zinc-900 border-red-500/20 text-red-400 font-black uppercase tracking-wide'}`}>
+                              <span className="text-sm">{clientPhone.trim() ? '✅' : '❌'}</span>
+                              <div>
+                                <div className="text-[8px] uppercase tracking-widest text-zinc-500">REQUISITO 2</div>
+                                <span className="font-bold text-[10.5px]">{clientPhone.trim() ? 'WhatsApp ingresado' : 'FALTA TU WHATSAPP / CELULAR'}</span>
+                              </div>
+                            </div>
+
+                            <div className={`p-3 rounded-xl border flex items-center gap-2.5 transition-all duration-300 ${clientConfirmedLocation ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : 'bg-zinc-900 border-amber-500/35 text-amber-500 animate-pulse font-black uppercase tracking-wide cursor-pointer hover:bg-zinc-800'}`}
+                              onClick={() => {
+                                const box = document.getElementById('location-confirm-box');
+                                if (box) {
+                                  box.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                  box.classList.add('ring-4', 'ring-emerald-500', 'scale-[1.03]');
+                                  setTimeout(() => {
+                                    box.classList.remove('ring-4', 'ring-emerald-500', 'scale-[1.03]');
+                                  }, 1500);
+                                }
+                              }}
+                            >
+                              <span className="text-sm">{clientConfirmedLocation ? '✅' : '📍'}</span>
+                              <div className="flex-1 text-left">
+                                <div className="text-[8px] uppercase tracking-widest text-zinc-500">REQUISITO 3</div>
+                                <span className="font-bold text-[10.5px]">{clientConfirmedLocation ? 'Dirección confirmada' : 'BUSCÁ Y TOCÁ "CONFIRMAR UBICACIÓN" 🡱'}</span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
                       {/* Step 4 Bottom Navigation & Big Confirm Button */}
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-t border-white/[0.05] pt-6 md:pt-10 mt-6">
                         <button
@@ -2330,22 +2406,22 @@ export default function App() {
                             setCurrentBookingStep(3);
                             scrollToBookingFlow();
                           }}
-                          className="text-[10px] md:text-xs font-black uppercase tracking-widest text-zinc-500 hover:text-white transition-all flex items-center justify-center gap-1.5 py-3 px-4 border border-zinc-800 rounded-xl active:scale-95"
+                          className="text-[10px] md:text-xs font-black uppercase tracking-widest text-zinc-500 hover:text-white transition-all flex items-center justify-center gap-1.5 py-3.5 px-4 border border-zinc-800 rounded-xl active:scale-95"
                         >
                           🡴 Volver a Turno
                         </button>
                         
-                        {clientName && clientPhone && clientConfirmedLocation ? (
+                        {clientName.trim() && clientPhone.trim() && clientConfirmedLocation ? (
                           <button
                             onClick={() => setShowConfirmation(true)}
-                            className="bg-emerald-500 text-night font-display font-black italic px-6 py-4 rounded-xl hover:bg-emerald-400 transition-all text-sm tracking-wider uppercase cursor-pointer shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-2 group shrink-0"
+                            className="bg-emerald-500 text-night font-display font-black italic px-7 py-4.5 rounded-xl hover:bg-emerald-400 transition-all text-sm tracking-wider uppercase cursor-pointer shadow-lg shadow-emerald-500/25 flex items-center justify-center gap-2 group shrink-0"
                           >
-                            CONFIRMAR Y FINALIZAR TURNO 
+                            CONFIRMAR Y FINALIZAR RESERVA
                             <ChevronRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
                           </button>
                         ) : (
-                          <div className="text-[10px] uppercase font-bold text-zinc-500 tracking-wider text-center sm:text-right">
-                            Completa tu nombre, whatsapp y confirma la ubicación para finalizar
+                          <div className="p-3 bg-zinc-900/60 border border-zinc-800 text-zinc-400 rounded-xl text-center sm:text-right font-bold text-[10.5px] uppercase tracking-wider flex items-center justify-center gap-2">
+                            <span>✍🏽</span> Completá los datos marcados arriba para finalizar tu reserva
                           </div>
                         )}
                       </div>
