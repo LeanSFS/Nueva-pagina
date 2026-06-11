@@ -201,7 +201,16 @@ export default function App() {
   }, [dbServices]);
 
   const activeVehicles = useMemo(() => {
-    return dbVehicles.length > 0 ? dbVehicles : VEHICLES;
+    const list = dbVehicles.length > 0 ? [...dbVehicles] : [...VEHICLES];
+    const order = ['auto', 'suv', 'pickup'];
+    return list.sort((a, b) => {
+      const idxA = order.indexOf(a.id);
+      const idxB = order.indexOf(b.id);
+      if (idxA === -1 && idxB === -1) return 0;
+      if (idxA === -1) return 1;
+      if (idxB === -1) return -1;
+      return idxA - idxB;
+    });
   }, [dbVehicles]);
   
   // Track Page Landing Visita
@@ -218,6 +227,7 @@ export default function App() {
   const [vehicle, setVehicle] = useState<VehicleType | null>(null);
   const [selectedServices, setSelectedServices] = useState<string[]>([]);
   const [currentBookingStep, setCurrentBookingStep] = useState<number>(1);
+  const [tutorialAccepted, setTutorialAccepted] = useState(false);
   const selectedService = selectedServices[0] || null;
   const setSelectedService = (srv: string | null) => {
     setSelectedServices(srv ? [srv] : []);
@@ -1649,7 +1659,71 @@ export default function App() {
                     </motion.div>
                   )}
 
-                  {currentBookingStep === 2 && vehicle && (
+                  {currentBookingStep === 2 && vehicle && !tutorialAccepted && (
+                    <motion.div
+                      key="step2-tutorial"
+                      initial={{ opacity: 0, scale: 0.98, y: 15 }}
+                      animate={{ opacity: 1, scale: 1, y: 0 }}
+                      exit={{ opacity: 0, scale: 0.98, y: -15 }}
+                      transition={{ duration: 0.3 }}
+                      className="max-w-xl mx-auto p-5 md:p-8 rounded-3xl border border-emerald-500/20 bg-slate-950/80 backdrop-blur-md shadow-[0_20px_50px_rgba(16,185,129,0.05)] text-center space-y-6"
+                    >
+                      <div>
+                        <span className="bg-emerald-500/10 text-emerald-400 px-3 py-1 rounded-full font-sans text-[9px] md:text-[10px] font-black tracking-widest uppercase border border-emerald-500/10 inline-block mb-2">GUÍA RÁPIDA</span>
+                        <h3 className="text-lg md:text-2xl font-display font-black uppercase text-white italic tracking-tight">CÓMO ARMAR TU SERVICIO</h3>
+                        <p className="text-zinc-500 text-[9px] md:text-[10px] font-bold uppercase tracking-widest mt-1">Leé y empezá en 10 segundos</p>
+                      </div>
+
+                      <div className="space-y-2.5 text-left">
+                        <div className="flex items-start gap-3 p-3 bg-white/[0.02] border border-white/[0.04] rounded-2xl">
+                          <span className="text-emerald-400 text-sm shrink-0">⚡</span>
+                          <div>
+                            <h4 className="text-white text-xs font-black uppercase tracking-wide">1. ARMA TU COMBO</h4>
+                            <p className="text-zinc-400 text-[10px] md:text-[11px] leading-snug">Seleccioná un servicio principal y sumale todos los adicionales que necesites.</p>
+                          </div>
+                        </div>
+
+                        <div className="flex items-start gap-3 p-3 bg-white/[0.02] border border-white/[0.04] rounded-2xl">
+                          <span className="text-emerald-400 text-sm shrink-0">💵</span>
+                          <div>
+                            <h4 className="text-white text-xs font-black uppercase tracking-wide">2. VALOR POR VEHÍCULO</h4>
+                            <p className="text-zinc-400 text-[10px] md:text-[11px] leading-snug">El sistema calcula el precio final adaptándose automáticamente a tu tipo de vehículo.</p>
+                          </div>
+                        </div>
+
+                        <div className="flex items-start gap-3 p-3 bg-white/[0.02] border border-white/[0.04] rounded-2xl">
+                          <span className="text-emerald-400 text-sm shrink-0">📅</span>
+                          <div>
+                            <h4 className="text-white text-xs font-black uppercase tracking-wide">3. COMBINACIÓN DE COMBOS</h4>
+                            <p className="text-zinc-400 text-[10px] md:text-[11px] leading-snug">El sistema identificará inteligentemente si tu selección coincide con un combo recomendado.</p>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex gap-3 pt-2">
+                        <button
+                          onClick={() => {
+                            setCurrentBookingStep(1);
+                            scrollToBookingFlow();
+                          }}
+                          className="text-[9px] md:text-xs font-black uppercase tracking-widest text-zinc-500 hover:text-white transition-all py-3 md:py-3.5 px-4 border border-zinc-800 rounded-xl hover:border-white/10 active:scale-95 flex-1"
+                        >
+                          🡴 VOLVER
+                        </button>
+                        <button 
+                          onClick={() => {
+                            setTutorialAccepted(true);
+                            scrollToBookingFlow();
+                          }}
+                          className="bg-emerald-500 text-night font-display font-black italic text-[11px] md:text-xs px-5 py-3 md:py-3.5 rounded-xl uppercase tracking-wider cursor-pointer shadow-lg shadow-emerald-500/15 hover:bg-emerald-400 hover:shadow-emerald-500/25 active:scale-95 transition-all outline-none flex items-center justify-center gap-1.5 flex-1"
+                        >
+                          ¡ENTENDIDO! <ArrowRight className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </motion.div>
+                  )}
+
+                  {currentBookingStep === 2 && vehicle && tutorialAccepted && (
                     <motion.div
                       key="step2"
                       initial={{ opacity: 0, x: -10 }}
@@ -2488,6 +2562,64 @@ export default function App() {
               </div>
             </motion.div>
           </div>
+        )}
+      </AnimatePresence>
+
+      {/* Floating Service Summary (Step 2) */}
+      <AnimatePresence>
+        {view === 'booking' && currentBookingStep === 2 && selectedServices.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 50, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 100, scale: 0.95 }}
+            transition={{ type: 'spring', damping: 25, stiffness: 350 }}
+            className="fixed bottom-4 md:bottom-8 left-1/2 -translate-x-1/2 w-[92%] max-w-2xl z-[150] bg-zinc-950/90 backdrop-blur-md border border-emerald-500/25 rounded-2xl md:rounded-3xl shadow-[0_10px_40px_rgba(16,185,129,0.22)] p-4 md:p-6 flex items-center justify-between gap-4"
+          >
+            <div className="min-w-0 flex-1 text-left">
+              <div className="flex items-center gap-2 mb-0.5 sm:mb-1">
+                <span className="bg-emerald-500 text-night px-1.5 py-0.5 rounded text-[7px] md:text-[8px] font-display font-black tracking-widest uppercase italic leading-none">
+                  SELECCIONADO
+                </span>
+                <span className="text-[7.5px] md:text-[9px] font-black uppercase text-emerald-400 tracking-[0.15em] shrink-0">
+                  Resumen actual
+                </span>
+              </div>
+              <h5 className="text-white font-display font-black italic uppercase tracking-tight text-xs sm:text-lg truncate">
+                {getSelectedPackId() 
+                  ? PACKS.find(p => p.id === getSelectedPackId())?.name 
+                  : selectedServices.map(i => activeServices.find(s => s.id === i)?.name).join(' + ')
+                }
+              </h5>
+              <div className="flex items-center gap-2 mt-0.5 sm:mt-1">
+                <span className="text-[8.5px] sm:text-[10px] text-zinc-400 font-bold uppercase tracking-wider flex items-center gap-1">
+                  ⏱️ {totalDuration} min
+                </span>
+                {totalDuration > 120 && (
+                  <span className="bg-zinc-850 text-zinc-400 border border-white/[0.04] px-1.5 py-0.5 rounded text-[7px] sm:text-[8px] font-bold uppercase tracking-wider leading-none">
+                    2 MÓDULOS
+                  </span>
+                )}
+              </div>
+            </div>
+            
+            <div className="flex items-center gap-3 sm:gap-4 shrink-0">
+              <div className="text-right">
+                <div className="text-[7.5px] sm:text-[8.5px] font-black text-zinc-500 uppercase tracking-widest">INVERSIÓN</div>
+                <div className="text-sm sm:text-2xl font-display font-black text-white italic tracking-tighter">
+                  ${currentPrice.toLocaleString('es-AR')}
+                </div>
+              </div>
+              <button 
+                onClick={() => {
+                  setCurrentBookingStep(3);
+                  scrollToBookingFlow();
+                }}
+                className="bg-emerald-500 text-night font-display font-black italic text-[11px] sm:text-xs px-3.5 py-2.5 sm:px-5 sm:py-3.5 rounded-xl uppercase tracking-wider cursor-pointer shadow-lg shadow-emerald-500/10 hover:bg-emerald-400 hover:shadow-emerald-500/20 active:scale-95 transition-all outline-none flex items-center gap-1.5 shrink-0"
+              >
+                Siguiente <ArrowRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </motion.div>
         )}
       </AnimatePresence>
 
