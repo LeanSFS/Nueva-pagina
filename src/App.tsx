@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   ShieldCheck, 
@@ -234,30 +234,10 @@ export default function App() {
   };
   
   // Availability state
-  const [slotsData, setSlotsData] = useState<TimeSlot[]>(() => {
-    try {
-      const cached = sessionStorage.getItem('lys_slots_cache');
-      if (cached) {
-        const { data, timestamp } = JSON.parse(cached);
-        if (Date.now() - timestamp < 120000) return data;
-      }
-    } catch (e) {
-      console.error('Error reading initial cache:', e);
-    }
-    return [];
-  });
+  const [slotsData, setSlotsData] = useState<TimeSlot[]>([]);
   const [selectedDateStr, setSelectedDateStr] = useState<string | null>(null); // YYYY-MM-DD
   const [selectedTime, setSelectedTime] = useState<string | null>(null);
-  const [isLoadingSlots, setIsLoadingSlots] = useState(() => {
-    try {
-      const cached = sessionStorage.getItem('lys_slots_cache');
-      if (cached) {
-        const { timestamp } = JSON.parse(cached);
-        return (Date.now() - timestamp > 120000);
-      }
-    } catch (e) {}
-    return true;
-  });
+  const [isLoadingSlots, setIsLoadingSlots] = useState(true);
 
   // Client data
   const [clientName, setClientName] = useState('');
@@ -422,23 +402,64 @@ export default function App() {
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  useEffect(() => {
-    async function load() {
-      // If we don't have data yet, show loading
-      if (slotsData.length === 0) {
-        setIsLoadingSlots(true);
-      }
-      
-      // Always fetch fresh data in background
+  const refreshSlotsData = useCallback(async (showLoading = false) => {
+    if (showLoading) {
+      setIsLoadingSlots(true);
+    }
+    try {
+      // Force refresh fetches the absolute latest slot status directly from Firestore
       const data = await fetchSlots(true);
-      
       if (data && data.length > 0) {
         setSlotsData(data);
       }
+    } catch (e) {
+      console.error('Error refreshing available slots:', e);
+    } finally {
       setIsLoadingSlots(false);
     }
-    load();
   }, []);
+
+  // 1. Refresh whenever we change step (especially when arriving at the calendar)
+  useEffect(() => {
+    if (view === 'booking') {
+      const isCalendarStep = currentBookingStep === 3;
+      refreshSlotsData(isCalendarStep);
+    }
+  }, [currentBookingStep, view, refreshSlotsData]);
+
+  // 2. Refresh immediately when the tab/window is focused or restored from background
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && view === 'booking') {
+        refreshSlotsData(false); // Silent background refresh
+      }
+    };
+    
+    const handleFocus = () => {
+      if (view === 'booking') {
+        refreshSlotsData(false); // Silent background refresh
+      }
+    };
+
+    window.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', handleFocus);
+    
+    return () => {
+      window.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handleFocus);
+    };
+  }, [view, refreshSlotsData]);
+
+  // 3. Gentle periodic auto-refresh every 20 seconds while on the booking page
+  useEffect(() => {
+    if (view !== 'booking') return;
+    
+    const interval = setInterval(() => {
+      refreshSlotsData(false);
+    }, 20000);
+    
+    return () => clearInterval(interval);
+  }, [view, refreshSlotsData]);
 
   // Helper to get current Date/Time in Argentina time (UTC-3)
   const getArgentinaDateTime = () => {
