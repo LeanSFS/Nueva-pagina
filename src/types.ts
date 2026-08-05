@@ -21,6 +21,7 @@ export interface Service {
     pickup: number;
   };
   duration?: number; // duration in minutes
+  isHidden?: boolean;
 }
 
 export interface PricingTier {

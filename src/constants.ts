@@ -23,7 +23,7 @@ export const SERVICES: Service[] = [
       suv: 20000,
       pickup: 30000
     },
-    duration: 60
+    duration: 90
   },
   {
     id: 'detallado_interior',
@@ -43,7 +43,7 @@ export const SERVICES: Service[] = [
       suv: 25000,
       pickup: 30000
     },
-    duration: 60
+    duration: 90
   },
   {
     id: 'limpieza_techo',
@@ -81,7 +81,7 @@ export const SERVICES: Service[] = [
       suv: 45000,
       pickup: 50000
     },
-    duration: 120
+    duration: 90
   },
   {
     id: 'tapizados_cuero',
@@ -119,7 +119,8 @@ export const SERVICES: Service[] = [
       suv: 12000,
       pickup: 15000
     },
-    duration: 60
+    duration: 60,
+    isHidden: true
   }
 ];
 

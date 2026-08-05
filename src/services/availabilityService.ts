@@ -100,8 +100,8 @@ export async function fetchSlots(forceRefresh = false): Promise<TimeSlot[]> {
       // Define possible times based on the day of the week
       // Saturday = 6, Weekdays = 1-5
       const dTimes = d.getDay() === 6 
-        ? ['09:00', '11:00', '15:00', '17:00']
-        : ['09:00', '11:00'];
+        ? ['08:00', '09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00']
+        : ['07:00', '08:00', '09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00'];
 
       const year = d.getFullYear();
       const month = String(d.getMonth() + 1).padStart(2, '0');

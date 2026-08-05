@@ -540,64 +540,81 @@ export default function App() {
     }).filter(Boolean) as typeof slotsData;
   }, [slotsData]);
 
-  const availableDates = useMemo(() => {
-    return filteredSlotsData
-      .filter(s => s && s.fecha && s.fecha.includes('-'))
-      .map(s => {
-        const [y, m, d] = s.fecha.split('-').map(Number);
-        return {
-          str: s.fecha,
-          date: new Date(y, m - 1, d),
-          slotsCount: s.slots ? s.slots.length : (s.count || 0)
-        };
-      })
-      .filter(item => item.date.getDay() !== 0); // 0 is Sunday
-  }, [filteredSlotsData]);
+  const timeToMins = (timeStr: string) => {
+    const [h, m] = timeStr.split(':').map(Number);
+    return h * 60 + (m || 0);
+  };
+
+  const getBlockedSlotsList = useCallback((startHour: string, durationMinutes: number) => {
+    const startMins = timeToMins(startHour);
+    const endMins = startMins + (durationMinutes || 60);
+    const blocked: string[] = [];
+    
+    // Check all hourly slots between 07:00 and 18:00
+    for (let mins = 7 * 60; mins <= 18 * 60; mins += 60) {
+      if (mins >= startMins && mins < endMins) {
+        const h = Math.floor(mins / 60);
+        const m = mins % 60;
+        const slotStr = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+        blocked.push(slotStr);
+      }
+    }
+    return blocked.length > 0 ? blocked : [startHour];
+  }, []);
 
   const totalDuration = useMemo(() => {
+    if (selectedServices.length === 0) return 60;
     return selectedServices.reduce((total, sId) => {
       const srv = activeServices.find(s => s.id === sId);
       return total + (srv?.duration || 60);
     }, 0);
   }, [selectedServices, activeServices]);
 
-  const getBlockedSlotsList = (startHour: string, duration: number, isSaturday: boolean) => {
-    const list = [startHour];
-    if (duration > 120) {
-      if (startHour === '09:00') {
-        list.push('11:00');
-      } else if (startHour === '15:00' && isSaturday) {
-        list.push('17:00');
-      }
-    }
-    return list;
-  };
+  // Helper to check if a start time can fit the required duration given available free slots on that day
+  const isStartSlotAvailableForDuration = useCallback((startStr: string, freeSlots: string[], durationMinutes: number) => {
+    const startMins = timeToMins(startStr);
+    const endMins = startMins + durationMinutes;
+
+    // Max work end time: 19:30 (7:30 PM)
+    if (endMins > 19 * 60 + 30) return false;
+
+    // Get all hourly slots that this booking will occupy
+    const neededSlots = getBlockedSlotsList(startStr, durationMinutes);
+
+    // ALL required slots must be free (present in freeSlots)
+    return neededSlots.every(slot => freeSlots.includes(slot));
+  }, [getBlockedSlotsList]);
 
   const availableTimes = useMemo(() => {
     if (!selectedDateStr) return [];
     const dayData = filteredSlotsData.find(s => s && s.fecha === selectedDateStr);
     if (!dayData) return [];
     
-    const allSlots = dayData.slots || [];
+    const allFreeSlots = dayData.slots || [];
     
-    // Check if we need consecutive slots
-    if (totalDuration > 120) {
-      const dateParts = selectedDateStr.split('-').map(Number);
-      const dateObj = new Date(dateParts[0], dateParts[1] - 1, dateParts[2]);
-      const isSaturday = dateObj.getDay() === 6;
+    return allFreeSlots.filter((startStr: string) => 
+      isStartSlotAvailableForDuration(startStr, allFreeSlots, totalDuration)
+    );
+  }, [selectedDateStr, filteredSlotsData, totalDuration, isStartSlotAvailableForDuration]);
 
-      return allSlots.filter((time: string) => {
-        if (time === '09:00') {
-          return allSlots.includes('11:00');
-        }
-        if (time === '15:00' && isSaturday) {
-          return allSlots.includes('17:00');
-        }
-        return false;
-      });
-    }
-    return allSlots;
-  }, [selectedDateStr, filteredSlotsData, totalDuration]);
+  const availableDates = useMemo(() => {
+    return filteredSlotsData
+      .filter(s => s && s.fecha && s.fecha.includes('-'))
+      .map(s => {
+        const [y, m, d] = s.fecha.split('-').map(Number);
+        const freeSlots = s.slots || [];
+        const validStartSlotsCount = freeSlots.filter(startStr => 
+          isStartSlotAvailableForDuration(startStr, freeSlots, totalDuration)
+        ).length;
+
+        return {
+          str: s.fecha,
+          date: new Date(y, m - 1, d),
+          slotsCount: validStartSlotsCount
+        };
+      })
+      .filter(item => item.date.getDay() !== 0); // 0 is Sunday
+  }, [filteredSlotsData, totalDuration, isStartSlotAvailableForDuration]);
 
   // --- Weather Logic ---
   const [weatherData, setWeatherData] = useState<Record<string, { isRainy: boolean, code: number }>>({});
@@ -628,6 +645,15 @@ export default function App() {
 
   // --- Support Components ---
   
+  const formatDurationHours = (mins: number) => {
+    if (!mins || mins <= 0) return '0min';
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
+    if (h > 0 && m > 0) return `${h}h ${m}min`;
+    if (h > 0) return `${h}h`;
+    return `${m}min`;
+  };
+
   const calculatePrice = (srvOrIds: string | string[] | null, vType: VehicleType | null) => {
     if (!srvOrIds || !vType) return 0;
     const ids = Array.isArray(srvOrIds) ? srvOrIds : [srvOrIds];
@@ -677,8 +703,7 @@ export default function App() {
     const serviceName = selectedServices.map(sId => activeServices.find(s => s.id === sId)?.name || sId).join(' + ');
     const vehicleName = activeVehicles.find(v => v.id === vehicle)?.name || vehicle;
     
-    const isSaturday = availableDates.find(d => d.str === selectedDateStr)?.date.getDay() === 6;
-    const blocked = getBlockedSlotsList(selectedTime, totalDuration, isSaturday);
+    const blocked = getBlockedSlotsList(selectedTime, totalDuration);
 
     const result = await createBooking({
       fecha: selectedDateStr,
@@ -779,7 +804,7 @@ export default function App() {
               </div>
             </div>
             <span className="text-[9px] md:text-[10px] text-zinc-500 font-extrabold uppercase shrink-0 whitespace-nowrap bg-white/[0.02] border border-white/[0.04] px-1.5 py-0.5 rounded-md">
-              ⏱️ {s.duration || 60} min
+              ⏱️ {formatDurationHours(s.duration || 60)}
             </span>
           </div>
           
@@ -1897,6 +1922,7 @@ export default function App() {
                         {/* FRAME 3: DETALLES ADICIONALES */}
                         {(() => {
                           const packAdditionalSrvs = activeServices.filter(s => ['tratamiento_vidrios'].includes(s.id));
+                          if (packAdditionalSrvs.length === 0) return null;
                           const isAdicSelected = selectedServices.includes('tratamiento_vidrios');
 
                           return (
@@ -1939,8 +1965,8 @@ export default function App() {
                                 : selectedServices.map(i => activeServices.find(s => s.id === i)?.name).join(' + ')
                               }
                             </h5>
-                            <p className="text-[8px] md:text-[10px] text-zinc-550 font-bold uppercase tracking-wider text-left">
-                              ⏱️ Duración: <span className="text-white font-black">{totalDuration} min</span> {totalDuration > 120 && '• Requiere 2 módulos de tiempo'}
+                            <p className="text-[8px] md:text-[10px] text-zinc-400 font-bold uppercase tracking-wider text-left">
+                              ⏱️ Duración: <span className="text-white font-black">{formatDurationHours(totalDuration)}</span> • Requiere {Math.ceil(totalDuration / 60)} {Math.ceil(totalDuration / 60) === 1 ? 'módulo' : 'módulos'} de tiempo
                             </p>
                           </div>
                           <div className="flex items-center justify-between md:justify-end gap-4 border-t border-white/[0.04] md:border-0 pt-3 md:pt-0">
@@ -2688,14 +2714,12 @@ export default function App() {
                 }
               </h5>
               <div className="flex items-center gap-2 mt-0.5 sm:mt-1">
-                <span className="text-[8.5px] sm:text-[10px] text-zinc-400 font-bold uppercase tracking-wider flex items-center gap-1">
-                  ⏱️ {totalDuration} min
+                <span className="text-[8.5px] sm:text-[10px] text-zinc-300 font-bold uppercase tracking-wider flex items-center gap-1">
+                  ⏱️ {formatDurationHours(totalDuration)}
                 </span>
-                {totalDuration > 120 && (
-                  <span className="bg-zinc-850 text-zinc-400 border border-white/[0.04] px-1.5 py-0.5 rounded text-[7px] sm:text-[8px] font-bold uppercase tracking-wider leading-none">
-                    2 MÓDULOS
-                  </span>
-                )}
+                <span className="bg-zinc-850 text-zinc-400 border border-white/[0.04] px-1.5 py-0.5 rounded text-[7px] sm:text-[8px] font-bold uppercase tracking-wider leading-none">
+                  {Math.ceil(totalDuration / 60)} {Math.ceil(totalDuration / 60) === 1 ? 'MÓDULO' : 'MÓDULOS'}
+                </span>
               </div>
             </div>
             
