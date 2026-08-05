@@ -4,7 +4,7 @@ import {
   getDocs, 
   doc, 
   setDoc, 
-  getDocFromServer,
+  getDoc,
   writeBatch
 } from 'firebase/firestore';
 import { db, auth } from './firebase.ts';
@@ -178,20 +178,20 @@ export const generateHistoricalData = (): SectionTrace[] => {
   return traces.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
 };
 
-// Test initial connection to validation server
+// Test initial connection
 async function testConnection() {
   try {
-    await getDocFromServer(doc(db, 'test', 'connection'));
+    await getDoc(doc(db, 'test', 'connection'));
   } catch (error) {
-    if (error instanceof Error && error.message.includes('the client is offline')) {
-      console.warn("Firestore client appears to be offline. Local telemetry fallbacks are active.");
+    if (error instanceof Error) {
+      console.warn("Firestore client notice:", error.message);
     }
   }
 }
 testConnection();
 
 export const metricsService = {
-  // Try retrieving traces from cloud Firestore (falls back to local mock storage)
+  // Try retrieving traces from cloud Firestore (falls back to local storage)
   async getTracesFromCloud(): Promise<SectionTrace[]> {
     const pathRef = 'traces';
     try {
@@ -210,8 +210,8 @@ export const metricsService = {
 
       return firestoreTraces.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
     } catch (error) {
-      handleFirestoreError(error, OperationType.GET, pathRef);
-      return [];
+      console.warn("Could not load metrics from cloud, using local storage fallback:", error);
+      return this.getLocalTraces();
     }
   },
 

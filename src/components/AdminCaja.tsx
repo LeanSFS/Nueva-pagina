@@ -28,12 +28,14 @@ import {
   Link2,
   Clock,
   Eye,
-  EyeOff
+  EyeOff,
+  Tag,
+  Image
 } from 'lucide-react';
 import AdminAgenda from './AdminAgenda.tsx';
 import AdminRendimientos from './AdminRendimientos.tsx';
 import AdminMetrics from './AdminMetrics.tsx';
-import { firestoreService, Movement, Booking } from '../services/firestoreService.ts';
+import { firestoreService, Movement, Booking, sanitizeImageUrl } from '../services/firestoreService.ts';
 import { auth } from '../services/firebase.ts';
 import { SERVICES } from '../constants.ts';
 import { signInWithPopup, signInWithRedirect, getRedirectResult, GoogleAuthProvider, signOut, User as FirebaseUser } from 'firebase/auth';
@@ -174,47 +176,6 @@ export default function AdminCaja({ onBack }: { onBack: () => void }) {
     }
   };
 
-  // ARCA (ex-AFIP) Facturación Config
-  const [arcaConfig, setArcaConfig] = useState(() => {
-    try {
-      const saved = localStorage.getItem('lys_arca_config');
-      if (saved) return JSON.parse(saved);
-    } catch (e) {}
-    return {
-      enabled: true,
-      autoEmit: true,
-      cuit: '20-38491029-4',
-      ptoVenta: '0001',
-      tipoComprobante: 'FC-C',
-      condicionIva: 'Monotributo',
-      entorno: 'produccion'
-    };
-  });
-  const [showArcaSettings, setShowArcaSettings] = useState(false);
-  const [selectedArcaVoucher, setSelectedArcaVoucher] = useState<{ movement: Movement; nro: string; cae: string; caeVto: string } | null>(null);
-
-  const saveArcaConfig = (newCfg: typeof arcaConfig) => {
-    setArcaConfig(newCfg);
-    try {
-      localStorage.setItem('lys_arca_config', JSON.stringify(newCfg));
-    } catch (e) {}
-  };
-
-  const generateArcaInvoiceData = (tipoComp = arcaConfig.tipoComprobante, ptoVta = arcaConfig.ptoVenta) => {
-    const nextNum = Math.floor(1000 + Math.random() * 9000);
-    const nroFactura = `${tipoComp} ${ptoVta.padStart(4, '0')}-${String(nextNum).padStart(8, '0')}`;
-    const randomCAE = '74' + Array.from({ length: 12 }, () => Math.floor(Math.random() * 10)).join('');
-    const vto = new Date();
-    vto.setDate(vto.getDate() + 10);
-    const vtoStr = vto.toISOString().split('T')[0];
-    return {
-      facturaFullStr: `${nroFactura} (CAE: ${randomCAE})`,
-      nroFactura,
-      cae: randomCAE,
-      caeVto: vtoStr
-    };
-  };
-
   const handleAdd = async () => {
     if (!newMovement.concepto || !newMovement.monto) {
       setError('Complete concepto y monto');
@@ -225,13 +186,6 @@ export default function AdminCaja({ onBack }: { onBack: () => void }) {
     setError(null);
     try {
       const movementId = `mov_${Date.now()}_generic`;
-      let finalFactura = newMovement.factura || '';
-
-      // Auto-emit ARCA invoice if enabled for paid income
-      if (arcaConfig.enabled && arcaConfig.autoEmit && newMovement.tipo === 'Ingreso' && newMovement.estado === 'Pagado' && !finalFactura) {
-        const arcaRes = generateArcaInvoiceData();
-        finalFactura = arcaRes.facturaFullStr;
-      }
 
       const val: Movement = {
         id: movementId,
@@ -242,7 +196,7 @@ export default function AdminCaja({ onBack }: { onBack: () => void }) {
         monto_ars: Number(newMovement.monto) || 0,
         medio: newMovement.medio,
         estado: newMovement.estado as 'Pagado' | 'Pendiente',
-        factura: finalFactura,
+        factura: newMovement.factura || '',
         cliente: newMovement.cliente || '',
         notas: newMovement.notes || ''
       };
@@ -262,24 +216,6 @@ export default function AdminCaja({ onBack }: { onBack: () => void }) {
       setError(err.message || 'Error al guardar movimiento');
     } finally {
       setSubmitting(false);
-    }
-  };
-
-  const handleEmitArcaInvoice = async (r: Movement) => {
-    setLoading(true);
-    setError(null);
-    try {
-      const arcaRes = generateArcaInvoiceData();
-      const val: Movement = {
-        ...r,
-        factura: arcaRes.facturaFullStr
-      };
-      await firestoreService.saveMovement(val);
-      await fetchRows();
-    } catch (e: any) {
-      setError(e.message || 'Error al emitir factura en ARCA');
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -400,7 +336,8 @@ export default function AdminCaja({ onBack }: { onBack: () => void }) {
   const [catalogSuccess, setCatalogSuccess] = useState(false);
 
   const [newPhoto, setNewPhoto] = useState({ url: '', title: '', description: '' });
-  const [imageInputMethod, setImageInputMethod] = useState<'url' | 'file'>('url');
+  const [imageInputMethod, setImageInputMethod] = useState<'url' | 'file'>('file');
+  const [previewImageError, setPreviewImageError] = useState(false);
   const [savingPhoto, setSavingPhoto] = useState(false);
   const [compressingImage, setCompressingImage] = useState(false);
   const [deleteConfirmPhotoId, setDeleteConfirmPhotoId] = useState<string | null>(null);
@@ -611,28 +548,43 @@ export default function AdminCaja({ onBack }: { onBack: () => void }) {
 
   const handleAddPhoto = async () => {
     if (!newPhoto.url) {
-      setError('Complete la URL de la imagen');
+      setError('Seleccione una imagen o pegue una URL válida.');
       return;
     }
     setSavingPhoto(true);
     setError(null);
     try {
+      const sanitizedUrl = sanitizeImageUrl(newPhoto.url);
       const photoId = `photo_${Date.now()}`;
       const payload = {
         id: photoId,
-        url: newPhoto.url,
+        url: sanitizedUrl,
         title: newPhoto.title || 'Trabajo Realizado',
         description: newPhoto.description || 'Resultado profesional en nuestro taller.',
         createdAt: new Date().toISOString()
       };
       await firestoreService.addGalleryPhoto(payload);
       setNewPhoto({ url: '', title: '', description: '' });
-      // Update local state directly for instant feedback and to prevent public read overriding before sync completes
-      setDbPhotos(prev => [payload, ...prev]);
+      setPreviewImageError(false);
+      // Update local state directly for instant feedback
+      setDbPhotos(prev => [payload, ...prev.filter(p => p.id !== photoId)]);
     } catch (e: any) {
       setError(e.message || 'Error al guardar foto');
     } finally {
       setSavingPhoto(false);
+    }
+  };
+
+  const handleRestoreGallery = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const reset = await firestoreService.restoreDefaultGallery();
+      setDbPhotos(reset);
+    } catch (e: any) {
+      setError('Error al restaurar galería de ejemplo');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -790,61 +742,97 @@ export default function AdminCaja({ onBack }: { onBack: () => void }) {
   return (
     <div className="min-h-screen bg-slate-950 text-white p-4 md:p-8 font-sans">
       <div className="max-w-6xl mx-auto">
-        <div className="flex flex-col md:flex-row items-center justify-between gap-6 mb-12">
-          <div className="flex flex-col sm:flex-row items-center gap-4">
-            <button onClick={onBack} className="flex items-center gap-2 text-zinc-500 hover:text-white transition-colors">
-              <ArrowLeft className="w-5 h-5" />
+        {/* Header Superior */}
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mb-6 pb-6 border-b border-white/5">
+          <div className="flex items-center gap-4">
+            <button 
+              onClick={onBack} 
+              className="flex items-center gap-2 text-zinc-400 hover:text-white transition-colors text-xs font-bold uppercase tracking-wider py-1.5 px-3 rounded-lg hover:bg-white/5 cursor-pointer"
+            >
+              <ArrowLeft className="w-4 h-4" />
               <span>Salir del Panel</span>
             </button>
             <div className="hidden sm:block text-zinc-700 font-black">|</div>
-            <div className="flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/20 px-3.5 py-1.5 rounded-full select-none text-[10px] font-black uppercase tracking-widest text-emerald-400">
+            <div className="flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/20 px-3 py-1 rounded-full select-none text-[10px] font-black uppercase tracking-widest text-emerald-400">
               <ShieldCheck className="w-3.5 h-3.5 animate-pulse" />
               <span>Sincronizado</span>
-              <span className="hidden md:inline text-zinc-500 font-normal">({currentUser?.email})</span>
+              <span className="hidden lg:inline text-zinc-500 font-normal">({currentUser?.email})</span>
             </div>
           </div>
           
-          <div className="flex bg-zinc-900/50 p-1 rounded-2xl border border-white/5 overflow-x-auto max-w-full">
-            <button 
-              onClick={() => setActiveTab('agenda')}
-              className={`flex items-center gap-2 px-4 md:px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all whitespace-nowrap ${activeTab === 'agenda' ? 'bg-emerald-500 text-night shadow-lg' : 'text-zinc-500 hover:text-white'}`}
-            >
-              <LayoutDashboard className="w-4 h-4" /> Agenda
-            </button>
-            <button 
-              onClick={() => setActiveTab('catalog')}
-              className={`flex items-center gap-2 px-4 md:px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all whitespace-nowrap ${activeTab === 'catalog' ? 'bg-emerald-500 text-night shadow-lg' : 'text-zinc-500 hover:text-white'}`}
-            >
-              <Sparkles className="w-4 h-4" /> Precios
-            </button>
-            <button 
-              onClick={() => setActiveTab('gallery')}
-              className={`flex items-center gap-2 px-4 md:px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all whitespace-nowrap ${activeTab === 'gallery' ? 'bg-emerald-500 text-night shadow-lg' : 'text-zinc-500 hover:text-white'}`}
-            >
-              <Plus className="w-4 h-4" /> Galería
-            </button>
-            <button 
-              onClick={() => setActiveTab('caja')}
-              className={`flex items-center gap-2 px-4 md:px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all whitespace-nowrap ${activeTab === 'caja' ? 'bg-emerald-500 text-night shadow-lg' : 'text-zinc-500 hover:text-white'}`}
-            >
-              <Wallet className="w-4 h-4" /> Caja
-            </button>
-            <button 
-              onClick={() => setActiveTab('stats')}
-              className={`flex items-center gap-2 px-4 md:px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all whitespace-nowrap ${activeTab === 'stats' ? 'bg-emerald-500 text-night shadow-lg' : 'text-zinc-500 hover:text-white'}`}
-            >
-              <BarChartIcon className="w-4 h-4" /> Rendimientos
-            </button>
-            <button 
-              onClick={() => setActiveTab('metrics')}
-              className={`flex items-center gap-2 px-4 md:px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all whitespace-nowrap ${activeTab === 'metrics' ? 'bg-emerald-500 text-night shadow-lg' : 'text-zinc-500 hover:text-white'}`}
-            >
-              <Activity className="w-4 h-4" /> Métricas
-            </button>
-          </div>
-          
-          <h1 className="text-xl md:text-2xl font-display font-black italic tracking-tighter hidden md:block">LyS Lavados <span className="text-emerald-500">Admin</span></h1>
+          <h1 className="text-xl md:text-2xl font-display font-black italic tracking-tighter">
+            LyS Lavados <span className="text-emerald-500">Admin</span>
+          </h1>
         </div>
+
+        {/* NAVEGACIÓN PRINCIPAL DE PESTAÑAS (Orden: Agenda, Caja, Precios, Galería, Rendimientos, Métricas) */}
+        <nav className="bg-zinc-900/90 p-1.5 rounded-2xl border border-white/10 shadow-2xl flex items-center justify-start lg:justify-between gap-1 overflow-x-auto max-w-full mb-8 scrollbar-none">
+          {/* 1. Agenda */}
+          <button 
+            onClick={() => setActiveTab('agenda')}
+            className={`flex-1 min-w-[110px] sm:min-w-0 flex items-center justify-center gap-2 px-3 sm:px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all whitespace-nowrap cursor-pointer ${
+              activeTab === 'agenda' ? 'bg-emerald-500 text-slate-950 font-black shadow-lg shadow-emerald-500/20' : 'text-zinc-400 hover:text-white hover:bg-white/5'
+            }`}
+          >
+            <LayoutDashboard className="w-4 h-4 shrink-0" />
+            <span>Agenda</span>
+          </button>
+
+          {/* 2. Caja */}
+          <button 
+            onClick={() => setActiveTab('caja')}
+            className={`flex-1 min-w-[110px] sm:min-w-0 flex items-center justify-center gap-2 px-3 sm:px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all whitespace-nowrap cursor-pointer ${
+              activeTab === 'caja' ? 'bg-emerald-500 text-slate-950 font-black shadow-lg shadow-emerald-500/20' : 'text-zinc-400 hover:text-white hover:bg-white/5'
+            }`}
+          >
+            <Wallet className="w-4 h-4 shrink-0" />
+            <span>Caja</span>
+          </button>
+
+          {/* 3. Precios */}
+          <button 
+            onClick={() => setActiveTab('catalog')}
+            className={`flex-1 min-w-[110px] sm:min-w-0 flex items-center justify-center gap-2 px-3 sm:px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all whitespace-nowrap cursor-pointer ${
+              activeTab === 'catalog' ? 'bg-emerald-500 text-slate-950 font-black shadow-lg shadow-emerald-500/20' : 'text-zinc-400 hover:text-white hover:bg-white/5'
+            }`}
+          >
+            <Tag className="w-4 h-4 shrink-0" />
+            <span>Precios</span>
+          </button>
+
+          {/* 4. Galería */}
+          <button 
+            onClick={() => setActiveTab('gallery')}
+            className={`flex-1 min-w-[110px] sm:min-w-0 flex items-center justify-center gap-2 px-3 sm:px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all whitespace-nowrap cursor-pointer ${
+              activeTab === 'gallery' ? 'bg-emerald-500 text-slate-950 font-black shadow-lg shadow-emerald-500/20' : 'text-zinc-400 hover:text-white hover:bg-white/5'
+            }`}
+          >
+            <Image className="w-4 h-4 shrink-0" />
+            <span>Galería</span>
+          </button>
+
+          {/* 5. Rendimientos */}
+          <button 
+            onClick={() => setActiveTab('stats')}
+            className={`flex-1 min-w-[110px] sm:min-w-0 flex items-center justify-center gap-2 px-3 sm:px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all whitespace-nowrap cursor-pointer ${
+              activeTab === 'stats' ? 'bg-emerald-500 text-slate-950 font-black shadow-lg shadow-emerald-500/20' : 'text-zinc-400 hover:text-white hover:bg-white/5'
+            }`}
+          >
+            <BarChartIcon className="w-4 h-4 shrink-0" />
+            <span>Rendimientos</span>
+          </button>
+
+          {/* 6. Métricas */}
+          <button 
+            onClick={() => setActiveTab('metrics')}
+            className={`flex-1 min-w-[110px] sm:min-w-0 flex items-center justify-center gap-2 px-3 sm:px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all whitespace-nowrap cursor-pointer ${
+              activeTab === 'metrics' ? 'bg-emerald-500 text-slate-950 font-black shadow-lg shadow-emerald-500/20' : 'text-zinc-400 hover:text-white hover:bg-white/5'
+            }`}
+          >
+            <Activity className="w-4 h-4 shrink-0" />
+            <span>Métricas</span>
+          </button>
+        </nav>
 
         {activeTab === 'agenda' ? (
           <AdminAgenda 
@@ -1044,11 +1032,22 @@ export default function AdminCaja({ onBack }: { onBack: () => void }) {
           </div>
         ) : activeTab === 'gallery' ? (
           <div className="bg-zinc-900 border border-white/5 rounded-[2.5rem] p-8 md:p-12 space-y-8 animate-fade-in">
-            <div>
-              <h2 className="text-2xl font-display font-black italic text-white tracking-tight flex items-center gap-3">
-                <Plus className="w-6 h-6 text-emerald-500" /> GALERÍA DE RESULTADOS
-              </h2>
-              <p className="text-zinc-500 text-[10px] font-black uppercase tracking-widest mt-1">Sube fotos reales para motivar a tus clientes</p>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <h2 className="text-2xl font-display font-black italic text-white tracking-tight flex items-center gap-3">
+                  <Plus className="w-6 h-6 text-emerald-500" /> GALERÍA DE RESULTADOS
+                </h2>
+                <p className="text-zinc-500 text-[10px] font-black uppercase tracking-widest mt-1">Sube fotos reales para motivar a tus clientes</p>
+              </div>
+              <button
+                onClick={handleRestoreGallery}
+                disabled={loading}
+                className="bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-white/10 px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wider transition-all flex items-center gap-2 cursor-pointer self-start sm:self-auto"
+                title="Restaurar imágenes de ejemplo por defecto"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
+                Restaurar Fotos Demo
+              </button>
             </div>
 
             {/* Upload form */}
@@ -1059,40 +1058,22 @@ export default function AdminCaja({ onBack }: { onBack: () => void }) {
                   <label className="text-[8px] font-black uppercase text-zinc-500 mb-1 block">Título</label>
                   <input 
                     type="text" 
-                    placeholder="Ej. Pulido Ópticas" 
+                    placeholder="Ej. Pulido Ópticas / Limpieza Tapizados" 
                     value={newPhoto.title} 
                     onChange={e => setNewPhoto({...newPhoto, title: e.target.value})}
                     className="w-full bg-zinc-900 border border-white/10 rounded-xl p-3 text-sm focus:border-emerald-500 outline-none"
                   />
                 </div>
                 <div className="md:col-span-8 flex flex-col justify-end">
-                  <span className="text-[8px] font-black uppercase text-zinc-500 mb-2 block">Imagen del Trabajo (Seleccioná método)</span>
+                  <span className="text-[8px] font-black uppercase text-zinc-500 mb-2 block">Origen de la Imagen (Elegí opción)</span>
                   
                   {/* Selector de Método */}
                   <div className="flex bg-zinc-900 p-1 rounded-xl border border-white/5 mb-3 select-none">
                     <button
                       type="button"
                       onClick={() => {
-                        setImageInputMethod('url');
-                        if (newPhoto.url.startsWith('data:')) {
-                          setNewPhoto(prev => ({ ...prev, url: '' }));
-                        }
-                      }}
-                      className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
-                        imageInputMethod === 'url'
-                          ? 'bg-emerald-500 text-night shadow-lg font-black'
-                          : 'text-zinc-400 hover:text-white'
-                      }`}
-                    >
-                      <Link2 className="w-3.5 h-3.5" /> Pegar Link (Calidad Original HD)
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
                         setImageInputMethod('file');
-                        if (newPhoto.url && !newPhoto.url.startsWith('data:')) {
-                          setNewPhoto(prev => ({ ...prev, url: '' }));
-                        }
+                        setPreviewImageError(false);
                       }}
                       className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
                         imageInputMethod === 'file'
@@ -1100,25 +1081,26 @@ export default function AdminCaja({ onBack }: { onBack: () => void }) {
                           : 'text-zinc-400 hover:text-white'
                       }`}
                     >
-                      <Plus className="w-3.5 h-3.5" /> Subir Archivo (Comprimido)
+                      <Plus className="w-3.5 h-3.5" /> 📱 Subir Desde Dispositivo / Galería
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setImageInputMethod('url');
+                        setPreviewImageError(false);
+                      }}
+                      className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+                        imageInputMethod === 'url'
+                          ? 'bg-emerald-500 text-night shadow-lg font-black'
+                          : 'text-zinc-400 hover:text-white'
+                      }`}
+                    >
+                      <Link2 className="w-3.5 h-3.5" /> 🔗 Pegar Enlace (URL Directo)
                     </button>
                   </div>
 
                   <div>
-                    {imageInputMethod === 'url' ? (
-                      <div>
-                        <input 
-                          type="text" 
-                          placeholder="Pegar URL definitivo de la imagen (ej. https://i.imgur.com/...)" 
-                          value={newPhoto.url.startsWith('data:') ? '' : newPhoto.url} 
-                          onChange={e => setNewPhoto({...newPhoto, url: e.target.value})}
-                          className="w-full bg-zinc-900 border border-white/10 rounded-xl p-3 text-sm focus:border-emerald-500 outline-none placeholder:text-zinc-600 text-white"
-                        />
-                        <span className="text-[9px] text-zinc-500 mt-1.5 block leading-relaxed">
-                          💡 <strong>Recomendado:</strong> Para subir fotos en <strong>alta calidad original (Full HD)</strong>, subí la foto a servidores gratuitos como Imgur, PostIMG, o similares y pegá su enlace directo de archivo acá.
-                        </span>
-                      </div>
-                    ) : (
+                    {imageInputMethod === 'file' ? (
                       <div>
                         <input 
                           type="file" 
@@ -1129,22 +1111,40 @@ export default function AdminCaja({ onBack }: { onBack: () => void }) {
                         />
                         <label 
                           htmlFor="phone-image-upload"
-                          className="w-full bg-zinc-900 hover:bg-zinc-800 border-2 border-dashed border-emerald-500/20 hover:border-emerald-500/40 rounded-xl p-4 text-xs font-black text-center text-emerald-400 uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer select-none transition-all active:scale-[0.98] min-h-[46px]"
+                          className="w-full bg-zinc-900 hover:bg-zinc-800 border-2 border-dashed border-emerald-500/30 hover:border-emerald-500/60 rounded-xl p-4 text-xs font-black text-center text-emerald-400 uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer select-none transition-all active:scale-[0.98] min-h-[50px]"
                         >
                           {compressingImage ? (
                             <>
                               <Loader2 className="w-4 h-4 animate-spin text-emerald-400" />
-                              PROCESANDO...
+                              PROCESANDO IMAGEN...
                             </>
                           ) : (
                             <>
                               <Plus className="w-4 h-4 text-emerald-400" />
-                              SELECCIONAR ARCHIVO DESDE DISPOSITIVO
+                              SELECCIONAR O ARRASTRAR FOTO DE TU CELULAR / PC
                             </>
                           )}
                         </label>
                         <span className="text-[9px] text-zinc-500 mt-1.5 block leading-relaxed">
-                          ⚠️ Al subir archivos locales, la web los comprime y reduce de resolución automáticamente para ahorrar espacio de almacenamiento y que la página mantenga una carga rápida para el resto de los usuarios.
+                          ✓ Las fotos subidas desde tu dispositivo se procesan y optimizan automáticamente para almacenarse de forma permanente y segura en la aplicación.
+                        </span>
+                      </div>
+                    ) : (
+                      <div>
+                        <input 
+                          type="text" 
+                          placeholder="Pegar enlace de imagen (ej. https://i.imgur.com/..., Google Drive o Dropbox)" 
+                          value={newPhoto.url.startsWith('data:') ? '' : newPhoto.url} 
+                          onChange={e => {
+                            const raw = e.target.value;
+                            const sanitized = sanitizeImageUrl(raw);
+                            setNewPhoto({...newPhoto, url: sanitized});
+                            setPreviewImageError(false);
+                          }}
+                          className="w-full bg-zinc-900 border border-white/10 rounded-xl p-3 text-sm focus:border-emerald-500 outline-none placeholder:text-zinc-600 text-white"
+                        />
+                        <span className="text-[9px] text-zinc-500 mt-1.5 block leading-relaxed">
+                          💡 Se convierten automáticamente enlaces de Google Drive, Imgur o Dropbox en formato visible directo.
                         </span>
                       </div>
                     )}
@@ -1154,25 +1154,41 @@ export default function AdminCaja({ onBack }: { onBack: () => void }) {
 
               {/* Show selected image preview */}
               {newPhoto.url && (
-                <div className="bg-black/50 border border-white/5 rounded-2xl p-3 flex items-center justify-between gap-4">
+                <div className="bg-black/50 border border-white/10 rounded-2xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                   <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-12 h-12 rounded-lg overflow-hidden bg-zinc-800 border border-white/10 flex-shrink-0">
+                    <div className="w-14 h-14 rounded-lg overflow-hidden bg-zinc-800 border border-white/10 flex-shrink-0 relative">
                       <img 
                         src={newPhoto.url} 
                         alt="Preview" 
                         className="w-full h-full object-cover" 
+                        onError={() => setPreviewImageError(true)}
+                        onLoad={() => setPreviewImageError(false)}
                       />
                     </div>
                     <div className="min-w-0">
-                      <p className="text-[9px] font-black uppercase text-emerald-400 tracking-wider">Imagen Lista para Subir</p>
-                      <p className="text-zinc-400 text-xs truncate max-w-[200px] sm:max-w-xs">{newPhoto.url.startsWith('data:') ? 'Archivo comprimido localmente (JPEG)' : newPhoto.url}</p>
+                      <p className="text-[9px] font-black uppercase text-emerald-400 tracking-wider flex items-center gap-1">
+                        <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                        Imagen Lista para Agregar
+                      </p>
+                      <p className="text-zinc-400 text-xs truncate max-w-[220px] sm:max-w-md">
+                        {newPhoto.url.startsWith('data:') ? 'Foto local optimizada (JPEG)' : newPhoto.url}
+                      </p>
+                      {previewImageError && (
+                        <p className="text-amber-400 text-[10px] font-bold mt-1 flex items-center gap-1">
+                          <AlertTriangle className="w-3 h-3 text-amber-400" />
+                          No se pudo cargar la vista previa. Si usas URL, te sugerimos subir el archivo directo desde tu celular.
+                        </p>
+                      )}
                     </div>
                   </div>
                   <button 
-                    onClick={() => setNewPhoto(prev => ({ ...prev, url: '' }))}
-                    className="text-red-400 hover:text-red-300 transition-colors p-2 text-xs font-bold uppercase tracking-wider cursor-pointer flex-shrink-0"
+                    onClick={() => {
+                      setNewPhoto(prev => ({ ...prev, url: '' }));
+                      setPreviewImageError(false);
+                    }}
+                    className="text-red-400 hover:text-red-300 transition-colors p-2 text-xs font-bold uppercase tracking-wider cursor-pointer self-end sm:self-auto"
                   >
-                    Borrar
+                    Quitar
                   </button>
                 </div>
               )}
@@ -1181,7 +1197,7 @@ export default function AdminCaja({ onBack }: { onBack: () => void }) {
                 <label className="text-[8px] font-black uppercase text-zinc-500 mb-1 block">Descripción del Trabajo</label>
                 <textarea 
                   rows={2}
-                  placeholder="Detalles de la limpieza, ceras aplicadas, etc." 
+                  placeholder="Detalles del tratamiento realizado, productos aplicados, etc." 
                   value={newPhoto.description} 
                   onChange={e => setNewPhoto({...newPhoto, description: e.target.value})}
                   className="w-full bg-zinc-900 border border-white/10 rounded-xl p-3 text-sm focus:border-emerald-500 outline-none"
@@ -1194,14 +1210,14 @@ export default function AdminCaja({ onBack }: { onBack: () => void }) {
                   disabled={savingPhoto || compressingImage || !newPhoto.url}
                 >
                   {savingPhoto ? <Loader2 className="w-5 h-5 animate-spin" /> : <Plus className="w-5 h-5" />}
-                  {savingPhoto ? 'SUBIENDO...' : 'SUBIR FOTO'}
+                  {savingPhoto ? 'SUBIENDO...' : 'PUBLICAR EN GALERÍA'}
                 </button>
               </div>
             </div>
 
             {/* Photo List Grid */}
             <div className="space-y-4">
-              <h3 className="text-xs font-black uppercase tracking-widest text-zinc-400">Imágenes Actuales ({dbPhotos.length})</h3>
+              <h3 className="text-xs font-black uppercase tracking-widest text-zinc-400">Imágenes Publicadas ({dbPhotos.length})</h3>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 {dbPhotos.map(photo => (
                   <div key={photo.id} className="bg-slate-950 border border-white/5 rounded-2xl overflow-hidden group flex flex-col h-full hover:border-white/10 transition-colors">
@@ -1211,6 +1227,11 @@ export default function AdminCaja({ onBack }: { onBack: () => void }) {
                         alt={photo.title}
                         className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
                         referrerPolicy="no-referrer"
+                        onError={(e) => {
+                          const target = e.target as HTMLImageElement;
+                          target.onerror = null;
+                          target.src = 'https://images.unsplash.com/photo-1601362840469-51e4d8d59085?auto=format&fit=crop&q=80&w=600';
+                        }}
                       />
                       {deleteConfirmPhotoId === photo.id ? (
                         <div className="absolute top-3 right-3 flex items-center gap-1 bg-zinc-950 p-1.5 rounded-xl border border-red-500/30 shadow-2xl z-20">
@@ -1218,7 +1239,7 @@ export default function AdminCaja({ onBack }: { onBack: () => void }) {
                             onClick={() => handleDeletePhoto(photo.id)}
                             className="px-2 py-1 bg-red-600 hover:bg-red-500 text-white rounded-lg text-[9px] font-black uppercase tracking-wider transition-colors cursor-pointer"
                           >
-                            SÍ
+                            SÍ, ELIMINAR
                           </button>
                           <button 
                             onClick={() => setDeleteConfirmPhotoId(null)}
@@ -1243,7 +1264,15 @@ export default function AdminCaja({ onBack }: { onBack: () => void }) {
                   </div>
                 ))}
                 {dbPhotos.length === 0 && (
-                  <div className="col-span-3 text-center py-12 text-zinc-500 italic">No hay imágenes en la galería. Agrégalas arriba.</div>
+                  <div className="col-span-3 text-center py-12 text-zinc-500 italic space-y-3">
+                    <p>No hay imágenes publicadas en la galería.</p>
+                    <button
+                      onClick={handleRestoreGallery}
+                      className="px-4 py-2 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-emerald-500/20 transition-all cursor-pointer"
+                    >
+                      Restaurar Galería Demo Inicial
+                    </button>
+                  </div>
                 )}
               </div>
             </div>
@@ -1291,109 +1320,6 @@ export default function AdminCaja({ onBack }: { onBack: () => void }) {
           </div>
         </div>
 
-        {/* ARCA (ex-AFIP) Config Banner */}
-        <div className="bg-zinc-900 border border-emerald-500/20 p-6 rounded-3xl mb-8 flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-xl relative overflow-hidden">
-          <div className="flex items-start gap-4">
-            <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 shrink-0">
-              <FileText className="w-6 h-6" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h3 className="font-display font-black text-white text-base italic uppercase tracking-tight">Facturación Electrónica ARCA (ex-AFIP)</h3>
-                <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full ${arcaConfig.enabled ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-zinc-800 text-zinc-500'}`}>
-                  {arcaConfig.enabled ? 'ACTIVO' : 'INACTIVO'}
-                </span>
-              </div>
-              <p className="text-zinc-400 text-xs mt-0.5 leading-relaxed">
-                CUIT: <strong className="text-white font-mono">{arcaConfig.cuit}</strong> • PTO VTA: <strong className="text-white font-mono">{arcaConfig.ptoVenta}</strong> • {arcaConfig.tipoComprobante} ({arcaConfig.condicionIva}) • {arcaConfig.autoEmit ? '⚡ Auto-Facturar al guardar Ingreso' : 'Emisión Manual'}
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-3 self-end md:self-center">
-            <button
-              onClick={() => saveArcaConfig({ ...arcaConfig, autoEmit: !arcaConfig.autoEmit })}
-              className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all border ${
-                arcaConfig.autoEmit
-                  ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20'
-                  : 'bg-zinc-800 border-white/5 text-zinc-400 hover:text-white'
-              }`}
-            >
-              Auto-Facturar: {arcaConfig.autoEmit ? 'SÍ' : 'NO'}
-            </button>
-            <button
-              onClick={() => setShowArcaSettings(!showArcaSettings)}
-              className="px-4 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-white border border-white/10 text-xs font-black uppercase tracking-wider transition-all"
-            >
-              Configurar ARCA
-            </button>
-          </div>
-        </div>
-
-        {/* ARCA Settings Expandable Form */}
-        {showArcaSettings && (
-          <div className="bg-slate-950 border border-emerald-500/30 p-6 md:p-8 rounded-3xl mb-8 space-y-6 animate-fade-in">
-            <div className="flex items-center justify-between">
-              <h4 className="text-sm font-display font-black text-emerald-400 uppercase italic tracking-wider flex items-center gap-2">
-                <Sparkles className="w-4 h-4 text-emerald-400" /> Datos de Emisor y Web Service ARCA / AFIP
-              </h4>
-              <button onClick={() => setShowArcaSettings(false)} className="text-zinc-500 hover:text-white text-xs font-black uppercase">Cerrar</button>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
-              <div>
-                <label className="text-[9px] font-black uppercase text-zinc-500 block mb-1">CUIT Emisor (ARCA)</label>
-                <input
-                  type="text"
-                  value={arcaConfig.cuit}
-                  onChange={e => saveArcaConfig({ ...arcaConfig, cuit: e.target.value })}
-                  placeholder="20-38491029-4"
-                  className="w-full bg-zinc-900 border border-white/10 rounded-xl p-3 text-xs text-white font-mono font-bold outline-none focus:border-emerald-500"
-                />
-              </div>
-              <div>
-                <label className="text-[9px] font-black uppercase text-zinc-500 block mb-1">Punto de Venta</label>
-                <input
-                  type="text"
-                  value={arcaConfig.ptoVenta}
-                  onChange={e => saveArcaConfig({ ...arcaConfig, ptoVenta: e.target.value })}
-                  placeholder="0001"
-                  className="w-full bg-zinc-900 border border-white/10 rounded-xl p-3 text-xs text-white font-mono font-bold outline-none focus:border-emerald-500"
-                />
-              </div>
-              <div>
-                <label className="text-[9px] font-black uppercase text-zinc-500 block mb-1">Tipo de Comprobante</label>
-                <select
-                  value={arcaConfig.tipoComprobante}
-                  onChange={e => saveArcaConfig({ ...arcaConfig, tipoComprobante: e.target.value })}
-                  className="w-full bg-zinc-900 border border-white/10 rounded-xl p-3 text-xs text-white font-bold outline-none focus:border-emerald-500"
-                >
-                  <option value="FC-C">Factura C (Monotributo)</option>
-                  <option value="FC-B">Factura B (Resp. Inscripto a Cons. Final)</option>
-                  <option value="FC-A">Factura A (Resp. Inscripto a Resp. Inscripto)</option>
-                </select>
-              </div>
-              <div>
-                <label className="text-[9px] font-black uppercase text-zinc-500 block mb-1">Condición Frente al IVA</label>
-                <select
-                  value={arcaConfig.condicionIva}
-                  onChange={e => saveArcaConfig({ ...arcaConfig, condicionIva: e.target.value })}
-                  className="w-full bg-zinc-900 border border-white/10 rounded-xl p-3 text-xs text-white font-bold outline-none focus:border-emerald-500"
-                >
-                  <option value="Monotributo">Monotributo / Régimen Simplificado</option>
-                  <option value="Responsable Inscripto">Responsable Inscripto</option>
-                  <option value="Exento">Exento</option>
-                </select>
-              </div>
-            </div>
-            <div className="bg-zinc-900/60 border border-white/5 p-4 rounded-2xl space-y-2 text-xs text-zinc-400">
-              <p className="text-emerald-400 font-bold uppercase text-[10px] flex items-center gap-1.5">
-                <Info className="w-3.5 h-3.5" /> Estado de la Conexión Web Service ARCA (WSFEv1)
-              </p>
-              <p className="leading-relaxed text-[11px]">
-                El sistema genera automáticamente el CAE (Código de Autorización Electrónico) y formateo oficial de ARCA para cada comprobante emitido. Los comprobantes generados quedan guardados con su número de serie, CAE y vencimiento oficial, listos para descargar o imprimir con código QR.
-              </p>
-            </div>
-          </div>
-        )}
         <div className="bg-zinc-900 border border-white/5 p-6 rounded-3xl mb-8">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
             <div>
@@ -1520,18 +1446,11 @@ export default function AdminCaja({ onBack }: { onBack: () => void }) {
                   <th className="px-6 py-5">Monto</th>
                   <th className="px-6 py-5">Medio</th>
                   <th className="px-6 py-5">Estado</th>
-                  <th className="px-6 py-5">Factura ARCA</th>
                   <th className="px-6 py-5">Acciones</th>
                 </tr>
               </thead>
               <tbody>
-                {filteredRows.map(r => {
-                  const hasArcaInvoice = r.factura && (r.factura.includes('FC-') || r.factura.includes('CAE:'));
-                  const caeMatch = r.factura ? r.factura.match(/CAE:\s*(\d+)/) : null;
-                  const caeNum = caeMatch ? caeMatch[1] : '';
-                  const nroOnly = r.factura ? r.factura.replace(/\s*\(CAE:.*\)/, '') : '';
-
-                  return (
+                {filteredRows.map(r => (
                   <React.Fragment key={r.id}>
                     <tr className="border-b border-white/[0.02] hover:bg-white/[0.02] transition-colors">
                       <td className="px-6 py-4 font-medium">{r.fecha}</td>
@@ -1548,35 +1467,6 @@ export default function AdminCaja({ onBack }: { onBack: () => void }) {
                         <span className={`text-[10px] font-black uppercase tracking-tighter ${r.estado?.toLowerCase() === 'pagado' ? 'text-emerald-500' : 'text-amber-500 animate-pulse'}`}>
                           {r.estado}
                         </span>
-                      </td>
-                      <td className="px-6 py-4">
-                        {hasArcaInvoice ? (
-                          <button
-                            onClick={() => {
-                              setSelectedArcaVoucher({
-                                movement: r,
-                                nro: nroOnly || 'FC-C 0001-00000001',
-                                cae: caeNum || '74389102849201',
-                                caeVto: new Date(Date.now() + 864000000).toISOString().split('T')[0]
-                              });
-                            }}
-                            className="flex items-center gap-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all cursor-pointer"
-                          >
-                            <FileText className="w-3.5 h-3.5 text-emerald-400" />
-                            <span className="truncate max-w-[100px]">{nroOnly}</span>
-                          </button>
-                        ) : r.tipo === 'Ingreso' && r.estado === 'Pagado' ? (
-                          <button
-                            onClick={() => handleEmitArcaInvoice(r)}
-                            disabled={loading}
-                            className="flex items-center gap-1 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 hover:text-amber-200 px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all cursor-pointer"
-                          >
-                            <Sparkles className="w-3 h-3 text-amber-400 animate-pulse" />
-                            <span>⚡ Emitir ARCA</span>
-                          </button>
-                        ) : (
-                          <span className="text-[9px] text-zinc-600 font-bold uppercase">—</span>
-                        )}
                       </td>
                       <td className="px-6 py-4">
                         <div className="flex gap-2">
@@ -1600,7 +1490,7 @@ export default function AdminCaja({ onBack }: { onBack: () => void }) {
                     </tr>
                     {editingId === r.id && (
                       <tr className="bg-white/[0.03]">
-                        <td colSpan={9} className="p-8">
+                        <td colSpan={8} className="p-8">
                           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
                             <div>
                               <label className="text-[10px] font-bold uppercase text-zinc-500 mb-1 block">Fecha</label>
@@ -1630,16 +1520,15 @@ export default function AdminCaja({ onBack }: { onBack: () => void }) {
                       </tr>
                     )}
                   </React.Fragment>
-                );
-              })}
+                ))}
                 {!filteredRows.length && !loading && (
                   <tr>
-                    <td colSpan={9} className="px-6 py-12 text-center text-zinc-500 italic">No se encontraron movimientos para este periodo</td>
+                    <td colSpan={8} className="px-6 py-12 text-center text-zinc-500 italic">No se encontraron movimientos para este periodo</td>
                   </tr>
                 )}
                 {loading && (
                   <tr>
-                    <td colSpan={9} className="px-6 py-12 text-center text-zinc-500 italic">Cargando datos...</td>
+                    <td colSpan={8} className="px-6 py-12 text-center text-zinc-500 italic">Cargando datos...</td>
                   </tr>
                 )}
               </tbody>
@@ -1659,105 +1548,6 @@ export default function AdminCaja({ onBack }: { onBack: () => void }) {
             <div className="flex gap-4">
               <button onClick={() => setDeletingId(null)} className="flex-1 px-4 py-3 rounded-xl bg-white/5 font-black uppercase text-[10px] hover:bg-white/10 transition-all">Cancelar</button>
               <button onClick={handleDelete} className="flex-1 px-4 py-3 rounded-xl bg-red-500 text-white font-black uppercase text-[10px] hover:bg-red-400 transition-all">Borrar</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ARCA Official Invoice Voucher Modal */}
-      {selectedArcaVoucher && (
-        <div className="fixed inset-0 z-[500] flex items-center justify-center bg-black/85 backdrop-blur-md p-4 md:p-6 animate-fade-in select-none">
-          <div className="bg-white text-zinc-900 border border-zinc-300 p-6 md:p-8 rounded-3xl max-w-lg w-full space-y-6 shadow-2xl relative">
-            <button
-              onClick={() => setSelectedArcaVoucher(null)}
-              className="absolute top-4 right-4 text-zinc-400 hover:text-zinc-800 p-2 rounded-full transition-colors cursor-pointer"
-            >
-              <X className="w-5 h-5" />
-            </button>
-
-            {/* ARCA Header */}
-            <div className="border-b border-zinc-200 pb-4 space-y-2">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-xs font-black tracking-widest uppercase text-zinc-500">Agencia de Recaudación y Control Aduanero</h3>
-                  <h2 className="text-xl font-display font-black text-emerald-700 italic">ARCA (ex-AFIP)</h2>
-                </div>
-                <div className="border-2 border-zinc-900 px-3 py-1 text-center rounded-lg bg-zinc-50">
-                  <span className="text-2xl font-black block leading-none">{arcaConfig.tipoComprobante.replace('FC-', '')}</span>
-                  <span className="text-[8px] font-bold tracking-tighter uppercase text-zinc-500">COD. 011</span>
-                </div>
-              </div>
-              <p className="text-[10px] font-bold text-zinc-600 uppercase">Comprobante Autorizado Electrónicamente</p>
-            </div>
-
-            {/* Emisor & Comprobante info */}
-            <div className="grid grid-cols-2 gap-4 text-xs border-b border-zinc-200 pb-4">
-              <div className="space-y-1">
-                <p className="text-[9px] font-bold uppercase text-zinc-400">Emisor / Razón Social</p>
-                <p className="font-bold text-zinc-900">LyS Lavados Detail</p>
-                <p className="text-zinc-600 font-mono text-[11px]">CUIT: {arcaConfig.cuit}</p>
-                <p className="text-zinc-600 text-[10px]">{arcaConfig.condicionIva}</p>
-              </div>
-              <div className="space-y-1 text-right">
-                <p className="text-[9px] font-bold uppercase text-zinc-400">Comprobante N°</p>
-                <p className="font-mono font-black text-sm text-zinc-900">{selectedArcaVoucher.nro}</p>
-                <p className="text-zinc-600 text-[10px]">Fecha: {selectedArcaVoucher.movement.fecha}</p>
-                <p className="text-zinc-600 text-[10px]">Pto. Venta: {arcaConfig.ptoVenta}</p>
-              </div>
-            </div>
-
-            {/* Cliente & Detalle */}
-            <div className="space-y-3 text-xs border-b border-zinc-200 pb-4">
-              <div className="flex justify-between text-[11px]">
-                <span className="text-zinc-500 font-bold uppercase">Receptor / Cliente:</span>
-                <span className="font-bold text-zinc-900">{selectedArcaVoucher.movement.cliente || 'Consumidor Final'}</span>
-              </div>
-              <div className="flex justify-between text-[11px]">
-                <span className="text-zinc-500 font-bold uppercase">Concepto:</span>
-                <span className="font-semibold text-zinc-900 italic">{selectedArcaVoucher.movement.concepto}</span>
-              </div>
-              <div className="flex justify-between text-[11px]">
-                <span className="text-zinc-500 font-bold uppercase">Medio de Pago:</span>
-                <span className="font-semibold text-zinc-900">{selectedArcaVoucher.movement.medio}</span>
-              </div>
-              <div className="flex justify-between items-center bg-emerald-50 border border-emerald-200 p-3 rounded-2xl pt-2">
-                <span className="font-black text-xs uppercase text-emerald-900">TOTAL ARS:</span>
-                <span className="font-display font-black text-xl text-emerald-700">{fmt(selectedArcaVoucher.movement.monto_ars)}</span>
-              </div>
-            </div>
-
-            {/* Footer ARCA CAE & QR */}
-            <div className="flex items-center justify-between gap-4 pt-1">
-              <div className="space-y-1 text-[10px] font-mono">
-                <p className="text-zinc-700 font-bold">CAE N°: <span className="text-zinc-900 font-black">{selectedArcaVoucher.cae}</span></p>
-                <p className="text-zinc-600">Vencimiento CAE: {selectedArcaVoucher.caeVto}</p>
-                <div className="inline-flex items-center gap-1 bg-emerald-100 text-emerald-800 text-[8px] font-sans font-extrabold px-2 py-0.5 rounded-md uppercase">
-                  <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Verificado por ARCA
-                </div>
-              </div>
-
-              {/* ARCA QR Code simulation box */}
-              <div className="flex flex-col items-center justify-center p-2 bg-zinc-100 border border-zinc-300 rounded-xl">
-                <div className="w-16 h-16 bg-zinc-900 flex items-center justify-center rounded text-white font-mono text-[8px] p-1 text-center font-bold leading-tight">
-                  [QR ARCA]
-                </div>
-                <span className="text-[7px] font-mono text-zinc-400 mt-0.5">AFIP / ARCA</span>
-              </div>
-            </div>
-
-            <div className="flex gap-3 pt-2">
-              <button
-                onClick={() => window.print()}
-                className="flex-1 bg-zinc-900 hover:bg-zinc-800 text-white py-3 rounded-2xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center gap-2"
-              >
-                Imprimir / PDF
-              </button>
-              <button
-                onClick={() => setSelectedArcaVoucher(null)}
-                className="px-6 bg-zinc-200 hover:bg-zinc-300 text-zinc-800 py-3 rounded-2xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer"
-              >
-                Cerrar
-              </button>
             </div>
           </div>
         </div>

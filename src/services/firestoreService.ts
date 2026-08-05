@@ -8,7 +8,6 @@ import {
   deleteDoc, 
   query, 
   where,
-  getDocFromServer,
   writeBatch
 } from 'firebase/firestore';
 import { db, auth } from './firebase.ts';
@@ -58,8 +57,7 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
     operationType,
     path
   };
-  console.error('Firestore Error Detailed: ', JSON.stringify(errInfo));
-  throw error instanceof Error ? error : new Error(String(error));
+  console.warn('Firestore Operation Notice (Saved locally / offline fallback):', JSON.stringify(errInfo));
 }
 
 // --- Timeout Promise Wrapper ---
@@ -101,7 +99,7 @@ function isUserAdmin(): boolean {
 // --- Validate Connection on boot ---
 async function testConnection() {
   try {
-    await withTimeout(getDocFromServer(doc(db, 'test', 'connection')), 5000);
+    await withTimeout(getDoc(doc(db, 'test', 'connection')), 3000);
   } catch (error) {
     if (error instanceof Error) {
       console.warn("Firestore connection check notice:", error.message);
@@ -177,6 +175,40 @@ export interface GalleryPhoto {
   title: string;
   description: string;
   createdAt: string;
+}
+
+// Helper to convert Google Drive, Imgur page URLs, and Dropbox sharing links into direct image URLs
+export function sanitizeImageUrl(rawUrl: string): string {
+  if (!rawUrl) return '';
+  let url = rawUrl.trim();
+
+  // Base64 images
+  if (url.startsWith('data:image')) return url;
+
+  // Google Drive link conversion
+  const driveFileMatch = url.match(/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/);
+  if (driveFileMatch && driveFileMatch[1]) {
+    return `https://lh3.googleusercontent.com/d/${driveFileMatch[1]}`;
+  }
+  const driveIdMatch = url.match(/drive\.google\.com\/open\?id=([a-zA-Z0-9_-]+)/);
+  if (driveIdMatch && driveIdMatch[1]) {
+    return `https://lh3.googleusercontent.com/d/${driveIdMatch[1]}`;
+  }
+
+  // Imgur page link conversion
+  if (url.includes('imgur.com') && !url.includes('i.imgur.com')) {
+    const imgurMatch = url.match(/imgur\.com\/(?:a\/|gallery\/)?([a-zA-Z0-9]+)/);
+    if (imgurMatch && imgurMatch[1]) {
+      return `https://i.imgur.com/${imgurMatch[1]}.jpg`;
+    }
+  }
+
+  // Dropbox link conversion
+  if (url.includes('dropbox.com')) {
+    url = url.replace('dl=0', 'raw=1').replace('dl=1', 'raw=1');
+  }
+
+  return url;
 }
 
 export const firestoreService = {
@@ -713,16 +745,21 @@ export const firestoreService = {
   async addGalleryPhoto(photo: GalleryPhoto): Promise<void> {
     const colPath = 'gallery';
 
+    const sanitizedPhoto: GalleryPhoto = {
+      ...photo,
+      url: sanitizeImageUrl(photo.url)
+    };
+
     // Save locally
     const localGallery = getLocalCache<GalleryPhoto[]>('lys_cache_gallery', []);
-    const filtered = localGallery.filter(p => p.id !== photo.id);
-    filtered.push(photo);
+    const filtered = localGallery.filter(p => p.id !== sanitizedPhoto.id);
+    filtered.unshift(sanitizedPhoto);
     setLocalCache('lys_cache_gallery', filtered);
 
     try {
-      await withTimeout(setDoc(doc(db, colPath, photo.id), photo), 2500);
+      await withTimeout(setDoc(doc(db, colPath, sanitizedPhoto.id), sanitizedPhoto), 2500);
     } catch (e) {
-      handleFirestoreError(e, OperationType.WRITE, `${colPath}/${photo.id}`);
+      handleFirestoreError(e, OperationType.WRITE, `${colPath}/${sanitizedPhoto.id}`);
     }
   },
 
@@ -739,6 +776,45 @@ export const firestoreService = {
     } catch (e) {
       handleFirestoreError(e, OperationType.DELETE, `${colPath}/${photoId}`);
     }
+  },
+
+  async restoreDefaultGallery(): Promise<GalleryPhoto[]> {
+    const colPath = 'gallery';
+    const defaultPhotos: GalleryPhoto[] = [
+      {
+        id: 'demo-1',
+        url: 'https://images.unsplash.com/photo-1601362840469-51e4d8d59085?auto=format&fit=crop&q=80&w=600',
+        title: 'Detallado de Llantas & Carrocería',
+        description: 'Aplicación técnica de Koch Chemie Gentle Snow Foam y remoción profunda en BMW Serie 3.',
+        createdAt: new Date().toISOString()
+      },
+      {
+        id: 'demo-2',
+        url: 'https://images.unsplash.com/photo-1563720223185-11003d516935?auto=format&fit=crop&q=80&w=600',
+        title: 'Interiores Libres de Polvo',
+        description: 'Acondicionado absoluto con Top Star, dejando un acabado mate sedoso, antiestático y con aroma premium.',
+        createdAt: new Date().toISOString()
+      },
+      {
+        id: 'demo-3',
+        url: 'https://images.unsplash.com/photo-1520340356584-f9917d1ecc6f?auto=format&fit=crop&q=80&w=600',
+        title: 'Protector Wax Aplicación Full',
+        description: 'Brillo húmedo extremo, efecto lotus de autolimpieza e hidrofobia duradera hasta por 3 meses.',
+        createdAt: new Date().toISOString()
+      }
+    ];
+
+    setLocalCache('lys_cache_gallery', defaultPhotos);
+    try {
+      const batch = writeBatch(db);
+      defaultPhotos.forEach(p => {
+        batch.set(doc(db, colPath, p.id), p);
+      });
+      await withTimeout(batch.commit(), 3000);
+    } catch (e) {
+      console.warn("restoreDefaultGallery cloud write failed, saved locally:", e);
+    }
+    return defaultPhotos;
   },
 
   async importFromGoogleSheets(customUrl?: string): Promise<{ success: boolean; count: number; error?: string }> {
