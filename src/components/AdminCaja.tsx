@@ -355,8 +355,8 @@ export default function AdminCaja({ onBack }: { onBack: () => void }) {
         let width = img.width;
         let height = img.height;
 
-        // Scale to max 800px while maintaining aspect ratio
-        const maxDim = 800;
+        // Scale to max 1080px (Full HD) maintaining aspect ratio for optimal clarity on all screens
+        const maxDim = 1080;
         if (width > maxDim || height > maxDim) {
           if (width > height) {
             height = Math.round((height * maxDim) / width);
@@ -372,7 +372,7 @@ export default function AdminCaja({ onBack }: { onBack: () => void }) {
         const ctx = canvas.getContext('2d');
         if (ctx) {
           ctx.drawImage(img, 0, 0, width, height);
-          const compressedBase64 = canvas.toDataURL('image/jpeg', 0.65);
+          const compressedBase64 = canvas.toDataURL('image/jpeg', 0.80);
           setNewPhoto(prev => ({ ...prev, url: compressedBase64 }));
         }
         setCompressingImage(false);
