@@ -211,6 +211,44 @@ export function sanitizeImageUrl(rawUrl: string): string {
   return url;
 }
 
+export function calculateDurationFromServiceName(serviceName: string): number {
+  if (!serviceName) return 90;
+  const lower = serviceName.toLowerCase();
+  
+  // Check for Full / Combo / Exterior + Interior
+  if (lower.includes('full') || lower.includes('combo') || (lower.includes('exterior') && lower.includes('interior'))) {
+    return 180; // 3 hours
+  }
+  
+  let total = 0;
+  if (lower.includes('exterior')) total += 90;
+  if (lower.includes('interior')) total += 90;
+  if (lower.includes('tapizados de tela') || lower.includes('tapizados tela')) total += 90;
+  if (lower.includes('tapizados de cuero') || lower.includes('cuero')) total += 60;
+  if (lower.includes('techo')) total += 60;
+  if (lower.includes('vidrios')) total += 60;
+
+  return total > 0 ? total : 90;
+}
+
+export function calculateBlockedSlotsForStart(startHour: string, durationMinutes: number): string[] {
+  if (!startHour) return ['08:00'];
+  const [h, m] = startHour.split(':').map(Number);
+  const startMins = h * 60 + (m || 0);
+  const endMins = startMins + (durationMinutes || 60);
+  const blocked: string[] = [];
+
+  for (let mins = 7 * 60; mins <= 18 * 60; mins += 60) {
+    if (mins >= startMins && mins < endMins) {
+      const slotH = Math.floor(mins / 60);
+      const slotM = mins % 60;
+      blocked.push(`${String(slotH).padStart(2, '0')}:${String(slotM).padStart(2, '0')}`);
+    }
+  }
+
+  return blocked.length > 0 ? blocked : [startHour];
+}
+
 export const firestoreService = {
   // ------------------ 1. BOOKINGS (TURNOS) ------------------
   
@@ -380,19 +418,56 @@ export const firestoreService = {
         console.warn('Fallback to system timezone for todayStr:', e);
       }
 
-      // Query only slots starting from today onwards
+      // Query taken_slots from today onwards
       const q = query(
         collection(db, colPath), 
         where('fecha', '>=', todayStr)
       );
       
       const snap = await withTimeout(getDocs(q), 3000);
-      const res: TakenSlot[] = [];
+      const resMap = new Map<string, TakenSlot>();
+
       snap.forEach(docSnap => {
-        res.push(docSnap.data() as TakenSlot);
+        const data = docSnap.data() as TakenSlot;
+        if (data && data.id) {
+          resMap.set(data.id, data);
+        }
       });
-      setLocalCache('lys_cache_taken_slots', res);
-      return res;
+
+      // ALSO cross-reference active bookings to dynamically block all slots required by their duration
+      try {
+        const allBookings = await this.getBookings();
+        const activeBookings = allBookings.filter(b => b.fecha >= todayStr && b.estado !== 'cancelado');
+
+        for (const bk of activeBookings) {
+          let hoursToBlock: string[] = [];
+
+          if (bk.blockedSlots && bk.blockedSlots.length > 1) {
+            hoursToBlock = bk.blockedSlots;
+          } else {
+            const durationMins = calculateDurationFromServiceName(bk.servicio);
+            hoursToBlock = calculateBlockedSlotsForStart(bk.hora, durationMins);
+          }
+
+          for (const h of hoursToBlock) {
+            const sId = `${bk.fecha}_${h}`;
+            if (!resMap.has(sId)) {
+              resMap.set(sId, {
+                id: sId,
+                fecha: bk.fecha,
+                hora: h,
+                isBlocked: false
+              });
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('Silent warning parsing active bookings for extra blocked slots:', err);
+      }
+
+      const resList = Array.from(resMap.values());
+      setLocalCache('lys_cache_taken_slots', resList);
+      return resList;
     } catch (e) {
       console.warn("Firestore getPublicTakenSlots error/timeout, using local cache:", e);
       let todayStr = new Date().toISOString().split('T')[0];
@@ -553,7 +628,12 @@ export const firestoreService = {
 
       const list: CatalogService[] = [];
       snap.forEach(d => {
-        list.push(d.data() as CatalogService);
+        const item = d.data() as CatalogService;
+        const staticMatch = SERVICES.find(s => s.id === item.id);
+        list.push({
+          ...item,
+          duration: item.duration || staticMatch?.duration || 60
+        });
       });
       setLocalCache('lys_cache_services', list);
       return list;

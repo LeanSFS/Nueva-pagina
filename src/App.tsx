@@ -419,6 +419,11 @@ export default function App() {
     }
   }, []);
 
+  // 0. Refresh immediately on initial app load so landing page shows next availability instantly
+  useEffect(() => {
+    refreshSlotsData(true);
+  }, [refreshSlotsData]);
+
   // 1. Refresh whenever we change step (especially when arriving at the calendar)
   useEffect(() => {
     if (view === 'booking') {
@@ -566,7 +571,8 @@ export default function App() {
     if (selectedServices.length === 0) return 60;
     return selectedServices.reduce((total, sId) => {
       const srv = activeServices.find(s => s.id === sId);
-      return total + (srv?.duration || 60);
+      const defaultDuration = SERVICES.find(st => st.id === sId)?.duration || 60;
+      return total + (srv?.duration || defaultDuration);
     }, 0);
   }, [selectedServices, activeServices]);
 
@@ -675,16 +681,49 @@ export default function App() {
 
   const firstAvailableInfo = useMemo(() => {
     if (isLoadingSlots) return { day: 'Cargando...', times: 'Buscando horarios disponibles...' };
-    const firstDay = availableDates.find(d => d.slotsCount > 0);
-    if (firstDay) {
+    
+    // Requiere un bloque de al menos 3 módulos (180 minutos = 3 horas)
+    const requiredModulesDuration = 180;
+
+    for (const s of filteredSlotsData) {
+      if (!s || !s.fecha || !s.fecha.includes('-')) continue;
+      const [y, m, d] = s.fecha.split('-').map(Number);
+      const dateObj = new Date(y, m - 1, d);
+
+      // Omitir domingos
+      if (dateObj.getDay() === 0) continue;
+
+      const freeSlots = s.slots || [];
+      const valid3ModuleStartSlots = freeSlots.filter(startStr => 
+        isStartSlotAvailableForDuration(startStr, freeSlots, requiredModulesDuration)
+      );
+
+      if (valid3ModuleStartSlots.length > 0) {
+        try {
+          const options: Intl.DateTimeFormatOptions = { weekday: 'long', day: 'numeric', month: 'long' };
+          const formatted = dateObj.toLocaleDateString('es-AR', options);
+          const dayCapitalized = formatted.charAt(0).toUpperCase() + formatted.slice(1);
+
+          const timesStr = valid3ModuleStartSlots.slice(0, 3).map(t => `${t} hs`).join(' / ');
+
+          return {
+            day: dayCapitalized,
+            times: `${timesStr} (Bloque de 3 hs libre)`
+          };
+        } catch (e) {
+          console.error('Error formatting date:', e);
+        }
+      }
+    }
+
+    // Fallback si no hay ningún día en la ventana de 14 días con 3 módulos continuos
+    const fallbackDay = availableDates.find(d => d.slotsCount > 0);
+    if (fallbackDay) {
       try {
         const options: Intl.DateTimeFormatOptions = { weekday: 'long', day: 'numeric', month: 'long' };
-        const formatted = firstDay.date.toLocaleDateString('es-AR', options);
-        
-        // Find slot times for this date from filteredSlotsData
-        const dayData = filteredSlotsData.find(s => s && s.fecha === firstDay.str);
-        const times = dayData && dayData.slots ? dayData.slots.join(' / ') : '';
-        
+        const formatted = fallbackDay.date.toLocaleDateString('es-AR', options);
+        const dayData = filteredSlotsData.find(s => s && s.fecha === fallbackDay.str);
+        const times = dayData && dayData.slots ? dayData.slots.slice(0, 3).map(t => `${t} hs`).join(' / ') : '';
         return {
           day: formatted.charAt(0).toUpperCase() + formatted.slice(1),
           times: times
@@ -693,8 +732,9 @@ export default function App() {
         console.error('Error formatting date:', e);
       }
     }
-    return { day: 'Próximamente', times: '' };
-  }, [availableDates, filteredSlotsData, isLoadingSlots]);
+
+    return { day: 'Próximamente', times: 'Consultar disponibilidad por WhatsApp' };
+  }, [filteredSlotsData, isLoadingSlots, availableDates, isStartSlotAvailableForDuration]);
 
   const handleFinalBooking = async () => {
     if (!selectedDateStr || !selectedTime || !vehicle || selectedServices.length === 0 || !clientName || !clientPhone || !clientConfirmedLocation) return;
