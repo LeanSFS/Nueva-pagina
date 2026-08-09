@@ -634,8 +634,8 @@ export default function App() {
           const map: Record<string, { isRainy: boolean, code: number }> = {};
           data.daily.time.forEach((time: string, i: number) => {
             const code = data.daily.weather_code[i];
-            // Codes for rain/showers/drizzle: 51, 53, 55, 61, 63, 65, 80, 81, 82
-            const isRainy = [51, 53, 55, 61, 63, 65, 80, 81, 82].includes(code);
+            // Codes for rain/showers/thunderstorms (excluding light drizzle 51, 53, 55): 61, 63, 65, 80, 81, 82, 95, 96, 99
+            const isRainy = [61, 63, 65, 80, 81, 82, 95, 96, 99].includes(code);
             map[time] = { isRainy, code };
           });
           setWeatherData(map);
