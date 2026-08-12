@@ -35,6 +35,7 @@ import {
 import AdminAgenda from './AdminAgenda.tsx';
 import AdminRendimientos from './AdminRendimientos.tsx';
 import AdminMetrics from './AdminMetrics.tsx';
+import AdminAssistant from './AdminAssistant.tsx';
 import { firestoreService, Movement, Booking, sanitizeImageUrl } from '../services/firestoreService.ts';
 import { auth } from '../services/firebase.ts';
 import { SERVICES } from '../constants.ts';
@@ -764,6 +765,16 @@ export default function AdminCaja({ onBack }: { onBack: () => void }) {
             LyS Lavados <span className="text-emerald-500">Admin</span>
           </h1>
         </div>
+
+        {/* ASISTENTE DE IA ADMIN */}
+        <AdminAssistant
+          onRefreshMovements={fetchRows}
+          onRefreshBookings={fetchBookings}
+          onNavigateTab={(tab) => setActiveTab(tab)}
+          allMovements={allMovements}
+          bookings={bookings}
+          services={dbServices}
+        />
 
         {/* NAVEGACIÓN PRINCIPAL DE PESTAÑAS (Orden: Agenda, Caja, Precios, Galería, Rendimientos, Métricas) */}
         <nav className="bg-zinc-900/90 p-1.5 rounded-2xl border border-white/10 shadow-2xl flex items-center justify-start lg:justify-between gap-1 overflow-x-auto max-w-full mb-8 scrollbar-none">
