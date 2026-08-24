@@ -728,7 +728,7 @@ export default function AdminMetrics() {
                           Alertas por Telegram
                         </h4>
                         <p className="text-zinc-500 text-[11px] font-semibold mt-0.5">
-                          Notificaciones instantáneas directamente en tu celular.
+                          Notificaciones de nuevos turnos directamente en tu celular.
                         </p>
                       </div>
                     </div>

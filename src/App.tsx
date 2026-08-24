@@ -216,9 +216,6 @@ export default function App() {
   // Track Page Landing Visita
   useEffect(() => {
     metricsService.logAction('visita');
-    telegramService.sendAccessNotification().catch(err => {
-      console.warn('Access telegram notification delay or off:', err);
-    });
   }, []);
 
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false);
