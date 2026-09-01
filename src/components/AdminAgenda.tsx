@@ -97,10 +97,13 @@ export default function AdminAgenda({
   };
 
   const copyExpressLink = () => {
-    const url = `${window.location.origin}/turnoexpress`;
+    const origin = window.location.origin;
+    const url = origin.includes('localhost') || origin.includes('ais-')
+      ? `${origin}/turnoexpress`
+      : 'https://lyslavados.com/turnoexpress';
     navigator.clipboard.writeText(url);
     setCopiedExpressLink(true);
-    showToast('¡Link de Turno Express copiado!');
+    showToast('¡Link copiado: ' + (origin.includes('ais-') ? url : 'lyslavados.com/turnoexpress') + '!');
     setTimeout(() => setCopiedExpressLink(false), 2500);
   };
 

@@ -335,7 +335,10 @@ export default function TurnoExpress({
   };
 
   const handleCopyExpressLink = () => {
-    const url = `${window.location.origin}/turnoexpress`;
+    const origin = window.location.origin;
+    const url = origin.includes('localhost') || origin.includes('ais-')
+      ? `${origin}/turnoexpress`
+      : 'https://lyslavados.com/turnoexpress';
     navigator.clipboard.writeText(url);
     setCopiedLink(true);
     setTimeout(() => setCopiedLink(false), 2500);

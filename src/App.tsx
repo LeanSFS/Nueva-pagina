@@ -87,9 +87,29 @@ const SectionHeader = ({ kicker, title, number }: { kicker: string, title: strin
 
 const isExpressPath = () => {
   if (typeof window === 'undefined') return false;
-  const path = window.location.pathname.toLowerCase();
+  const path = window.location.pathname.toLowerCase().replace(/\/+$/, '');
   const search = window.location.search.toLowerCase();
-  return path.includes('turnoexpress') || path.includes('express') || search.includes('turnoexpress') || search.includes('express');
+  const hash = window.location.hash.toLowerCase();
+  return (
+    path === '/turnoexpress' ||
+    path === '/turno-express' ||
+    path.endsWith('/turnoexpress') ||
+    path.endsWith('/turno-express') ||
+    path.includes('turnoexpress') || 
+    path.includes('turno-express') || 
+    search.includes('turnoexpress') || 
+    search.includes('express') || 
+    hash.includes('turnoexpress') || 
+    hash.includes('turno-express') || 
+    hash.includes('express')
+  );
+};
+
+const isAdminPath = () => {
+  if (typeof window === 'undefined') return false;
+  const path = window.location.pathname.toLowerCase().replace(/\/+$/, '');
+  const hash = window.location.hash.toLowerCase();
+  return path === '/admin' || path.endsWith('/admin') || hash.includes('admin');
 };
 
 const Navigation = ({ 
@@ -168,38 +188,54 @@ const SummaryItem = ({ label, value }: { label: string, value: string | undefine
 
 export default function App() {
   const [view, setView] = useState<'home' | 'booking' | 'admin' | 'express'>(() => {
-    if (typeof window !== 'undefined' && isExpressPath()) {
-      return 'express';
+    if (typeof window !== 'undefined') {
+      if (isExpressPath()) return 'express';
+      if (isAdminPath()) return 'admin';
     }
     return 'home';
   });
 
   const navigateToExpress = useCallback(() => {
-    if (typeof window !== 'undefined' && window.location.pathname !== '/turnoexpress') {
-      window.history.pushState(null, '', '/turnoexpress');
+    if (typeof window !== 'undefined') {
+      const targetPath = '/turnoexpress';
+      if (window.location.pathname !== targetPath) {
+        window.history.pushState(null, '', targetPath);
+      }
     }
     setView('express');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, []);
 
   const navigateToHome = useCallback(() => {
-    if (typeof window !== 'undefined' && window.location.pathname === '/turnoexpress') {
-      window.history.pushState(null, '', '/');
+    if (typeof window !== 'undefined') {
+      if (window.location.pathname !== '/') {
+        window.history.pushState(null, '', '/');
+      }
     }
     setView('home');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, []);
 
   useEffect(() => {
-    const handlePopState = () => {
+    const handleUrlChange = () => {
       if (isExpressPath()) {
         setView('express');
-      } else if (view === 'express') {
+      } else if (isAdminPath()) {
+        setView('admin');
+      } else if (view === 'express' || view === 'admin') {
         setView('home');
       }
     };
-    window.addEventListener('popstate', handlePopState);
-    return () => window.removeEventListener('popstate', handlePopState);
+
+    // Check on mount as well
+    handleUrlChange();
+
+    window.addEventListener('popstate', handleUrlChange);
+    window.addEventListener('hashchange', handleUrlChange);
+    return () => {
+      window.removeEventListener('popstate', handleUrlChange);
+      window.removeEventListener('hashchange', handleUrlChange);
+    };
   }, [view]);
   const [dbServices, setDbServices] = useState<CatalogService[]>([]);
   const [dbVehicles, setDbVehicles] = useState<CatalogVehicle[]>([]);
@@ -917,8 +953,8 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen pt-24 md:pt-32 pb-24 overflow-x-hidden">
-      {view !== 'express' && <Navigation setView={setView} view={view} onGoExpress={navigateToExpress} />}
+    <div className={`min-h-screen overflow-x-hidden ${view === 'express' || view === 'admin' ? '' : 'pt-24 md:pt-32 pb-24'}`}>
+      {view !== 'express' && view !== 'admin' && <Navigation setView={setView} view={view} onGoExpress={navigateToExpress} />}
       
       <AnimatePresence mode="wait">
         {view === 'admin' ? (
