@@ -53,7 +53,15 @@ const formatDurationHours = (mins: number) => {
   return `${m}min`;
 };
 
-export default function AdminCaja({ onBack }: { onBack: () => void }) {
+export default function AdminCaja({ 
+  onBack, 
+  isPasswordAuthenticated, 
+  onLogout 
+}: { 
+  onBack: () => void; 
+  isPasswordAuthenticated?: boolean; 
+  onLogout?: () => void; 
+}) {
   const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
   const [authChecking, setAuthChecking] = useState(true);
   const [preferredMethod, setPreferredMethod] = useState<'popup' | 'redirect'>('popup');
@@ -68,6 +76,15 @@ export default function AdminCaja({ onBack }: { onBack: () => void }) {
     if (!user) return false;
     return user.email?.toLowerCase() === 'leandro.saralegui@gmail.com' || user.uid === 'AYbEVBVfFxcx9vgxAWb83cJvDV02';
   };
+
+  const isAuthorized = useMemo(() => {
+    if (isPasswordAuthenticated) return true;
+    if (currentUser && isUserAdmin(currentUser)) return true;
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('lys_admin_auth') === 'true' || sessionStorage.getItem('lys_admin_auth') === 'true';
+    }
+    return false;
+  }, [isPasswordAuthenticated, currentUser]);
 
   const updateUnsyncedCount = () => {
     try {
@@ -436,6 +453,15 @@ export default function AdminCaja({ onBack }: { onBack: () => void }) {
   };
 
   useEffect(() => {
+    if (isAuthorized) {
+      updateUnsyncedCount();
+      fetchRows();
+      fetchBookings();
+      loadCatalogAndGallery();
+    }
+  }, [isAuthorized]);
+
+  useEffect(() => {
     updateUnsyncedCount();
 
     const unsubscribe = auth.onAuthStateChanged((user) => {
@@ -499,9 +525,22 @@ export default function AdminCaja({ onBack }: { onBack: () => void }) {
   const handleLogout = async () => {
     setSubmittingGoogleAuth(true);
     try {
-      await signOut(auth);
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('lys_admin_auth');
+        sessionStorage.removeItem('lys_admin_auth');
+      }
+      if (auth.currentUser) {
+        await signOut(auth);
+      }
+      if (onLogout) {
+        onLogout();
+      } else {
+        onBack();
+      }
     } catch (err) {
       console.error("Error logging out:", err);
+      if (onLogout) onLogout();
+      else onBack();
     } finally {
       setSubmittingGoogleAuth(false);
     }
@@ -620,7 +659,7 @@ export default function AdminCaja({ onBack }: { onBack: () => void }) {
     );
   }
 
-  if (!currentUser || !isUserAdmin(currentUser)) {
+  if (!isAuthorized) {
     return (
       <div className="min-h-screen bg-slate-950 text-white p-4 md:p-8 flex items-center justify-center font-sans">
         <div className="max-w-md w-full bg-zinc-900/50 border border-white/5 rounded-3xl p-6 md:p-8 space-y-6 shadow-2xl relative overflow-hidden">
@@ -643,7 +682,7 @@ export default function AdminCaja({ onBack }: { onBack: () => void }) {
               Panel Administrativo Cerrado
             </h2>
             <p className="text-xs text-zinc-400 leading-relaxed max-w-sm mx-auto">
-              Esta sección está restringida exclusivamente para los administradores de LyS Lavados. Se requiere autenticación segura con Google.
+              Esta sección está restringida exclusivamente para los administradores de LyS Lavados.
             </p>
           </div>
 
@@ -668,7 +707,7 @@ export default function AdminCaja({ onBack }: { onBack: () => void }) {
           <div className="space-y-4">
             <div className="space-y-1">
               <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 block">
-                Método de Conexión Google
+                Conectar con Google (Opcional)
               </label>
               <div className="flex bg-zinc-950 border border-white/5 p-1 rounded-xl text-[10px] uppercase font-black tracking-widest">
                 <button
@@ -745,20 +784,29 @@ export default function AdminCaja({ onBack }: { onBack: () => void }) {
       <div className="max-w-6xl mx-auto">
         {/* Header Superior */}
         <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mb-6 pb-6 border-b border-white/5">
-          <div className="flex items-center gap-4">
+          <div className="flex flex-wrap items-center gap-3 sm:gap-4">
             <button 
               onClick={onBack} 
               className="flex items-center gap-2 text-zinc-400 hover:text-white transition-colors text-xs font-bold uppercase tracking-wider py-1.5 px-3 rounded-lg hover:bg-white/5 cursor-pointer"
             >
               <ArrowLeft className="w-4 h-4" />
-              <span>Salir del Panel</span>
+              <span>Volver a la Web</span>
             </button>
             <div className="hidden sm:block text-zinc-700 font-black">|</div>
             <div className="flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/20 px-3 py-1 rounded-full select-none text-[10px] font-black uppercase tracking-widest text-emerald-400">
               <ShieldCheck className="w-3.5 h-3.5 animate-pulse" />
-              <span>Sincronizado</span>
-              <span className="hidden lg:inline text-zinc-500 font-normal">({currentUser?.email})</span>
+              <span>{currentUser ? 'Google Admin' : 'Sesión Activa (Taller)'}</span>
+              {currentUser?.email && (
+                <span className="hidden lg:inline text-zinc-400 font-normal">({currentUser.email})</span>
+              )}
             </div>
+            <button
+              onClick={handleLogout}
+              className="text-[10px] font-black uppercase tracking-widest text-zinc-400 hover:text-red-400 px-2.5 py-1 rounded-lg border border-white/5 hover:border-red-500/20 hover:bg-red-500/5 transition-all cursor-pointer"
+              title="Cerrar sesión de Administrador"
+            >
+              Cerrar Sesión
+            </button>
           </div>
           
           <h1 className="text-xl md:text-2xl font-display font-black italic tracking-tighter">

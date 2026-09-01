@@ -30,7 +30,10 @@ import {
   Star,
   ChevronDown,
   HelpCircle,
-  Zap
+  Zap,
+  Lock,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 import { SERVICES, VEHICLES, BASE_PRICES, TYPE_EXTRA } from './constants.ts';
 import { VehicleType, ServiceKey } from './types.ts';
@@ -230,19 +233,27 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, []);
 
+  const navigateToAdmin = useCallback(() => {
+    if (typeof window !== 'undefined') {
+      const targetPath = '/admin';
+      if (window.location.pathname !== targetPath) {
+        window.history.pushState(null, '', targetPath);
+      }
+    }
+    setView('admin');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, []);
+
   useEffect(() => {
     const handleUrlChange = () => {
       if (isExpressPath()) {
         setView('express');
       } else if (isAdminPath()) {
         setView('admin');
-      } else if (view === 'express' || view === 'admin') {
+      } else {
         setView('home');
       }
     };
-
-    // Check on mount as well
-    handleUrlChange();
 
     window.addEventListener('popstate', handleUrlChange);
     window.addEventListener('hashchange', handleUrlChange);
@@ -250,7 +261,7 @@ export default function App() {
       window.removeEventListener('popstate', handleUrlChange);
       window.removeEventListener('hashchange', handleUrlChange);
     };
-  }, [view]);
+  }, []);
   const [dbServices, setDbServices] = useState<CatalogService[]>([]);
   const [dbVehicles, setDbVehicles] = useState<CatalogVehicle[]>([]);
   const [dbPhotos, setDbPhotos] = useState<GalleryPhoto[]>([]);
@@ -326,9 +337,44 @@ export default function App() {
     metricsService.logAction('visita');
   }, []);
 
-  const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false);
+  const [isAdminAuthenticated, setIsAdminAuthenticated] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('lys_admin_auth') === 'true' || sessionStorage.getItem('lys_admin_auth') === 'true';
+    }
+    return false;
+  });
   const [adminPassword, setAdminPassword] = useState('');
   const [showPasswordPrompt, setShowPasswordPrompt] = useState(false);
+  const [passwordError, setPasswordError] = useState(false);
+  const [showPasswordText, setShowPasswordText] = useState(false);
+
+  const handleOpenAdmin = useCallback(() => {
+    if (isAdminAuthenticated) {
+      navigateToAdmin();
+    } else {
+      setPasswordError(false);
+      setAdminPassword('');
+      setShowPasswordPrompt(true);
+    }
+  }, [isAdminAuthenticated, navigateToAdmin]);
+
+  const handleAdminLoginSubmit = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const clean = adminPassword.trim().toLowerCase();
+    if (clean === 'lys' || clean === 'lys lavados' || clean === 'admin') {
+      setIsAdminAuthenticated(true);
+      try {
+        localStorage.setItem('lys_admin_auth', 'true');
+        sessionStorage.setItem('lys_admin_auth', 'true');
+      } catch (err) {}
+      setShowPasswordPrompt(false);
+      setPasswordError(false);
+      setAdminPassword('');
+      navigateToAdmin();
+    } else {
+      setPasswordError(true);
+    }
+  };
   const [vehicle, setVehicle] = useState<VehicleType | null>(null);
   const [selectedServices, setSelectedServices] = useState<string[]>([]);
   const [currentBookingStep, setCurrentBookingStep] = useState<number>(1);
@@ -976,13 +1022,7 @@ export default function App() {
           setView={setView} 
           view={view} 
           onGoExpress={navigateToExpress}
-          onOpenAdmin={() => {
-            if (isAdminAuthenticated) {
-              setView('admin');
-            } else {
-              setShowPasswordPrompt(true);
-            }
-          }}
+          onOpenAdmin={handleOpenAdmin}
         />
       )}
       
@@ -990,12 +1030,23 @@ export default function App() {
         {view === 'admin' ? (
           <motion.div
             key="admin"
-            initial={{ opacity: 0, scale: 0.95 }}
+            initial={{ opacity: 0, scale: 0.98 }}
             animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 1.05 }}
-            transition={{ duration: 0.4 }}
+            exit={{ opacity: 0, scale: 1.02 }}
+            transition={{ duration: 0.3 }}
           >
-            <AdminCaja onBack={() => setView('home')} />
+            <AdminCaja 
+              onBack={navigateToHome}
+              isPasswordAuthenticated={isAdminAuthenticated}
+              onLogout={() => {
+                setIsAdminAuthenticated(false);
+                try {
+                  localStorage.removeItem('lys_admin_auth');
+                  sessionStorage.removeItem('lys_admin_auth');
+                } catch (e) {}
+                navigateToHome();
+              }}
+            />
           </motion.div>
         ) : view === 'express' ? (
           <motion.div
@@ -2702,14 +2753,8 @@ export default function App() {
              <div className="text-[9px] font-black uppercase tracking-[0.4em] text-zinc-700">© 2026 LyS Premium Services</div>
              <div className="flex gap-4 text-[8px] font-black uppercase tracking-widest">
                <span 
-                 onClick={() => {
-                   if (isAdminAuthenticated) {
-                     setView('admin');
-                   } else {
-                     setShowPasswordPrompt(true);
-                   }
-                 }}
-                 className="hover:text-emerald-500/50 cursor-pointer transition-colors opacity-30 hover:opacity-100"
+                 onClick={handleOpenAdmin}
+                 className="hover:text-emerald-500/80 cursor-pointer transition-colors opacity-40 hover:opacity-100"
                >
                  Admin
                </span>
@@ -2723,37 +2768,86 @@ export default function App() {
       {/* Admin Password Prompt */}
       <AnimatePresence>
         {showPasswordPrompt && (
-          <div className="fixed inset-0 z-[300] flex items-center justify-center p-6 bg-night/90 backdrop-blur-3xl">
+          <div className="fixed inset-0 z-[300] flex items-center justify-center p-4 sm:p-6 bg-night/90 backdrop-blur-2xl">
+            <div 
+              className="absolute inset-0"
+              onClick={() => setShowPasswordPrompt(false)}
+            />
             <motion.div
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-              className="bg-zinc-900 border border-white/10 p-8 rounded-3xl w-full max-w-xs shadow-2xl"
+              initial={{ scale: 0.92, opacity: 0, y: 10 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.92, opacity: 0, y: 10 }}
+              className="relative bg-zinc-900 border border-white/15 p-6 sm:p-8 rounded-[2rem] w-full max-w-sm shadow-2xl z-10"
             >
-              <h3 className="text-xl font-display font-black italic text-white mb-6">Acceso Admin</h3>
-              <input 
-                autoFocus
-                type="password" 
-                value={adminPassword}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  setAdminPassword(val);
-                  if (val.toLowerCase() === 'lys') {
-                    setIsAdminAuthenticated(true);
-                    setShowPasswordPrompt(false);
-                    setView('admin');
-                    setAdminPassword('');
-                  }
-                }}
-                placeholder="Contraseña"
-                className="w-full bg-black/50 border border-white/10 rounded-xl py-4 text-center text-xl tracking-[0.2em] text-white focus:border-emerald-500 outline-none transition-all"
-              />
-              <button 
-                onClick={() => setShowPasswordPrompt(false)}
-                className="w-full mt-4 text-[10px] font-black uppercase tracking-widest text-zinc-500 hover:text-white"
-              >
-                Cancelar
-              </button>
+              <div className="flex items-center gap-3 mb-6">
+                <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/25 flex items-center justify-center text-emerald-400">
+                  <Lock className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-xl font-display font-black italic text-white tracking-tight">Acceso Admin</h3>
+                  <p className="text-[10px] text-zinc-400 font-bold uppercase tracking-wider">Taller LyS Lavados</p>
+                </div>
+              </div>
+
+              <form onSubmit={handleAdminLoginSubmit} className="space-y-4">
+                <div className="relative">
+                  <input 
+                    autoFocus
+                    type={showPasswordText ? "text" : "password"} 
+                    value={adminPassword}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setAdminPassword(val);
+                      if (passwordError) setPasswordError(false);
+                      // Fast unlock if typed correctly
+                      const clean = val.trim().toLowerCase();
+                      if (clean === 'lys' || clean === 'lys lavados') {
+                        setIsAdminAuthenticated(true);
+                        try {
+                          localStorage.setItem('lys_admin_auth', 'true');
+                          sessionStorage.setItem('lys_admin_auth', 'true');
+                        } catch (err) {}
+                        setShowPasswordPrompt(false);
+                        setPasswordError(false);
+                        setAdminPassword('');
+                        navigateToAdmin();
+                      }
+                    }}
+                    placeholder="Contraseña"
+                    className={`w-full bg-black/60 border ${passwordError ? 'border-red-500/60 focus:border-red-500' : 'border-white/15 focus:border-emerald-500'} rounded-xl py-3.5 pl-4 pr-12 text-center text-lg tracking-[0.2em] text-white outline-none transition-all`}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPasswordText(!showPasswordText)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-white p-1 cursor-pointer"
+                    title={showPasswordText ? "Ocultar" : "Mostrar"}
+                  >
+                    {showPasswordText ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+
+                {passwordError && (
+                  <p className="text-red-400 text-[11px] font-bold text-center tracking-wide">
+                    Contraseña incorrecta.
+                  </p>
+                )}
+
+                <button 
+                  type="submit"
+                  className="w-full bg-emerald-500 hover:bg-emerald-400 active:scale-98 text-night font-display font-black italic py-3.5 rounded-xl uppercase tracking-wider text-sm shadow-lg shadow-emerald-500/20 cursor-pointer transition-all flex items-center justify-center gap-2"
+                >
+                  <span>Ingresar al Panel</span>
+                  <ArrowRight className="w-4 h-4" />
+                </button>
+
+                <button 
+                  type="button"
+                  onClick={() => setShowPasswordPrompt(false)}
+                  className="w-full py-2 text-[10px] font-black uppercase tracking-widest text-zinc-500 hover:text-zinc-300 transition-colors cursor-pointer"
+                >
+                  Cancelar
+                </button>
+              </form>
             </motion.div>
           </div>
         )}
