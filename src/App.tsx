@@ -29,12 +29,14 @@ import {
   CloudLightning,
   Star,
   ChevronDown,
-  HelpCircle
+  HelpCircle,
+  Zap
 } from 'lucide-react';
 import { SERVICES, VEHICLES, BASE_PRICES, TYPE_EXTRA } from './constants.ts';
 import { VehicleType, ServiceKey } from './types.ts';
 import { fetchSlots, createBooking, TimeSlot } from './services/availabilityService.ts';
 import AdminCaja from './components/AdminCaja.tsx';
+import TurnoExpress from './components/TurnoExpress.tsx';
 import { metricsService } from './services/metricsService.ts';
 import { firestoreService, CatalogService, CatalogVehicle, GalleryPhoto } from './services/firestoreService.ts';
 import { telegramService } from './services/telegramService.ts';
@@ -83,8 +85,23 @@ const SectionHeader = ({ kicker, title, number }: { kicker: string, title: strin
   </div>
 );
 
-const Navigation = ({ setView, view }: { setView: (v: 'home' | 'booking') => void, view: string }) => (
-  <nav className="absolute top-0 left-0 right-0 z-50 py-8 md:py-12 px-6 md:px-12 flex justify-between items-center transition-all duration-300">
+const isExpressPath = () => {
+  if (typeof window === 'undefined') return false;
+  const path = window.location.pathname.toLowerCase();
+  const search = window.location.search.toLowerCase();
+  return path.includes('turnoexpress') || path.includes('express') || search.includes('turnoexpress') || search.includes('express');
+};
+
+const Navigation = ({ 
+  setView, 
+  view,
+  onGoExpress 
+}: { 
+  setView: (v: 'home' | 'booking' | 'admin' | 'express') => void, 
+  view: string,
+  onGoExpress: () => void 
+}) => (
+  <nav className="absolute top-0 left-0 right-0 z-50 py-6 md:py-10 px-6 md:px-12 flex justify-between items-center transition-all duration-300">
       <div 
         onClick={() => {
           setView('home');
@@ -100,8 +117,16 @@ const Navigation = ({ setView, view }: { setView: (v: 'home' | 'booking') => voi
         />
       </div>
 
-    <div className="flex items-center gap-4 md:gap-16">
-      <div className="flex items-center gap-6 md:gap-12 text-[10px] md:text-[11px] font-black uppercase tracking-[0.2em] md:tracking-[0.3em] text-zinc-500">
+    <div className="flex items-center gap-3 md:gap-8">
+      <button
+        onClick={onGoExpress}
+        className="flex items-center gap-1.5 px-3 py-1.5 md:px-4 md:py-2 rounded-full bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/35 text-emerald-400 hover:text-emerald-300 text-[10px] md:text-xs font-black uppercase tracking-wider transition-all cursor-pointer shadow-[0_0_15px_rgba(16,185,129,0.15)]"
+      >
+        <Zap className="w-3.5 h-3.5 fill-emerald-400" />
+        <span>Turno Express</span>
+      </button>
+
+      <div className="flex items-center gap-4 md:gap-8 text-[10px] md:text-[11px] font-black uppercase tracking-[0.2em] md:tracking-[0.3em] text-zinc-500">
         <button 
           onClick={() => {
             metricsService.logAction('click_servicios');
@@ -112,7 +137,7 @@ const Navigation = ({ setView, view }: { setView: (v: 'home' | 'booking') => voi
               document.getElementById('services')?.scrollIntoView({ behavior: 'smooth' });
             }
           }}
-          className="hover:text-emerald-500 transition-colors"
+          className="hover:text-emerald-500 transition-colors cursor-pointer"
         >
           Servicios
         </button>
@@ -121,7 +146,7 @@ const Navigation = ({ setView, view }: { setView: (v: 'home' | 'booking') => voi
             if (view !== 'home') setView('home');
             setTimeout(() => window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' }), 100);
           }}
-          className="hover:text-emerald-500 transition-colors"
+          className="hover:text-emerald-500 transition-colors cursor-pointer"
         >
           Nosotros
         </button>
@@ -142,7 +167,40 @@ const SummaryItem = ({ label, value }: { label: string, value: string | undefine
 // --- Main App ---
 
 export default function App() {
-  const [view, setView] = useState<'home' | 'booking' | 'admin'>('home');
+  const [view, setView] = useState<'home' | 'booking' | 'admin' | 'express'>(() => {
+    if (typeof window !== 'undefined' && isExpressPath()) {
+      return 'express';
+    }
+    return 'home';
+  });
+
+  const navigateToExpress = useCallback(() => {
+    if (typeof window !== 'undefined' && window.location.pathname !== '/turnoexpress') {
+      window.history.pushState(null, '', '/turnoexpress');
+    }
+    setView('express');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, []);
+
+  const navigateToHome = useCallback(() => {
+    if (typeof window !== 'undefined' && window.location.pathname === '/turnoexpress') {
+      window.history.pushState(null, '', '/');
+    }
+    setView('home');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, []);
+
+  useEffect(() => {
+    const handlePopState = () => {
+      if (isExpressPath()) {
+        setView('express');
+      } else if (view === 'express') {
+        setView('home');
+      }
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [view]);
   const [dbServices, setDbServices] = useState<CatalogService[]>([]);
   const [dbVehicles, setDbVehicles] = useState<CatalogVehicle[]>([]);
   const [dbPhotos, setDbPhotos] = useState<GalleryPhoto[]>([]);
@@ -860,7 +918,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen pt-24 md:pt-32 pb-24 overflow-x-hidden">
-      <Navigation setView={setView} view={view} />
+      {view !== 'express' && <Navigation setView={setView} view={view} onGoExpress={navigateToExpress} />}
       
       <AnimatePresence mode="wait">
         {view === 'admin' ? (
@@ -872,6 +930,20 @@ export default function App() {
             transition={{ duration: 0.4 }}
           >
             <AdminCaja onBack={() => setView('home')} />
+          </motion.div>
+        ) : view === 'express' ? (
+          <motion.div
+            key="express"
+            initial={{ opacity: 0, y: 15 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -15 }}
+            transition={{ duration: 0.35 }}
+          >
+            <TurnoExpress
+              onBackToHome={navigateToHome}
+              dbServices={dbServices}
+              dbVehicles={dbVehicles}
+            />
           </motion.div>
         ) : view === 'home' ? (
           <motion.div
@@ -913,20 +985,20 @@ export default function App() {
                     Tratamientos de detailing con enfoque artesanal. Cuidado meticuloso y terminaciones de exhibición, ahora exclusivamente en mi domicilio particular en Cipolletti.
                   </p>
                   
-                  <div className="flex flex-col sm:flex-row items-center gap-6 mb-12">
+                  <div className="flex flex-col sm:flex-row items-center gap-4 mb-12">
                     <button 
                       onClick={handleStartBooking}
-                      className="w-full sm:w-auto bg-emerald-500 text-night px-12 py-5 rounded-2xl font-display font-black text-xl italic tracking-tighter hover:bg-emerald-400 hover:shadow-[0_0_50px_rgba(16,185,129,0.3)] hover:scale-[1.02] active:scale-95 transition-all shadow-2xl shadow-emerald-500/20 flex items-center justify-center gap-3 group"
+                      className="w-full sm:w-auto bg-emerald-500 text-night px-10 py-5 rounded-2xl font-display font-black text-lg sm:text-xl italic tracking-tighter hover:bg-emerald-400 hover:shadow-[0_0_50px_rgba(16,185,129,0.3)] hover:scale-[1.02] active:scale-95 transition-all shadow-2xl shadow-emerald-500/20 flex items-center justify-center gap-2.5 group cursor-pointer"
                     >
-                      COTIZAR Y RESERVAR <ChevronRight className="w-7 h-7 group-hover:translate-x-1 transition-transform" />
+                      COTIZAR Y RESERVAR <ChevronRight className="w-6 h-6 group-hover:translate-x-1 transition-transform" />
                     </button>
                     
-                    <div className="flex items-center gap-4">
-                      <a href="https://instagram.com/lys.lavados" target="_blank" rel="noreferrer" className="w-14 h-14 bg-zinc-900 border-2 border-white/[0.1] rounded-2xl flex items-center justify-center text-white hover:text-emerald-500 hover:border-emerald-500 transition-all group shadow-xl">
-                        <Instagram className="w-7 h-7 group-hover:scale-110 transition-transform" />
+                    <div className="flex items-center gap-3">
+                      <a href="https://instagram.com/lys.lavados" target="_blank" rel="noreferrer" className="w-13 h-13 sm:w-14 sm:h-14 bg-zinc-900 border-2 border-white/[0.1] rounded-2xl flex items-center justify-center text-white hover:text-emerald-500 hover:border-emerald-500 transition-all group shadow-xl">
+                        <Instagram className="w-6 h-6 sm:w-7 sm:h-7 group-hover:scale-110 transition-transform" />
                       </a>
-                      <a href="https://facebook.com/lys.lavados" target="_blank" rel="noreferrer" className="w-14 h-14 bg-zinc-900 border-2 border-white/[0.1] rounded-2xl flex items-center justify-center text-white hover:text-emerald-500 hover:border-emerald-500 transition-all group shadow-xl">
-                        <Facebook className="w-7 h-7 group-hover:scale-110 transition-transform" />
+                      <a href="https://facebook.com/lys.lavados" target="_blank" rel="noreferrer" className="w-13 h-13 sm:w-14 sm:h-14 bg-zinc-900 border-2 border-white/[0.1] rounded-2xl flex items-center justify-center text-white hover:text-emerald-500 hover:border-emerald-500 transition-all group shadow-xl">
+                        <Facebook className="w-6 h-6 sm:w-7 sm:h-7 group-hover:scale-110 transition-transform" />
                       </a>
                     </div>
                   </div>
@@ -1660,7 +1732,7 @@ export default function App() {
                           
                           <div className="text-center md:hidden block">
                             <div className={`text-[8px] font-black uppercase tracking-wider leading-none ${
-                              isActive ? 'text-emerald-400' : isCompleted ? 'text-zinc-350' : 'text-zinc-500'
+                              isActive ? 'text-emerald-400' : isCompleted ? 'text-zinc-300' : 'text-zinc-500'
                             }`}>
                               {st.label}
                             </div>
@@ -1842,7 +1914,7 @@ export default function App() {
                         {selectedServices.length > 0 && (
                           <button 
                             onClick={() => setSelectedServices([])}
-                            className="text-[8px] md:text-[9px] font-black uppercase tracking-widest text-zinc-500 hover:text-rose-455 transition-colors self-start md:self-auto py-1 px-3 border border-zinc-800 rounded-lg hover:border-rose-500/25"
+                            className="text-[8px] md:text-[9px] font-black uppercase tracking-widest text-zinc-500 hover:text-rose-400 transition-colors self-start md:self-auto py-1 px-3 border border-zinc-800 rounded-lg hover:border-rose-500/25"
                           >
                             ✕ Limpiar Selección
                           </button>
@@ -2121,7 +2193,7 @@ export default function App() {
                                       isSelected 
                                       ? 'bg-emerald-500 border-emerald-400 text-night shadow-[0_4px_20px_rgba(16,185,129,0.25)] scale-[1.02]' 
                                       : isFull
-                                        ? 'bg-zinc-950/45 border-white/[0.02] text-zinc-750 cursor-not-allowed opacity-40'
+                                        ? 'bg-zinc-950/45 border-white/[0.02] text-zinc-700 cursor-not-allowed opacity-40'
                                         : 'bg-zinc-900/60 border-white/[0.05] text-white hover:border-emerald-500/30 hover:bg-zinc-900 hover:scale-[1.01]'
                                     }`}
                                   >
@@ -2623,7 +2695,7 @@ export default function App() {
 
       {/* Floating Price Indicator */}
       <AnimatePresence>
-        {vehicle && selectedService && selectedDateStr && selectedTime && clientName && clientPhone && clientConfirmedLocation && !showConfirmation && !showSuccessModal && (
+        {vehicle && selectedServices.length > 0 && selectedDateStr && selectedTime && clientName && clientPhone && clientConfirmedLocation && !showConfirmation && !showSuccessModal && (
           <motion.div
             initial={{ y: 20, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
@@ -2686,7 +2758,11 @@ export default function App() {
                 <div className="space-y-4 mb-10">
                   <div className="flex justify-between items-center py-3 border-b border-white/[0.05]">
                     <span className="text-zinc-500 text-[10px] font-black uppercase tracking-widest">Servicio</span>
-                    <span className="text-white font-display font-black italic">{activeServices.find(s => s.id === selectedService)?.name}</span>
+                    <span className="text-white font-display font-black italic text-right">
+                      {getSelectedPackId() 
+                        ? PACKS.find(p => p.id === getSelectedPackId())?.name 
+                        : selectedServices.map(sId => activeServices.find(s => s.id === sId)?.name || sId).join(' + ')}
+                    </span>
                   </div>
                   <div className="flex justify-between items-center py-3 border-b border-white/[0.05]">
                     <span className="text-zinc-500 text-[10px] font-black uppercase tracking-widest">Vehículo</span>

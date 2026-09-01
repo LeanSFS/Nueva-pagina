@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Sparkles, Send, Mic, MicOff, CheckCircle2, RotateCcw, AlertCircle, Bot, Wallet, Calendar, ArrowRight, Tag } from 'lucide-react';
-import { firestoreService, Movement, Booking, CatalogService } from '../services/firestoreService';
+import { firestoreService, Movement, Booking, CatalogService } from '../services/firestoreService.ts';
 
 interface AdminAssistantProps {
   onRefreshMovements: () => Promise<void> | void;

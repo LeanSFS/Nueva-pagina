@@ -259,20 +259,37 @@ export const firestoreService = {
       const snap = await withTimeout(getDocs(q), 3000);
       const rows: Booking[] = [];
       snap.forEach(docSnap => {
-        rows.push(docSnap.data() as Booking);
+        const data = docSnap.data() as Booking;
+        if (!data.blockedSlots || data.blockedSlots.length === 0) {
+          const dur = calculateDurationFromServiceName(data.servicio);
+          data.blockedSlots = calculateBlockedSlotsForStart(data.hora, dur);
+        }
+        rows.push(data);
       });
       setLocalCache('lys_cache_bookings', rows);
       return rows;
     } catch (e) {
       console.warn("Firestore getBookings error/timeout, using local cache:", e);
-      return getLocalCache<Booking[]>('lys_cache_bookings', []);
+      const cached = getLocalCache<Booking[]>('lys_cache_bookings', []);
+      return cached.map(b => {
+        if (!b.blockedSlots || b.blockedSlots.length === 0) {
+          const dur = calculateDurationFromServiceName(b.servicio);
+          return { ...b, blockedSlots: calculateBlockedSlotsForStart(b.hora, dur) };
+        }
+        return b;
+      });
     }
   },
 
   async createBooking(booking: Booking, isBlocked = false): Promise<void> {
-    const hoursToBlock = booking.blockedSlots && booking.blockedSlots.length > 0
+    const duration = calculateDurationFromServiceName(booking.servicio);
+    const calculatedSlots = calculateBlockedSlotsForStart(booking.hora, duration);
+    const hoursToBlock = (booking.blockedSlots && booking.blockedSlots.length > 0)
       ? booking.blockedSlots
-      : [booking.hora];
+      : calculatedSlots;
+    
+    // Ensure blockedSlots is saved in the booking object
+    booking.blockedSlots = hoursToBlock;
 
     // Save to local cache first
     const localBookings = getLocalCache<Booking[]>('lys_cache_bookings', []);
@@ -316,9 +333,11 @@ export const firestoreService = {
     const localBookings = getLocalCache<Booking[]>('lys_cache_bookings', []);
     const bk = localBookings.find(b => b.id === bookingId);
     
+    const duration = calculateDurationFromServiceName(bk?.servicio || '');
+    const calculatedSlots = calculateBlockedSlotsForStart(bk?.hora || hora, duration);
     const hoursToBlock = bk && bk.blockedSlots && bk.blockedSlots.length > 0
       ? bk.blockedSlots
-      : [hora];
+      : calculatedSlots;
 
     // Update local cache
     const filteredBookings = localBookings.filter(b => b.id !== bookingId);
@@ -347,9 +366,11 @@ export const firestoreService = {
   },
 
   async updateBookingStatus(bookingId: string, booking: Booking, newStatus: Booking['estado']): Promise<void> {
+    const duration = calculateDurationFromServiceName(booking.servicio);
+    const calculatedSlots = calculateBlockedSlotsForStart(booking.hora, duration);
     const hoursToBlock = booking.blockedSlots && booking.blockedSlots.length > 0
       ? booking.blockedSlots
-      : [booking.hora];
+      : calculatedSlots;
 
     // Update local cache
     const localBookings = getLocalCache<Booking[]>('lys_cache_bookings', []);
