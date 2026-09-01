@@ -41,6 +41,7 @@ import { metricsService } from './services/metricsService.ts';
 import { firestoreService, CatalogService, CatalogVehicle, GalleryPhoto } from './services/firestoreService.ts';
 import { telegramService } from './services/telegramService.ts';
 import { GlowCard } from './components/GlowCard.tsx';
+import { AIKnowledgeContent } from './components/AIKnowledgeContent.tsx';
 
 // --- Internal Components ---
 
@@ -115,38 +116,44 @@ const isAdminPath = () => {
 const Navigation = ({ 
   setView, 
   view,
-  onGoExpress 
+  onGoExpress,
+  onOpenAdmin
 }: { 
   setView: (v: 'home' | 'booking' | 'admin' | 'express') => void, 
   view: string,
-  onGoExpress: () => void 
+  onGoExpress: () => void,
+  onOpenAdmin: () => void
 }) => (
-  <nav className="absolute top-0 left-0 right-0 z-50 py-6 md:py-10 px-6 md:px-12 flex justify-between items-center transition-all duration-300">
-      <div 
-        onClick={() => {
-          setView('home');
-          window.scrollTo({ top: 0, behavior: 'smooth' });
-        }}
-        className="flex items-center group cursor-pointer"
-      >
-        <img 
-          src="./logo.png" 
-          className="h-10 md:h-14 w-auto object-contain transition-transform group-hover:scale-105 duration-300" 
-          alt="LyS Premium Detailing Logo" 
-          referrerPolicy="no-referrer"
-        />
-      </div>
+  <nav className="absolute top-0 left-0 right-0 z-50 px-3.5 sm:px-6 md:px-12 py-3 sm:py-5 md:py-8 flex justify-between items-start pointer-events-none transition-all duration-300">
+    <div 
+      onClick={() => {
+        setView('home');
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }}
+      className="flex items-start group cursor-pointer pointer-events-auto select-none pt-0.5"
+    >
+      <img 
+        src="./logo.png" 
+        className={`w-auto object-contain transition-all duration-300 drop-shadow-[0_12px_40px_rgba(0,0,0,0.85)] group-hover:scale-105 ${
+          view === 'home' 
+            ? 'h-24 sm:h-44 md:h-64 lg:h-72 max-h-[300px]' 
+            : 'h-14 sm:h-24 md:h-36 max-h-[160px]'
+        }`} 
+        alt="LyS Premium Detailing Logo" 
+        referrerPolicy="no-referrer"
+      />
+    </div>
 
-    <div className="flex items-center gap-3 md:gap-8">
+    <div className="flex items-center gap-1.5 sm:gap-3 md:gap-7 pointer-events-auto bg-zinc-950/85 backdrop-blur-md px-2.5 py-1.5 sm:px-5 sm:py-2.5 rounded-full border border-white/[0.08] shadow-2xl shrink-0">
       <button
         onClick={onGoExpress}
-        className="flex items-center gap-1.5 px-3 py-1.5 md:px-4 md:py-2 rounded-full bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/35 text-emerald-400 hover:text-emerald-300 text-[10px] md:text-xs font-black uppercase tracking-wider transition-all cursor-pointer shadow-[0_0_15px_rgba(16,185,129,0.15)]"
+        className="flex items-center gap-1 sm:gap-1.5 px-2.5 py-1 sm:px-4 sm:py-2 rounded-full bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-400 hover:text-emerald-300 text-[9px] sm:text-[10px] md:text-xs font-black uppercase tracking-wider transition-all cursor-pointer shadow-[0_0_15px_rgba(16,185,129,0.15)] active:scale-95"
       >
-        <Zap className="w-3.5 h-3.5 fill-emerald-400" />
-        <span>Turno Express</span>
+        <Zap className="w-3 h-3 sm:w-3.5 sm:h-3.5 fill-emerald-400 shrink-0" />
+        <span className="whitespace-nowrap">Express</span>
       </button>
 
-      <div className="flex items-center gap-4 md:gap-8 text-[10px] md:text-[11px] font-black uppercase tracking-[0.2em] md:tracking-[0.3em] text-zinc-500">
+      <div className="flex items-center gap-2 sm:gap-4 md:gap-6 text-[9px] sm:text-[10px] md:text-[11px] font-black uppercase tracking-[0.12em] sm:tracking-[0.2em] md:tracking-[0.3em] text-zinc-400">
         <button 
           onClick={() => {
             metricsService.logAction('click_servicios');
@@ -157,7 +164,7 @@ const Navigation = ({
               document.getElementById('services')?.scrollIntoView({ behavior: 'smooth' });
             }
           }}
-          className="hover:text-emerald-500 transition-colors cursor-pointer"
+          className="hover:text-emerald-400 transition-colors cursor-pointer whitespace-nowrap"
         >
           Servicios
         </button>
@@ -166,9 +173,16 @@ const Navigation = ({
             if (view !== 'home') setView('home');
             setTimeout(() => window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' }), 100);
           }}
-          className="hover:text-emerald-500 transition-colors cursor-pointer"
+          className="hover:text-emerald-400 transition-colors cursor-pointer whitespace-nowrap"
         >
           Nosotros
+        </button>
+        <button 
+          onClick={onOpenAdmin}
+          className="hover:text-emerald-400 transition-colors cursor-pointer opacity-60 hover:opacity-100 whitespace-nowrap"
+          title="Panel de Administración"
+        >
+          Admin
         </button>
       </div>
     </div>
@@ -953,8 +967,24 @@ export default function App() {
   };
 
   return (
-    <div className={`min-h-screen overflow-x-hidden ${view === 'express' || view === 'admin' ? '' : 'pt-24 md:pt-32 pb-24'}`}>
-      {view !== 'express' && view !== 'admin' && <Navigation setView={setView} view={view} onGoExpress={navigateToExpress} />}
+    <div className={`min-h-screen overflow-x-hidden ${view === 'express' || view === 'admin' ? '' : view === 'home' ? 'pb-24' : 'pt-20 sm:pt-24 md:pt-32 pb-24'}`}>
+      {/* Hidden structured content for AI search assistants & crawlers (ChatGPT, Perplexity, Gemini) */}
+      <AIKnowledgeContent />
+
+      {view !== 'express' && view !== 'admin' && (
+        <Navigation 
+          setView={setView} 
+          view={view} 
+          onGoExpress={navigateToExpress}
+          onOpenAdmin={() => {
+            if (isAdminAuthenticated) {
+              setView('admin');
+            } else {
+              setShowPasswordPrompt(true);
+            }
+          }}
+        />
+      )}
       
       <AnimatePresence mode="wait">
         {view === 'admin' ? (
@@ -990,7 +1020,7 @@ export default function App() {
             transition={{ duration: 0.5 }}
           >
             {/* Hero Section */}
-            <section className="relative px-6 md:px-12 pt-16 md:pt-48 pb-12 overflow-hidden min-h-[90vh] flex items-center">
+            <section className="relative px-5 sm:px-6 md:px-12 pt-28 sm:pt-36 md:pt-48 pb-12 overflow-hidden min-h-[85vh] md:min-h-[90vh] flex items-center">
               {/* Background Image for Mobile and Desktop Overlay */}
               <div className="absolute inset-0 -z-10 overflow-hidden">
                 <img 
@@ -1006,18 +1036,18 @@ export default function App() {
               <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] bg-emerald-500/10 blur-[150px] -z-10 rounded-full animate-pulse md:block hidden" />
               <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-emerald-500/10 blur-[180px] -z-10 rounded-full animate-float md:block hidden" style={{ animationDelay: '-3s' }} />
               
-              <div className="max-w-7xl mx-auto grid md:grid-cols-2 gap-12 md:gap-16 items-center relative z-10">
+              <div className="max-w-7xl mx-auto grid md:grid-cols-2 gap-10 md:gap-16 items-center relative z-10 w-full">
                 <motion.div
                   initial={{ opacity: 0, y: 30 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ duration: 0.8, ease: "easeOut" }}
                   className="relative z-20"
                 >
-                  <h1 className="text-5xl md:text-8xl font-display font-black leading-[0.9] tracking-tighter mb-8 bg-gradient-to-b from-white via-white to-zinc-500 bg-clip-text text-transparent">
+                  <h1 className="text-4xl sm:text-6xl md:text-8xl font-display font-black leading-[0.92] tracking-tighter mb-6 md:mb-8 bg-gradient-to-b from-white via-white to-zinc-500 bg-clip-text text-transparent">
                     Estética <br /> <span className="text-emerald-500 italic">Vehicular</span> <br /> de Autor.
                   </h1>
                   
-                  <p className="text-zinc-400 text-sm md:text-xl leading-relaxed max-w-xl mb-10 text-balance font-medium">
+                  <p className="text-zinc-400 text-sm sm:text-base md:text-xl leading-relaxed max-w-xl mb-8 md:mb-10 text-balance font-medium">
                     Tratamientos de detailing con enfoque artesanal. Cuidado meticuloso y terminaciones de exhibición, ahora exclusivamente en mi domicilio particular en Cipolletti.
                   </p>
                   

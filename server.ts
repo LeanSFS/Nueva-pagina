@@ -145,6 +145,97 @@ Contexto actual enviado por el cliente: ${JSON.stringify(context || {})}
   }
 });
 
+// AI / LLMs and SEO Knowledge Endpoints
+app.get("/llms.txt", (req, res) => {
+  const filePath = path.join(process.cwd(), "public", "llms.txt");
+  res.setHeader("Content-Type", "text/markdown; charset=utf-8");
+  res.sendFile(filePath);
+});
+
+app.get("/llms-full.txt", (req, res) => {
+  const filePath = path.join(process.cwd(), "public", "llms-full.txt");
+  res.setHeader("Content-Type", "text/markdown; charset=utf-8");
+  res.sendFile(filePath);
+});
+
+app.get("/robots.txt", (req, res) => {
+  const filePath = path.join(process.cwd(), "public", "robots.txt");
+  res.setHeader("Content-Type", "text/plain; charset=utf-8");
+  res.sendFile(filePath);
+});
+
+app.get("/sitemap.xml", (req, res) => {
+  const filePath = path.join(process.cwd(), "public", "sitemap.xml");
+  res.setHeader("Content-Type", "application/xml; charset=utf-8");
+  res.sendFile(filePath);
+});
+
+// JSON Knowledge base for AI Search / Agents
+app.get("/api/knowledge", (req, res) => {
+  res.json({
+    business_name: "LyS Lavados • Estética Vehicular de Autor",
+    tagline: "Detailing artesanal y cuidado meticuloso en Cipolletti",
+    address: {
+      street: "Venezuela 1659",
+      city: "Cipolletti",
+      province: "Río Negro",
+      country: "Argentina",
+      postal_code: "8324",
+      at_home_service: false,
+      note: "No realizamos servicios a domicilio; todos los trabajos se realizan en taller particular equipado en Venezuela 1659."
+    },
+    booking_url: "https://lyslavados.com/turnoexpress",
+    website: "https://lyslavados.com",
+    social: {
+      instagram: "https://instagram.com/lys.lavados",
+      facebook: "https://facebook.com/lys.lavados"
+    },
+    payment_methods: ["Efectivo", "Transferencia Bancaria", "Mercado Pago"],
+    services: [
+      {
+        id: "lavado_exterior",
+        name: "Lavado Exterior",
+        description: "Lavado artesanal con espuma pH neutro, llantas, pasaruedas, secado técnico sin rayas y sellador hidrofóbico.",
+        duration_minutes: 90,
+        prices_ars: { auto: 15000, suv: 20000, pickup: 30000 }
+      },
+      {
+        id: "detallado_interior",
+        name: "Detallado Interior",
+        description: "Aspirado profundo, pincelado de ventilaciones y consola, protector UV sin siliconas grasosas.",
+        duration_minutes: 90,
+        prices_ars: { auto: 20000, suv: 25000, pickup: 30000 }
+      },
+      {
+        id: "limpieza_techo",
+        name: "Limpieza de Techo",
+        description: "Remoción de manchas con espuma seca cuidando el adhesivo original.",
+        duration_minutes: 60,
+        prices_ars: { auto: 10000, suv: 12000, pickup: 15000 }
+      },
+      {
+        id: "tapizados_tela",
+        name: "Limpieza de Tapizados de Tela",
+        description: "Inyección y extracción profunda de manchas, suciedad y desinfección total de butacas.",
+        duration_minutes: 90,
+        prices_ars: { auto: 40000, suv: 45000, pickup: 50000 }
+      },
+      {
+        id: "tapizados_cuero",
+        name: "Tratamiento de Cuero",
+        description: "Limpieza suave y nutrición humectante contra grietas y resequedad.",
+        duration_minutes: 60,
+        prices_ars: { auto: 15000, suv: 18000, pickup: 20000 }
+      }
+    ],
+    packs: [
+      { id: "full", name: "Pack Full", includes: ["Lavado Exterior", "Detallado Interior"] },
+      { id: "interior_tela", name: "Pack Interior Tela", includes: ["Detallado Interior", "Limpieza de Techo", "Tapizados de Tela"] },
+      { id: "interior_cuero", name: "Pack Interior Cuero", includes: ["Detallado Interior", "Limpieza de Techo", "Tratamiento de Cuero"] }
+    ]
+  });
+});
+
 // Vite middleware for dev / static for prod
 async function setupServer() {
   if (process.env.NODE_ENV !== "production") {
