@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>LyS Lavados</title>
+    <script type="text/javascript">
+      // Single Page Apps for GitHub Pages & Static hosts
+      var pathSegmentsToKeep = 0;
+      var l = window.location;
+      var path = l.pathname.slice(1);
+      if (path.toLowerCase().indexOf('turnoexpress') !== -1 || path.toLowerCase().indexOf('express') !== -1) {
+        l.replace(l.protocol + '//' + l.hostname + (l.port ? ':' + l.port : '') + l.pathname.split('/').slice(0, 1 + pathSegmentsToKeep).join('/') + '/?express');
+      } else if (path.toLowerCase().indexOf('admin') !== -1) {
+        l.replace(l.protocol + '//' + l.hostname + (l.port ? ':' + l.port : '') + l.pathname.split('/').slice(0, 1 + pathSegmentsToKeep).join('/') + '/?admin');
+      } else {
+        l.replace(l.protocol + '//' + l.hostname + (l.port ? ':' + l.port : '') + l.pathname.split('/').slice(0, 1 + pathSegmentsToKeep).join('/') + '/');
+      }
+    </script>
+  </head>
+  <body>
+  </body>
+</html>
