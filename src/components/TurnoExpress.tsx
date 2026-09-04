@@ -49,7 +49,7 @@ export default function TurnoExpress({
 }: TurnoExpressProps) {
   // 1. Vehicle & Services state
   const [vehicle, setVehicle] = useState<VehicleType>('auto');
-  const [selectedServices, setSelectedServices] = useState<string[]>(['lavado_exterior', 'detallado_interior']); // Default to Pack Full
+  const [selectedServices, setSelectedServices] = useState<string[]>(['lavado_exterior']);
   
   // 2. Availability state
   const [slotsData, setSlotsData] = useState<TimeSlot[]>([]);
@@ -123,38 +123,6 @@ export default function TurnoExpress({
     }
     fetchWeather();
   }, []);
-
-  // Quick packs
-  const quickPacks = [
-    {
-      id: 'pack_full',
-      name: 'PACK FULL 💫',
-      badge: 'MÁS ELEGIDO',
-      desc: 'Lavado Exterior + Detallado Interior completo',
-      services: ['lavado_exterior', 'detallado_interior'],
-    },
-    {
-      id: 'solo_exterior',
-      name: 'Lavado Exterior 🧼',
-      badge: 'RÁPIDO',
-      desc: 'Espuma activa, llantas, pasaruedas y cera rápida',
-      services: ['lavado_exterior'],
-    },
-    {
-      id: 'solo_interior',
-      name: 'Detallado Interior ✨',
-      badge: 'PROFUNDO',
-      desc: 'Aspirado exhaustivo, plásticos UV y acondicionador',
-      services: ['detallado_interior'],
-    },
-    {
-      id: 'tapizados_tela_pack',
-      name: 'Interior + Tapizados Tela 💺',
-      badge: 'DESINFECCIÓN',
-      desc: 'Detallado interior + Extracción química de butacas',
-      services: ['detallado_interior', 'tapizados_tela'],
-    },
-  ];
 
   // Refresh slots
   const refreshSlots = useCallback(async () => {
@@ -315,7 +283,6 @@ export default function TurnoExpress({
   const handleToggleService = (serviceId: string) => {
     let next = [...selectedServices];
     if (next.includes(serviceId)) {
-      if (next.length === 1) return; // Must have at least 1 service
       next = next.filter(id => id !== serviceId);
     } else {
       if (serviceId === 'tapizados_tela') {
@@ -326,11 +293,6 @@ export default function TurnoExpress({
       next.push(serviceId);
     }
     setSelectedServices(next);
-    setSelectedTime(null);
-  };
-
-  const handleSelectPack = (packServices: string[]) => {
-    setSelectedServices(packServices);
     setSelectedTime(null);
   };
 
@@ -540,104 +502,77 @@ export default function TurnoExpress({
           </div>
         </section>
 
-        {/* PASO 2: SERVICIOS Y PACKS */}
+        {/* PASO 2: SERVICIOS */}
         <section className="mb-7">
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-sm font-display font-black uppercase italic tracking-wider text-zinc-300 flex items-center gap-2">
               <span className="w-6 h-6 rounded-lg bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 flex items-center justify-center text-xs font-black">2</span>
-              <span>Elegí tu servicio o pack</span>
+              <span>¿Qué servicio necesitás?</span>
             </h2>
             <span className="text-xs font-bold text-zinc-400">
-              Duración: <strong className="text-emerald-400">{formatDurationHours(totalDuration)}</strong>
+              {selectedServices.length === 0 ? (
+                <span className="text-amber-400 font-semibold">Elegí al menos un servicio</span>
+              ) : (
+                <>
+                  <span className="text-zinc-300">{selectedServices.length} {selectedServices.length === 1 ? 'servicio' : 'servicios'}</span>
+                  <span className="mx-1.5 text-zinc-600">•</span>
+                  <strong className="text-emerald-400">{formatDurationHours(totalDuration)}</strong>
+                </>
+              )}
             </span>
           </div>
 
-          {/* Quick Packs Carousel */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 mb-4">
-            {quickPacks.map((pack) => {
-              const isPackActive = pack.services.length === selectedServices.length && 
-                pack.services.every(sId => selectedServices.includes(sId));
-              const packPrice = calculatePrice(pack.services, vehicle);
-
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {activeServices.map((srv) => {
+              const isSelected = selectedServices.includes(srv.id);
+              const srvPrice = calculatePrice([srv.id], vehicle);
               return (
                 <button
-                  key={pack.id}
+                  key={srv.id}
                   type="button"
-                  onClick={() => handleSelectPack(pack.services)}
-                  className={`p-3.5 sm:p-4 rounded-2xl border text-left transition-all cursor-pointer select-none flex flex-col justify-between ${
-                    isPackActive
-                      ? 'bg-zinc-900 border-emerald-500 shadow-[0_0_20px_rgba(16,185,129,0.12)] ring-1 ring-emerald-500'
-                      : 'bg-zinc-900/40 border-white/10 hover:border-white/20 hover:bg-zinc-900/70'
+                  onClick={() => handleToggleService(srv.id)}
+                  className={`p-4 rounded-2xl border text-left transition-all cursor-pointer select-none flex flex-col justify-between gap-3 relative ${
+                    isSelected
+                      ? 'bg-zinc-900 border-emerald-500 shadow-[0_0_25px_rgba(16,185,129,0.15)] ring-1 ring-emerald-500 scale-[1.01]'
+                      : 'bg-zinc-900/40 border-white/10 hover:border-white/20 hover:bg-zinc-900/70 text-zinc-400 hover:text-zinc-200'
                   }`}
                 >
-                  <div>
-                    <div className="flex items-center justify-between gap-2 mb-1">
-                      <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                        {pack.badge}
-                      </span>
-                      <span className="text-sm sm:text-base font-display font-black text-emerald-400">
-                        ${packPrice.toLocaleString('es-AR')}
-                      </span>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-start gap-3 min-w-0">
+                      <div className={`w-5 h-5 rounded-lg border mt-0.5 flex items-center justify-center shrink-0 transition-colors ${
+                        isSelected 
+                          ? 'bg-emerald-500 border-emerald-400 text-slate-950 font-black text-xs' 
+                          : 'border-white/20 bg-zinc-950'
+                      }`}>
+                        {isSelected && '✓'}
+                      </div>
+                      <div className="min-w-0">
+                        <span className={`text-sm font-display font-black italic uppercase block tracking-tight ${
+                          isSelected ? 'text-white' : 'text-zinc-200'
+                        }`}>
+                          {srv.name}
+                        </span>
+                        <p className="text-[11px] text-zinc-400 mt-1 line-clamp-2 leading-relaxed">
+                          {srv.label || srv.description}
+                        </p>
+                      </div>
                     </div>
-                    <h3 className="text-sm font-display font-black italic uppercase text-white mt-1">
-                      {pack.name}
-                    </h3>
-                    <p className="text-[11px] text-zinc-400 mt-0.5 leading-snug">
-                      {pack.desc}
-                    </p>
                   </div>
 
-                  <div className="mt-3 pt-2.5 border-t border-white/5 flex items-center justify-between text-[11px]">
-                    <span className="text-zinc-500">
-                      {pack.services.length} {pack.services.length === 1 ? 'servicio' : 'servicios'}
+                  <div className="pt-2.5 border-t border-white/5 flex items-center justify-between">
+                    <span className="text-[10px] font-bold text-zinc-400 flex items-center gap-1">
+                      <Clock3 className="w-3.5 h-3.5 text-zinc-500" />
+                      {srv.duration || 60} min
                     </span>
-                    <span className={`font-bold flex items-center gap-1 ${isPackActive ? 'text-emerald-400' : 'text-zinc-400'}`}>
-                      {isPackActive ? '✓ Seleccionado' : 'Elegir pack →'}
-                    </span>
+                    <div className="text-right">
+                      <span className="text-sm sm:text-base font-display font-black text-emerald-400">
+                        ${srvPrice.toLocaleString('es-AR')}
+                      </span>
+                    </div>
                   </div>
                 </button>
               );
             })}
-          </div>
-
-          {/* Individual Toggle List */}
-          <div className="bg-zinc-900/50 border border-white/10 rounded-2xl p-3.5 sm:p-4">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-zinc-400 block mb-2.5">
-              O personalizá sumando servicios individuales:
-            </span>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {activeServices.map((srv) => {
-                const isSelected = selectedServices.includes(srv.id);
-                const srvPrice = calculatePrice([srv.id], vehicle);
-                return (
-                  <button
-                    key={srv.id}
-                    type="button"
-                    onClick={() => handleToggleService(srv.id)}
-                    className={`px-3 py-2.5 rounded-xl border text-left flex items-center justify-between gap-2 transition-all cursor-pointer ${
-                      isSelected
-                        ? 'bg-emerald-500/15 border-emerald-500/60 text-white'
-                        : 'bg-zinc-950/60 border-white/10 hover:border-white/20 text-zinc-400 hover:text-zinc-200'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <div className={`w-4 h-4 rounded-md border flex items-center justify-center shrink-0 ${
-                        isSelected ? 'bg-emerald-500 border-emerald-400 text-black font-bold' : 'border-zinc-700 bg-zinc-900'
-                      }`}>
-                        {isSelected && '✓'}
-                      </div>
-                      <div className="truncate">
-                        <span className="text-xs font-bold block truncate text-zinc-200">{srv.name}</span>
-                        <span className="text-[10px] text-zinc-500">{srv.duration || 60} min</span>
-                      </div>
-                    </div>
-                    <span className="text-xs font-bold font-mono text-emerald-400 shrink-0">
-                      +${srvPrice.toLocaleString('es-AR')}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
           </div>
         </section>
 
@@ -811,6 +746,17 @@ export default function TurnoExpress({
                 <p className="text-xs text-zinc-200 font-medium mt-0.5">
                   {activeVehicles.find(v => v.id === vehicle)?.name} • {selectedDateStr ? `${selectedDateStr.split('-')[2]}/${selectedDateStr.split('-')[1]}` : 'Fecha a elegir'} • {selectedTime ? `${selectedTime} hs` : 'Hora a elegir'}
                 </p>
+                <p className="text-xs text-emerald-400 font-bold mt-1">
+                  {selectedServices.length === 0 ? (
+                    <span className="text-amber-400 font-normal">Ningún servicio seleccionado</span>
+                  ) : (
+                    selectedServices.map(id => {
+                      const s = activeServices.find(srv => srv.id === id);
+                      const p = calculatePrice([id], vehicle);
+                      return `${s?.name || id} ($${p.toLocaleString('es-AR')})`;
+                    }).join(' + ')
+                  )}
+                </p>
               </div>
               <div className="sm:text-right">
                 <span className="text-[10px] uppercase font-bold text-emerald-400 block">Total a Pagar</span>
@@ -824,7 +770,7 @@ export default function TurnoExpress({
             <button
               type="button"
               onClick={handleConfirmExpressBooking}
-              disabled={isSubmitting || !selectedDateStr || !selectedTime || !clientName.trim() || !clientPhone.trim() || !clientConfirmedLocation}
+              disabled={isSubmitting || selectedServices.length === 0 || !selectedDateStr || !selectedTime || !clientName.trim() || !clientPhone.trim() || !clientConfirmedLocation}
               className="w-full bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 disabled:cursor-not-allowed text-slate-950 font-display font-black italic uppercase tracking-wider py-4 px-6 rounded-2xl text-sm sm:text-base flex items-center justify-center gap-3 shadow-xl shadow-emerald-500/20 transition-all cursor-pointer active:scale-[0.99]"
             >
               {isSubmitting ? (
@@ -832,6 +778,8 @@ export default function TurnoExpress({
                   <div className="w-5 h-5 border-2 border-slate-950 border-t-transparent rounded-full animate-spin" />
                   <span>Agendando Turno Express...</span>
                 </>
+              ) : selectedServices.length === 0 ? (
+                <span>Elegí al menos un servicio</span>
               ) : (
                 <>
                   <Zap className="w-5 h-5 fill-slate-950" />

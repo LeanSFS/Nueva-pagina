@@ -58,13 +58,6 @@
 
 ---
 
-## Combos Recomendados
-- **Pack Full:** Lavado Exterior + Detallado Interior.
-- **Interior Completo (Tela):** Detallado Interior + Limpieza de Techo + Tapizados de Tela.
-- **Interior Completo (Cuero):** Detallado Interior + Limpieza de Techo + Tratamiento Nutritivo de Cuero.
-
----
-
 ## Preguntas Frecuentes y Políticas
 - **¿Cómo reservar un turno?** Ingresando a https://lyslavados.com/turnoexpress. Se selecciona vehículo, servicio y horario disponible en 30 segundos.
 - **¿Cuáles son los medios de pago?** Efectivo, transferencia bancaria y Mercado Pago al retirar el vehículo tras la conformidad del cliente.
