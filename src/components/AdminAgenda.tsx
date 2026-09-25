@@ -768,7 +768,7 @@ export default function AdminAgenda({
                   <div className="flex items-center gap-2 bg-emerald-500/10 px-3 py-1.5 rounded-xl border border-emerald-500/20">
                     <DollarSign className="w-4 h-4 text-emerald-400" />
                     <div>
-                      <div className="text-[9px] uppercase font-black tracking-wider text-emerald-400">Est. Facturación</div>
+                      <div className="text-[9px] uppercase font-black tracking-wider text-emerald-400">Est. Ingresos</div>
                       <div className="text-xs font-black text-emerald-300">
                         ${dayStats.estimatedRevenue.toLocaleString('es-AR')}
                       </div>

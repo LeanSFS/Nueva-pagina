@@ -34,3 +34,38 @@ export interface PricingMap {
   pickup: PricingTier;
 }
 
+export interface ArcaConfig {
+  cuit: string;
+  razonSocial: string;
+  puntoVenta: number;
+  tipoComprobanteDefault: number; // 11 = Factura C, 6 = Factura B, 1 = Factura A
+  conceptoDefault: number; // 2 = Servicios
+  domicilioComercial: string;
+  inicioActividades: string;
+  condicionIva: string; // 'Responsable Monotributo'
+  production: boolean;
+}
+
+export interface ArcaFacturaRecord {
+  id: string;
+  cae: string;
+  caeVto: string;
+  cbteNro: number;
+  puntoVenta: number;
+  tipoComprobante: number;
+  tipoComprobanteNombre: string;
+  fechaEmision: string; // DD/MM/YYYY
+  fechaIso: string; // YYYY-MM-DD
+  total: number;
+  clienteNombre: string;
+  clienteDocTipo: string;
+  clienteDocNro: string;
+  clienteTelefono?: string;
+  conceptoDescripcion: string;
+  qrUrl?: string;
+  qrBase64?: string;
+  createdAt: string;
+  bookingId?: string;
+  movementId?: string;
+}
+

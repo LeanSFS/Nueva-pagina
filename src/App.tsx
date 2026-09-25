@@ -38,13 +38,14 @@ import {
 import { SERVICES, VEHICLES, BASE_PRICES, TYPE_EXTRA } from './constants.ts';
 import { VehicleType, ServiceKey } from './types.ts';
 import { fetchSlots, createBooking, TimeSlot } from './services/availabilityService.ts';
-import AdminCaja from './components/AdminCaja.tsx';
-import TurnoExpress from './components/TurnoExpress.tsx';
 import { metricsService } from './services/metricsService.ts';
 import { firestoreService, CatalogService, CatalogVehicle, GalleryPhoto } from './services/firestoreService.ts';
 import { telegramService } from './services/telegramService.ts';
 import { GlowCard } from './components/GlowCard.tsx';
 import { AIKnowledgeContent } from './components/AIKnowledgeContent.tsx';
+
+const AdminCaja = React.lazy(() => import('./components/AdminCaja.tsx'));
+const TurnoExpress = React.lazy(() => import('./components/TurnoExpress.tsx'));
 
 // --- Internal Components ---
 
@@ -1035,18 +1036,20 @@ export default function App() {
             exit={{ opacity: 0, scale: 1.02 }}
             transition={{ duration: 0.3 }}
           >
-            <AdminCaja 
-              onBack={navigateToHome}
-              isPasswordAuthenticated={isAdminAuthenticated}
-              onLogout={() => {
-                setIsAdminAuthenticated(false);
-                try {
-                  localStorage.removeItem('lys_admin_auth');
-                  sessionStorage.removeItem('lys_admin_auth');
-                } catch (e) {}
-                navigateToHome();
-              }}
-            />
+            <React.Suspense fallback={<div className="min-h-screen flex items-center justify-center bg-zinc-950 text-emerald-500 font-bold"><Loader2 className="w-8 h-8 animate-spin" /></div>}>
+              <AdminCaja 
+                onBack={navigateToHome}
+                isPasswordAuthenticated={isAdminAuthenticated}
+                onLogout={() => {
+                  setIsAdminAuthenticated(false);
+                  try {
+                    localStorage.removeItem('lys_admin_auth');
+                    sessionStorage.removeItem('lys_admin_auth');
+                  } catch (e) {}
+                  navigateToHome();
+                }}
+              />
+            </React.Suspense>
           </motion.div>
         ) : view === 'express' ? (
           <motion.div
@@ -1056,11 +1059,13 @@ export default function App() {
             exit={{ opacity: 0, y: -15 }}
             transition={{ duration: 0.35 }}
           >
-            <TurnoExpress
-              onBackToHome={navigateToHome}
-              dbServices={dbServices}
-              dbVehicles={dbVehicles}
-            />
+            <React.Suspense fallback={<div className="min-h-screen flex items-center justify-center bg-zinc-950 text-emerald-500 font-bold"><Loader2 className="w-8 h-8 animate-spin" /></div>}>
+              <TurnoExpress
+                onBackToHome={navigateToHome}
+                dbServices={dbServices}
+                dbVehicles={dbVehicles}
+              />
+            </React.Suspense>
           </motion.div>
         ) : view === 'home' ? (
           <motion.div

@@ -36,6 +36,7 @@ import AdminAgenda from './AdminAgenda.tsx';
 import AdminRendimientos from './AdminRendimientos.tsx';
 import AdminMetrics from './AdminMetrics.tsx';
 import AdminAssistant from './AdminAssistant.tsx';
+import AdminArcaFacturacion from './AdminArcaFacturacion.tsx';
 import { firestoreService, Movement, Booking, sanitizeImageUrl } from '../services/firestoreService.ts';
 import { auth } from '../services/firebase.ts';
 import { SERVICES } from '../constants.ts';
@@ -95,7 +96,7 @@ export default function AdminCaja({
     }
   };
 
-  const [activeTab, setActiveTab] = useState<'agenda' | 'caja' | 'stats' | 'metrics' | 'catalog' | 'gallery'>('agenda');
+  const [activeTab, setActiveTab] = useState<'agenda' | 'caja' | 'facturacion' | 'stats' | 'metrics' | 'catalog' | 'gallery'>('agenda');
   const [allMovements, setAllMovements] = useState<Movement[]>([]);
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [loading, setLoading] = useState(false);
@@ -848,6 +849,17 @@ export default function AdminCaja({
             <span>Caja</span>
           </button>
 
+          {/* 3. Facturación ARCA */}
+          <button 
+            onClick={() => setActiveTab('facturacion')}
+            className={`flex-1 min-w-[110px] sm:min-w-0 flex items-center justify-center gap-2 px-3 sm:px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all whitespace-nowrap cursor-pointer ${
+              activeTab === 'facturacion' ? 'bg-emerald-500 text-slate-950 font-black shadow-lg shadow-emerald-500/20' : 'text-zinc-400 hover:text-white hover:bg-white/5'
+            }`}
+          >
+            <FileText className="w-4 h-4 shrink-0" />
+            <span>Facturación ARCA</span>
+          </button>
+
           {/* 3. Precios */}
           <button 
             onClick={() => setActiveTab('catalog')}
@@ -896,6 +908,12 @@ export default function AdminCaja({
         {activeTab === 'agenda' ? (
           <AdminAgenda 
             customerVisits={customersMap}
+          />
+        ) : activeTab === 'facturacion' ? (
+          <AdminArcaFacturacion 
+            movements={allMovements} 
+            bookings={bookings} 
+            onRefreshMovements={fetchRows} 
           />
         ) : activeTab === 'stats' ? (
           <AdminRendimientos bookings={bookings} movements={allMovements} />
@@ -1476,7 +1494,7 @@ export default function AdminCaja({
               </select>
             </div>
             <div>
-              <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 mb-2 block">Cliente / Factura</label>
+              <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 mb-2 block">Cliente (Opcional)</label>
               <input value={newMovement.cliente} onChange={e => setNewMovement({...newMovement, cliente: e.target.value})} placeholder="Cliente opcional" className="w-full bg-slate-950 border border-emerald-500/10 rounded-xl p-3 text-sm" />
             </div>
           </div>

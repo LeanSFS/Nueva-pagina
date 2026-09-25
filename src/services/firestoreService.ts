@@ -12,6 +12,7 @@ import {
 } from 'firebase/firestore';
 import { db, auth } from './firebase.ts';
 import { SERVICES, VEHICLES } from '../constants.ts';
+import { ArcaConfig, ArcaFacturaRecord } from '../types.ts';
 
 // --- Error Handler conformance with FirestoreErrorInfo schema ---
 export enum OperationType {
@@ -1229,6 +1230,75 @@ export const firestoreService = {
     } catch (e: any) {
       console.error('Error importing caja from Google Sheets:', e);
       return { success: false, count: 0, error: e.message || String(e) };
+    }
+  },
+
+  // ------------------ 8. FACTURACIÓN ELECTRÓNICA DIRECTA ARCA ------------------
+
+  async getArcaConfig(): Promise<ArcaConfig> {
+    const defaultConfig: ArcaConfig = {
+      cuit: '20411564550',
+      razonSocial: 'LyS Lavados',
+      puntoVenta: 2,
+      tipoComprobanteDefault: 11, // Factura C
+      conceptoDefault: 2, // Servicios
+      domicilioComercial: 'Venezuela 1659, Cipolletti, Río Negro',
+      inicioActividades: '01/01/2024',
+      condicionIva: 'Responsable Monotributo',
+      production: true
+    };
+
+    try {
+      const docRef = doc(db, 'config', 'arca');
+      const snap = await withTimeout(getDoc(docRef), 3000);
+      if (snap.exists()) {
+        const data = snap.data() as Partial<ArcaConfig>;
+        const merged = { ...defaultConfig, ...data };
+        setLocalCache('lys_arca_config', merged);
+        return merged;
+      }
+    } catch (e) {
+      console.warn('Could not load arca config from firestore, using local cache:', e);
+    }
+
+    return getLocalCache<ArcaConfig>('lys_arca_config', defaultConfig);
+  },
+
+  async saveArcaConfig(config: ArcaConfig): Promise<void> {
+    setLocalCache('lys_arca_config', config);
+    try {
+      const docRef = doc(db, 'config', 'arca');
+      await withTimeout(setDoc(docRef, config, { merge: true }), 4000);
+    } catch (e) {
+      handleFirestoreError(e, OperationType.WRITE, 'config/arca');
+    }
+  },
+
+  async getArcaFacturas(): Promise<ArcaFacturaRecord[]> {
+    try {
+      const col = collection(db, 'facturas');
+      const snap = await withTimeout(getDocs(col), 3500);
+      const rows: ArcaFacturaRecord[] = [];
+      snap.forEach(d => rows.push(d.data() as ArcaFacturaRecord));
+      rows.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+      setLocalCache('lys_arca_facturas', rows);
+      return rows;
+    } catch (e) {
+      console.warn('Using local cache for arca facturas:', e);
+      return getLocalCache<ArcaFacturaRecord[]>('lys_arca_facturas', []);
+    }
+  },
+
+  async saveArcaFactura(factura: ArcaFacturaRecord): Promise<void> {
+    const cached = getLocalCache<ArcaFacturaRecord[]>('lys_arca_facturas', []);
+    const updated = [factura, ...cached.filter(f => f.id !== factura.id)];
+    setLocalCache('lys_arca_facturas', updated);
+
+    try {
+      const docRef = doc(db, 'facturas', factura.id);
+      await withTimeout(setDoc(docRef, factura), 4000);
+    } catch (e) {
+      handleFirestoreError(e, OperationType.CREATE, `facturas/${factura.id}`);
     }
   }
 };

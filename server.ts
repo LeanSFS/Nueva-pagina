@@ -3,6 +3,7 @@ import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
+import { ArcaService } from "./server/arcaService.ts";
 
 dotenv.config();
 
@@ -141,6 +142,154 @@ Contexto actual enviado por el cliente: ${JSON.stringify(context || {})}
     console.error("Error in /api/admin/assistant:", error);
     return res.status(500).json({ 
       error: error.message || "Error al procesar el comando con la IA." 
+    });
+  }
+});
+
+// ==========================================
+// ARCA (EX AFIP) FREE DIRECT INTEGRATION
+// ==========================================
+
+// 1. Get ARCA Server status (FEDummy)
+app.get("/api/arca/status", async (req, res) => {
+  try {
+    const isProd = req.query.production !== "false";
+    const status = await ArcaService.checkStatus(isProd);
+    return res.json(status);
+  } catch (error: any) {
+    return res.status(500).json({ online: false, error: error.message });
+  }
+});
+
+// 2. Get Certificate & Key status
+app.get("/api/arca/cert-info", (req, res) => {
+  try {
+    const info = ArcaService.getCertInfo();
+    return res.json(info);
+  } catch (error: any) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+// 3. Save Certificate and/or Private Key
+app.post("/api/arca/save-certs", (req, res) => {
+  try {
+    const { certPem, keyPem } = req.body;
+    if (!certPem && !keyPem) {
+      return res.status(400).json({ error: "Debe proveer al menos el certificado o la clave privada." });
+    }
+    ArcaService.saveCertificates(certPem || "", keyPem || "");
+    const info = ArcaService.getCertInfo();
+    return res.json({ success: true, info, message: "Certificados guardados con éxito en el servidor." });
+  } catch (error: any) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+// 4. Generate fresh RSA 2048 key and CSR
+app.post("/api/arca/generate-csr", (req, res) => {
+  try {
+    const { cuit, razonSocial } = req.body;
+    const cleanCuit = String(cuit || "20411564550").replace(/\D/g, "");
+    const cleanRazon = String(razonSocial || "LyS Lavados");
+    const result = ArcaService.generateCsr(cleanCuit, cleanRazon);
+    return res.json({
+      success: true,
+      cuit: cleanCuit,
+      razonSocial: cleanRazon,
+      csrPem: result.csrPem,
+      downloadUrl: "/pedido_arca.csr",
+      message: "CSR y Clave Privada generados con éxito."
+    });
+  } catch (error: any) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+// 5. Test WSAA Authentication (Token & Sign)
+app.post("/api/arca/test-auth", async (req, res) => {
+  try {
+    const isProd = req.body.production !== false;
+    const auth = await ArcaService.getAuth(isProd);
+    return res.json({
+      success: true,
+      message: "¡Autenticación con ARCA (WSAA) exitosa! Token y Sign obtenidos.",
+      auth: {
+        hasToken: !!auth.token,
+        hasSign: !!auth.sign
+      }
+    });
+  } catch (error: any) {
+    return res.status(400).json({
+      success: false,
+      error: error.message || "Error al autenticar con ARCA."
+    });
+  }
+});
+
+// 6. Get Last Voucher
+app.get("/api/arca/ultimo-comprobante", async (req, res) => {
+  try {
+    const cuit = String(req.query.cuit || "20411564550");
+    const puntoVenta = Number(req.query.puntoVenta || 2);
+    const tipoComprobante = Number(req.query.tipoComprobante || 11);
+    const isProd = req.query.production !== "false";
+
+    const lastVoucher = await ArcaService.getLastVoucher(cuit, puntoVenta, tipoComprobante, isProd);
+    return res.json({
+      success: true,
+      puntoVenta,
+      tipoComprobante,
+      ultimoComprobante: lastVoucher,
+      proximoComprobante: lastVoucher + 1
+    });
+  } catch (error: any) {
+    return res.status(400).json({
+      success: false,
+      error: error.message || "Error al consultar último comprobante en ARCA."
+    });
+  }
+});
+
+// 7. Emit Electronic Invoice directly with ARCA
+app.post("/api/arca/emitir", async (req, res) => {
+  try {
+    const {
+      cuit,
+      puntoVenta,
+      tipoComprobante,
+      concepto,
+      docTipo,
+      docNro,
+      total,
+      clienteNombre,
+      clienteEmail,
+      clienteTelefono,
+      descripcionServicio,
+      production
+    } = req.body;
+
+    const result = await ArcaService.emitirFactura({
+      cuit: cuit || "20411564550",
+      puntoVenta: Number(puntoVenta || 2),
+      tipoComprobante: Number(tipoComprobante || 11),
+      concepto: Number(concepto || 2),
+      docTipo: Number(docTipo || 99),
+      docNro: docNro || "0",
+      total: Number(total),
+      clienteNombre: clienteNombre || "Consumidor Final",
+      clienteEmail,
+      clienteTelefono,
+      descripcionServicio,
+      production: production !== false
+    });
+
+    return res.json(result);
+  } catch (error: any) {
+    console.error("Error emitiendo factura ARCA:", error);
+    return res.status(400).json({
+      success: false,
+      error: error.message || "Error al procesar la factura con ARCA."
     });
   }
 });

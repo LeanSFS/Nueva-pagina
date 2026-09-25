@@ -5,7 +5,7 @@ import { firestoreService, Movement, Booking, CatalogService } from '../services
 interface AdminAssistantProps {
   onRefreshMovements: () => Promise<void> | void;
   onRefreshBookings: () => Promise<void> | void;
-  onNavigateTab: (tab: 'agenda' | 'caja' | 'stats' | 'metrics' | 'catalog' | 'gallery') => void;
+  onNavigateTab: (tab: 'agenda' | 'caja' | 'facturacion' | 'stats' | 'metrics' | 'catalog' | 'gallery') => void;
   allMovements: Movement[];
   bookings: Booking[];
   services?: CatalogService[];
@@ -150,6 +150,9 @@ export default function AdminAssistant({
 
     // 3. NAVIGATION
     if (lower.includes('ir a') || lower.includes('abrir') || lower.includes('ver')) {
+      if (lower.includes('factur') || lower.includes('arca') || lower.includes('afip')) {
+        return { action: 'NAVIGATE_TAB', payload: { tab: 'facturacion' }, message: 'Navegando a Facturación ARCA...' };
+      }
       if (lower.includes('caja') || lower.includes('movimiento') || lower.includes('dinero')) {
         return { action: 'NAVIGATE_TAB', payload: { tab: 'caja' }, message: 'Navegando a la pestaña Caja...' };
       }
