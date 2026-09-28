@@ -30,7 +30,11 @@ import {
   Eye,
   EyeOff,
   Tag,
-  Image
+  Image,
+  Printer,
+  Send,
+  ExternalLink,
+  Receipt
 } from 'lucide-react';
 import AdminAgenda from './AdminAgenda.tsx';
 import AdminRendimientos from './AdminRendimientos.tsx';
@@ -38,6 +42,7 @@ import AdminMetrics from './AdminMetrics.tsx';
 import AdminAssistant from './AdminAssistant.tsx';
 import AdminArcaFacturacion from './AdminArcaFacturacion.tsx';
 import { firestoreService, Movement, Booking, sanitizeImageUrl } from '../services/firestoreService.ts';
+import { ArcaConfig, ArcaFacturaRecord } from '../types.ts';
 import { auth } from '../services/firebase.ts';
 import { SERVICES } from '../constants.ts';
 import { signInWithPopup, signInWithRedirect, getRedirectResult, GoogleAuthProvider, signOut, User as FirebaseUser } from 'firebase/auth';
@@ -118,6 +123,232 @@ export default function AdminCaja({
   const [filterEstado, setFilterEstado] = useState('');
   const [filterMedio, setFilterMedio] = useState('');
   const [filterCategoria, setFilterCategoria] = useState('');
+  const [filterFacturado, setFilterFacturado] = useState<'todos' | 'facturados' | 'sin_facturar'>('todos');
+
+  // Facturas y Configuración ARCA
+  const [arcaFacturas, setArcaFacturas] = useState<ArcaFacturaRecord[]>([]);
+  const [arcaConfig, setArcaConfig] = useState<ArcaConfig | null>(null);
+
+  // Modal para facturar movimiento puntual
+  const [facturarTarget, setFacturarTarget] = useState<Movement | null>(null);
+  const [facturarForm, setFacturarForm] = useState({
+    clienteNombre: '',
+    clienteDocTipo: '99', // 99: CF, 96: DNI, 80: CUIT
+    clienteDocNro: '',
+    clienteTelefono: '',
+    montoTotal: '',
+    concepto: '',
+    tipoComprobante: 11, // Factura C
+    puntoVenta: 2
+  });
+  const [isSubmittingFactura, setIsSubmittingFactura] = useState(false);
+  const [facturaError, setFacturaError] = useState<string | null>(null);
+
+  // Modal para ver comprobante oficial / imprimir / enviar WhatsApp
+  const [selectedFacturaRecord, setSelectedFacturaRecord] = useState<ArcaFacturaRecord | null>(null);
+
+  // Helper para saber si un movimiento ya fue facturado
+  const isMovementFacturado = (m: Movement) => {
+    if (m.facturado) return true;
+    if (m.cae && m.cae.trim()) return true;
+    if (m.factura && m.factura.trim() && m.factura !== '-' && m.factura.toLowerCase() !== 'sin factura' && m.factura.toLowerCase() !== 'no') return true;
+    if (arcaFacturas.some(f => f.movementId === m.id)) return true;
+    return false;
+  };
+
+  // Helper para obtener el comprobante asociado a un movimiento
+  const getMovementFacturaRecord = (m: Movement): ArcaFacturaRecord | null => {
+    const byId = arcaFacturas.find(f => f.movementId === m.id);
+    if (byId) return byId;
+    if (m.factura) {
+      const cleanDigits = m.factura.replace(/\D/g, '');
+      const byNro = arcaFacturas.find(f => {
+        const fullNro = `FC-${String(f.puntoVenta).padStart(4, '0')}-${String(f.cbteNro).padStart(8, '0')}`;
+        return fullNro === m.factura || (cleanDigits && String(f.cbteNro) === cleanDigits.slice(-8));
+      });
+      if (byNro) return byNro;
+    }
+    return null;
+  };
+
+  // Abrir modal de facturar para un movimiento
+  const handleOpenFacturar = (m: Movement) => {
+    setFacturaError(null);
+    setFacturarTarget(m);
+    setFacturarForm({
+      clienteNombre: m.cliente?.trim() || 'Consumidor Final',
+      clienteDocTipo: '99',
+      clienteDocNro: '',
+      clienteTelefono: '',
+      montoTotal: String(m.monto_ars || ''),
+      concepto: m.concepto || 'Servicio de Estética y Lavado Automotor',
+      tipoComprobante: arcaConfig?.tipoComprobanteDefault || 11,
+      puntoVenta: arcaConfig?.puntoVenta || 2
+    });
+  };
+
+  // Emitir Factura Electrónica ARCA para el movimiento
+  const handleEmitirFacturaMovimiento = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!facturarTarget) return;
+
+    const montoNum = Number(facturarForm.montoTotal);
+    if (!montoNum || montoNum <= 0) {
+      setFacturaError('El monto debe ser mayor a $0.');
+      return;
+    }
+
+    if (facturarForm.clienteDocTipo !== '99' && !facturarForm.clienteDocNro.trim()) {
+      setFacturaError('Por favor ingrese el número de documento del cliente.');
+      return;
+    }
+
+    setIsSubmittingFactura(true);
+    setFacturaError(null);
+
+    try {
+      const cfg = arcaConfig || await firestoreService.getArcaConfig();
+      const base = cfg.apiHost?.trim().replace(/\/$/, '') || '';
+      const endpoint = base ? `${base}/api/arca/emitir` : '/api/arca/emitir';
+
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          cuit: cfg.cuit || '20411564550',
+          puntoVenta: facturarForm.puntoVenta,
+          tipoComprobante: facturarForm.tipoComprobante,
+          concepto: 2, // Servicios
+          docTipo: Number(facturarForm.clienteDocTipo),
+          docNro: facturarForm.clienteDocTipo === '99' ? '0' : facturarForm.clienteDocNro.trim(),
+          total: montoNum,
+          clienteNombre: facturarForm.clienteNombre.trim() || 'Consumidor Final',
+          clienteTelefono: facturarForm.clienteTelefono.trim(),
+          descripcionServicio: facturarForm.concepto,
+          production: cfg.production !== false
+        })
+      });
+
+      const ct = res.headers.get('content-type') || '';
+      if (!ct.includes('application/json')) {
+        const txt = await res.text();
+        throw new Error(txt.includes('<html') 
+          ? 'El servidor backend de ARCA no respondió en formato JSON.' 
+          : `Respuesta de ARCA: ${txt.slice(0, 100)}`
+        );
+      }
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'No se pudo emitir la factura en ARCA.');
+      }
+
+      const facturaNro = `FC-${String(data.puntoVenta).padStart(4, '0')}-${String(data.cbteNro).padStart(8, '0')}`;
+      const facturaId = `arca_${data.puntoVenta}_${data.tipoComprobante}_${data.cbteNro}`;
+
+      const newFactura: ArcaFacturaRecord = {
+        id: facturaId,
+        cae: data.cae,
+        caeVto: data.caeVto,
+        cbteNro: data.cbteNro,
+        puntoVenta: data.puntoVenta,
+        tipoComprobante: data.tipoComprobante,
+        tipoComprobanteNombre: data.tipoComprobanteNombre || 'FACTURA C',
+        fechaEmision: data.fechaEmision || new Date().toLocaleDateString('es-AR'),
+        fechaIso: facturarTarget.fecha || new Date().toISOString().split('T')[0],
+        total: montoNum,
+        clienteNombre: facturarForm.clienteNombre.trim() || 'Consumidor Final',
+        clienteDocTipo: facturarForm.clienteDocTipo === '96' ? 'DNI' : facturarForm.clienteDocTipo === '80' ? 'CUIT' : 'Consumidor Final',
+        clienteDocNro: facturarForm.clienteDocNro.trim() || '0',
+        clienteTelefono: facturarForm.clienteTelefono.trim(),
+        conceptoDescripcion: facturarForm.concepto,
+        qrUrl: data.qrUrl,
+        qrBase64: data.qrBase64,
+        createdAt: new Date().toISOString(),
+        movementId: facturarTarget.id
+      };
+
+      // 1. Guardar factura en colección Firestore
+      await firestoreService.saveArcaFactura(newFactura);
+
+      // 2. Actualizar movimiento en Firestore
+      const updatedMovement: Movement = {
+        ...facturarTarget,
+        factura: facturaNro,
+        facturado: true,
+        cae: data.cae,
+        caeVto: data.caeVto,
+        facturaId: facturaId,
+        cliente: facturarForm.clienteNombre.trim() || facturarTarget.cliente
+      };
+      await firestoreService.saveMovement(updatedMovement);
+
+      // 3. Actualizar estados locales reactivos
+      setAllMovements(prev => prev.map(m => m.id === facturarTarget.id ? updatedMovement : m));
+      setArcaFacturas(prev => [newFactura, ...prev.filter(f => f.id !== newFactura.id)]);
+
+      // 4. Cerrar formulario y abrir comprobante emitido
+      setFacturarTarget(null);
+      setSelectedFacturaRecord(newFactura);
+    } catch (err: any) {
+      console.error('Error emitiendo factura desde caja:', err);
+      setFacturaError(err.message || 'Error al emitir factura en ARCA');
+    } finally {
+      setIsSubmittingFactura(false);
+    }
+  };
+
+  // Abrir comprobante
+  const handleViewReceipt = (m: Movement) => {
+    const rec = getMovementFacturaRecord(m);
+    if (rec) {
+      setSelectedFacturaRecord(rec);
+    } else {
+      const nroParts = (m.factura || '').match(/\d+/g) || ['2', '1'];
+      const cbteNum = Number(nroParts[nroParts.length - 1]) || 1;
+      const ptVenta = Number(nroParts[0]) || 2;
+      const synth: ArcaFacturaRecord = {
+        id: m.facturaId || `factura_${m.id}`,
+        cae: m.cae || 'Autorizado por AFIP',
+        caeVto: m.caeVto || m.fecha,
+        cbteNro: cbteNum,
+        puntoVenta: ptVenta,
+        tipoComprobante: 11,
+        tipoComprobanteNombre: 'FACTURA C',
+        fechaEmision: m.fecha ? m.fecha.split('-').reverse().join('/') : new Date().toLocaleDateString('es-AR'),
+        fechaIso: m.fecha,
+        total: m.monto_ars,
+        clienteNombre: m.cliente || 'Consumidor Final',
+        clienteDocTipo: 'Consumidor Final',
+        clienteDocNro: '0',
+        conceptoDescripcion: m.concepto,
+        createdAt: m.fecha,
+        movementId: m.id
+      };
+      setSelectedFacturaRecord(synth);
+    }
+  };
+
+  const handlePrintReceipt = () => {
+    window.print();
+  };
+
+  const handleSendWhatsApp = (factura: ArcaFacturaRecord) => {
+    let cleanPhone = (factura.clienteTelefono || '').replace(/\D/g, '');
+    if (cleanPhone && !cleanPhone.startsWith('549') && !cleanPhone.startsWith('54')) {
+      cleanPhone = `549${cleanPhone}`;
+    }
+    const msg = `¡Hola ${factura.clienteNombre}! Te adjuntamos el comprobante fiscal oficial de tu servicio en LyS Lavados.
+📄 ${factura.tipoComprobanteNombre || 'Factura C'} Nº ${String(factura.puntoVenta).padStart(4, '0')}-${String(factura.cbteNro).padStart(8, '0')}
+💰 Total: $${Number(factura.total).toLocaleString('es-AR')}
+🔒 CAE Oficial: ${factura.cae} (Vto: ${factura.caeVto})
+${factura.qrUrl ? `🔗 Validar en ARCA/AFIP: ${factura.qrUrl}` : ''}
+¡Muchas gracias por confiar en LyS Lavados! 🚗✨`;
+    const url = cleanPhone 
+      ? `https://wa.me/${cleanPhone}?text=${encodeURIComponent(msg)}`
+      : `https://wa.me/?text=${encodeURIComponent(msg)}`;
+    window.open(url, '_blank');
+  };
 
   // Filtrado local para la tabla de Caja
   const filteredRows = useMemo(() => {
@@ -128,9 +359,11 @@ export default function AdminCaja({
       if (filterEstado && m.estado?.toLowerCase() !== filterEstado.toLowerCase()) return false;
       if (filterMedio && m.medio?.toLowerCase() !== filterMedio.toLowerCase()) return false;
       if (filterCategoria && m.categoria !== filterCategoria) return false;
+      if (filterFacturado === 'facturados' && !isMovementFacturado(m)) return false;
+      if (filterFacturado === 'sin_facturar' && isMovementFacturado(m)) return false;
       return true;
     });
-  }, [allMovements, filterFrom, filterTo, filterTipo, filterEstado, filterMedio, filterCategoria]);
+  }, [allMovements, filterFrom, filterTo, filterTipo, filterEstado, filterMedio, filterCategoria, filterFacturado, arcaFacturas]);
 
   // Totals - Ahora basados en las filas filtradas para la vista de Caja
   const totals = useMemo(() => {
@@ -176,9 +409,15 @@ export default function AdminCaja({
     setLoading(true);
     setError(null);
     try {
-      const data = await firestoreService.getMovements();
+      const [data, facturasData, configData] = await Promise.all([
+        firestoreService.getMovements(),
+        firestoreService.getArcaFacturas().catch(() => []),
+        firestoreService.getArcaConfig().catch(() => null)
+      ]);
       const sorted = data.sort((a, b) => b.fecha.localeCompare(a.fecha));
       setAllMovements(sorted);
+      if (facturasData) setArcaFacturas(facturasData);
+      if (configData) setArcaConfig(configData);
     } catch (err: any) {
       console.error('Error loading movements:', err);
       setError('Error al acceder a Caja en Firestore. Verifique sus permisos de administrador.');
@@ -1463,7 +1702,7 @@ export default function AdminCaja({
         </div>
 
         <div className="bg-zinc-900 border border-white/5 p-6 rounded-3xl mb-8">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
             <div>
               <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 block mb-2">Desde</label>
               <input type="date" value={filterFrom} onChange={e => setFilterFrom(e.target.value)} className="w-full bg-slate-950 border border-white/10 rounded-xl p-3 text-sm focus:border-emerald-500 outline-none" />
@@ -1486,6 +1725,14 @@ export default function AdminCaja({
                 <option value="">Todos</option>
                 <option value="Pagado">Pagado</option>
                 <option value="Pendiente">Pendiente</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 block mb-2">Facturación ARCA</label>
+              <select value={filterFacturado} onChange={e => setFilterFacturado(e.target.value as any)} className="w-full bg-slate-950 border border-white/10 rounded-xl p-3 text-sm focus:border-emerald-500 outline-none">
+                <option value="todos">Todos</option>
+                <option value="facturados">✓ Facturados</option>
+                <option value="sin_facturar">Sin facturar</option>
               </select>
             </div>
           </div>
@@ -1628,6 +1875,7 @@ export default function AdminCaja({
                   <th className="px-6 py-5">Monto</th>
                   <th className="px-6 py-5">Medio</th>
                   <th className="px-6 py-5">Estado</th>
+                  <th className="px-6 py-5">Facturación ARCA</th>
                   <th className="px-6 py-5">Acciones</th>
                 </tr>
               </thead>
@@ -1635,7 +1883,7 @@ export default function AdminCaja({
                 {filteredRows.map(r => (
                   <React.Fragment key={r.id}>
                     <tr className="border-b border-white/[0.02] hover:bg-white/[0.02] transition-colors">
-                      <td className="px-6 py-4 font-medium">{r.fecha}</td>
+                      <td className="px-6 py-4 font-medium whitespace-nowrap">{r.fecha}</td>
                       <td className="px-6 py-4">
                         <span className={`text-[10px] font-black uppercase tracking-tighter px-2 py-1 rounded-md ${r.tipo?.toLowerCase() === 'ingreso' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-red-500/10 text-red-500'}`}>
                           {r.tipo}
@@ -1643,12 +1891,62 @@ export default function AdminCaja({
                       </td>
                       <td className="px-6 py-4 text-zinc-400">{r.categoria}</td>
                       <td className="px-6 py-4 font-display font-black italic truncate max-w-[150px]">{r.concepto}</td>
-                      <td className="px-6 py-4 font-display font-black">{fmt(r.monto_ars)}</td>
+                      <td className="px-6 py-4 font-display font-black whitespace-nowrap">{fmt(r.monto_ars)}</td>
                       <td className="px-6 py-4 text-zinc-400 text-xs">{r.medio}</td>
                       <td className="px-6 py-4">
                         <span className={`text-[10px] font-black uppercase tracking-tighter ${r.estado?.toLowerCase() === 'pagado' ? 'text-emerald-500' : 'text-amber-500 animate-pulse'}`}>
                           {r.estado}
                         </span>
+                      </td>
+                      {/* Facturación ARCA */}
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        {isMovementFacturado(r) ? (
+                          <div className="flex items-center gap-2">
+                            <span className="inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-wider px-2.5 py-1 rounded-lg bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 shadow-sm">
+                              <CheckCircle2 className="w-3 h-3 text-emerald-400 shrink-0" />
+                              <span>Facturado</span>
+                            </span>
+                            {r.factura && (
+                              <span className="font-mono text-[11px] text-zinc-300 font-bold bg-white/5 border border-white/5 px-2 py-0.5 rounded">
+                                {r.factura}
+                              </span>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => handleViewReceipt(r)}
+                              title="Ver Comprobante Oficial AFIP / Imprimir / WhatsApp"
+                              className="p-1.5 rounded-lg bg-white/5 hover:bg-emerald-500 hover:text-slate-950 text-zinc-400 transition-all cursor-pointer"
+                            >
+                              <Printer className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-2">
+                            <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-zinc-800 text-zinc-400 border border-white/5">
+                              Sin facturar
+                            </span>
+                            {r.tipo === 'Ingreso' ? (
+                              <button
+                                type="button"
+                                onClick={() => handleOpenFacturar(r)}
+                                className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-500 hover:bg-emerald-400 text-slate-950 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all shadow-md shadow-emerald-500/10 cursor-pointer active:scale-95"
+                                title="Emitir Factura Electrónica ARCA (AFIP) oficial para este cobro"
+                              >
+                                <FileText className="w-3 h-3 text-slate-950 shrink-0" />
+                                <span>Facturar</span>
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => handleOpenFacturar(r)}
+                                className="inline-flex items-center gap-1 px-2.5 py-1 bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all cursor-pointer"
+                                title="Generar comprobante para este gasto"
+                              >
+                                <span>Facturar</span>
+                              </button>
+                            )}
+                          </div>
+                        )}
                       </td>
                       <td className="px-6 py-4">
                         <div className="flex gap-2">
@@ -1657,13 +1955,13 @@ export default function AdminCaja({
                               setEditingId(editingId === r.id ? null : r.id);
                               setEditForm(r);
                             }}
-                            className="p-2 bg-white/5 rounded-lg hover:bg-emerald-500 hover:text-night transition-all"
+                            className="p-2 bg-white/5 rounded-lg hover:bg-emerald-500 hover:text-night transition-all cursor-pointer"
                           >
                             <Edit3 className="w-4 h-4" />
                           </button>
                           <button 
                             onClick={() => setDeletingId(r.id)}
-                            className="p-2 bg-white/5 rounded-lg hover:bg-red-500 transition-all"
+                            className="p-2 bg-white/5 rounded-lg hover:bg-red-500 transition-all cursor-pointer"
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>
@@ -1672,7 +1970,7 @@ export default function AdminCaja({
                     </tr>
                     {editingId === r.id && (
                       <tr className="bg-white/[0.03]">
-                        <td colSpan={8} className="p-8">
+                        <td colSpan={9} className="p-8">
                           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
                             <div>
                               <label className="text-[10px] font-bold uppercase text-zinc-500 mb-1 block">Fecha</label>
@@ -1695,8 +1993,8 @@ export default function AdminCaja({
                             </div>
                           </div>
                           <div className="flex justify-end gap-3">
-                            <button onClick={() => setEditingId(null)} className="px-6 py-2 rounded-xl text-xs font-black uppercase text-zinc-500 hover:text-white">Cancelar</button>
-                            <button onClick={handleUpdate} className="px-8 py-2 rounded-xl bg-emerald-500 text-night text-xs font-black uppercase italic tracking-tighter">Guardar Cambios</button>
+                            <button onClick={() => setEditingId(null)} className="px-6 py-2 rounded-xl text-xs font-black uppercase text-zinc-500 hover:text-white cursor-pointer">Cancelar</button>
+                            <button onClick={handleUpdate} className="px-8 py-2 rounded-xl bg-emerald-500 text-night text-xs font-black uppercase italic tracking-tighter cursor-pointer">Guardar Cambios</button>
                           </div>
                         </td>
                       </tr>
@@ -1705,12 +2003,12 @@ export default function AdminCaja({
                 ))}
                 {!filteredRows.length && !loading && (
                   <tr>
-                    <td colSpan={8} className="px-6 py-12 text-center text-zinc-500 italic">No se encontraron movimientos para este periodo</td>
+                    <td colSpan={9} className="px-6 py-12 text-center text-zinc-500 italic">No se encontraron movimientos para este periodo</td>
                   </tr>
                 )}
                 {loading && (
                   <tr>
-                    <td colSpan={8} className="px-6 py-12 text-center text-zinc-500 italic">Cargando datos...</td>
+                    <td colSpan={9} className="px-6 py-12 text-center text-zinc-500 italic">Cargando datos...</td>
                   </tr>
                 )}
               </tbody>
@@ -1720,6 +2018,310 @@ export default function AdminCaja({
       </>
     )}
       </div>
+
+      {/* MODAL: FACTURAR MOVIMIENTO DIRECTO EN ARCA */}
+      {facturarTarget && (
+        <div className="fixed inset-0 z-[450] flex items-center justify-center bg-black/80 backdrop-blur-md p-4 overflow-y-auto">
+          <div className="bg-zinc-950 border border-emerald-500/30 rounded-3xl max-w-xl w-full p-6 md:p-8 space-y-6 shadow-2xl relative my-8 animate-fade-in">
+            {/* Header */}
+            <div className="flex items-start justify-between border-b border-white/10 pb-4">
+              <div>
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="bg-emerald-500/20 text-emerald-400 text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full border border-emerald-500/30">
+                    ARCA / AFIP OFICIAL
+                  </span>
+                  <span className="text-zinc-500 text-xs font-mono">P.V. {String(facturarForm.puntoVenta).padStart(4, '0')}</span>
+                </div>
+                <h3 className="text-lg md:text-xl font-display font-black italic text-white flex items-center gap-2">
+                  <FileText className="w-5 h-5 text-emerald-400" />
+                  EMITIR FACTURA ELECTRÓNICA
+                </h3>
+                <p className="text-zinc-400 text-xs mt-0.5">
+                  Movimiento de Caja ({facturarTarget.fecha}) · {facturarTarget.tipo} ({facturarTarget.categoria})
+                </p>
+              </div>
+              <button 
+                type="button"
+                onClick={() => setFacturarTarget(null)}
+                disabled={isSubmittingFactura}
+                className="text-zinc-500 hover:text-white p-1 rounded-lg cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {facturaError && (
+              <div className="p-4 bg-rose-500/10 border border-rose-500/20 text-rose-400 rounded-2xl text-xs flex items-center gap-2.5 animate-fade-in">
+                <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
+                <span>{facturaError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleEmitirFacturaMovimiento} className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 mb-1.5 block">Tipo de Factura</label>
+                  <select
+                    value={facturarForm.tipoComprobante}
+                    onChange={e => setFacturarForm({ ...facturarForm, tipoComprobante: Number(e.target.value) })}
+                    className="w-full bg-slate-950 border border-white/10 rounded-xl p-3 text-sm text-white focus:outline-none focus:border-emerald-500"
+                  >
+                    <option value={11}>Factura C (Monotributo)</option>
+                    <option value={6}>Factura B (Resp. Inscripto a Consumidor Final)</option>
+                    <option value={1}>Factura A (Resp. Inscripto a Empresa)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 mb-1.5 block">Monto a Facturar ($ ARS)</label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-3 text-zinc-500 font-bold">$</span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      required
+                      value={facturarForm.montoTotal}
+                      onChange={e => setFacturarForm({ ...facturarForm, montoTotal: e.target.value })}
+                      placeholder="0.00"
+                      className="w-full bg-slate-950 border border-white/10 rounded-xl p-3 pl-8 text-sm font-bold text-emerald-400 focus:outline-none focus:border-emerald-500 font-mono"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 mb-1.5 block">Descripción del Servicio / Concepto</label>
+                <input
+                  type="text"
+                  required
+                  value={facturarForm.concepto}
+                  onChange={e => setFacturarForm({ ...facturarForm, concepto: e.target.value })}
+                  placeholder="Detalle del trabajo..."
+                  className="w-full bg-slate-950 border border-white/10 rounded-xl p-3 text-sm text-white focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 mb-1.5 block">Cliente / Receptor</label>
+                  <input
+                    type="text"
+                    value={facturarForm.clienteNombre}
+                    onChange={e => setFacturarForm({ ...facturarForm, clienteNombre: e.target.value })}
+                    placeholder="Consumidor Final"
+                    className="w-full bg-slate-950 border border-white/10 rounded-xl p-3 text-sm text-white focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 mb-1.5 block">Documento Fiscal</label>
+                  <div className="flex gap-2">
+                    <select
+                      value={facturarForm.clienteDocTipo}
+                      onChange={e => setFacturarForm({ ...facturarForm, clienteDocTipo: e.target.value })}
+                      className="w-1/3 bg-slate-950 border border-white/10 rounded-xl p-3 text-sm text-white focus:outline-none focus:border-emerald-500 text-xs"
+                    >
+                      <option value="99">CF (Sin Doc)</option>
+                      <option value="96">DNI</option>
+                      <option value="80">CUIT</option>
+                    </select>
+                    <input
+                      type="text"
+                      disabled={facturarForm.clienteDocTipo === '99'}
+                      value={facturarForm.clienteDocNro}
+                      onChange={e => setFacturarForm({ ...facturarForm, clienteDocNro: e.target.value })}
+                      placeholder={facturarForm.clienteDocTipo === '99' ? 'Consumidor Final' : 'Nº de Documento'}
+                      className="w-2/3 bg-slate-950 border border-white/10 rounded-xl p-3 text-sm text-white focus:outline-none focus:border-emerald-500 disabled:opacity-40"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 mb-1.5 block">Teléfono WhatsApp del Cliente (Opcional)</label>
+                <input
+                  type="tel"
+                  value={facturarForm.clienteTelefono}
+                  onChange={e => setFacturarForm({ ...facturarForm, clienteTelefono: e.target.value })}
+                  placeholder="299 1234567"
+                  className="w-full bg-slate-950 border border-white/10 rounded-xl p-3 text-sm text-white focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              <div className="bg-emerald-950/20 border border-emerald-500/20 p-3.5 rounded-2xl text-[11px] text-zinc-300 flex items-start gap-2.5">
+                <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                <span>
+                  Al hacer clic en emitir, el sistema solicitará en tiempo real el <strong className="text-white">CAE oficial a ARCA</strong> y asociará la factura directamente a este movimiento de caja.
+                </span>
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-4 border-t border-white/10">
+                <button
+                  type="button"
+                  onClick={() => setFacturarTarget(null)}
+                  disabled={isSubmittingFactura}
+                  className="px-5 py-2.5 rounded-xl text-xs font-bold text-zinc-400 hover:text-white cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmittingFactura}
+                  className="bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 font-display font-black italic text-sm px-7 py-3 rounded-xl shadow-lg shadow-emerald-500/20 flex items-center gap-2 cursor-pointer transition-all active:scale-95"
+                >
+                  {isSubmittingFactura ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin text-slate-950" />
+                      <span>AUTORIZANDO CON ARCA...</span>
+                    </>
+                  ) : (
+                    <>
+                      <FileText className="w-4 h-4" />
+                      <span>AUTORIZAR Y EMITIR FACTURA</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: VER COMPROBANTE OFICIAL ARCA CON QR / IMPRIMIR / WHATSAPP */}
+      {selectedFacturaRecord && (
+        <div className="fixed inset-0 z-[500] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-zinc-950 border border-white/10 rounded-2xl md:rounded-3xl max-w-2xl w-full p-6 md:p-8 space-y-6 shadow-2xl relative my-8 animate-fade-in">
+            {/* Modal actions bar */}
+            <div className="flex items-center justify-between border-b border-white/10 pb-4 print:hidden">
+              <div className="flex items-center gap-2">
+                <span className="bg-emerald-500/20 text-emerald-400 text-[10px] font-black uppercase px-2.5 py-1 rounded-full border border-emerald-500/30 flex items-center gap-1.5">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                  Comprobante Autorizado por ARCA
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handlePrintReceipt}
+                  className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs px-3.5 py-1.5 rounded-lg flex items-center gap-1.5 cursor-pointer shadow-md shadow-emerald-500/10"
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                  <span>Imprimir</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSendWhatsApp(selectedFacturaRecord)}
+                  className="bg-white/10 hover:bg-white/20 text-white font-bold text-xs px-3.5 py-1.5 rounded-lg flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Send className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>WhatsApp</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedFacturaRecord(null)}
+                  className="text-zinc-400 hover:text-white p-1 rounded cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* PRINTABLE RECEIPT TEMPLATE */}
+            <div id="printable-caja-receipt" className="bg-white text-black p-6 md:p-8 rounded-xl font-sans text-xs space-y-6 border border-zinc-200">
+              {/* Header */}
+              <div className="grid grid-cols-12 gap-2 border-b-2 border-black pb-4 relative">
+                <div className="col-span-5 space-y-1">
+                  <h1 className="text-xl font-black tracking-tight">{arcaConfig?.razonSocial || 'LyS Lavados'}</h1>
+                  <p className="text-[10px] text-zinc-600">Estética Automotriz y Lavado Artesanal</p>
+                  <p className="text-[10px] text-zinc-700">{arcaConfig?.domicilioComercial || 'Venezuela 1659, Cipolletti, Río Negro'}</p>
+                  <p className="text-[10px] font-bold">Condición IVA: {arcaConfig?.condicionIva || 'Responsable Monotributo'}</p>
+                </div>
+
+                {/* Center Badge "C" */}
+                <div className="col-span-2 flex flex-col items-center justify-center border border-black rounded p-1">
+                  <span className="text-3xl font-black">C</span>
+                  <span className="text-[8px] font-bold uppercase tracking-wider">CÓD. 011</span>
+                </div>
+
+                <div className="col-span-5 text-right space-y-1">
+                  <h2 className="text-base font-black uppercase">{selectedFacturaRecord.tipoComprobanteNombre || 'FACTURA C'}</h2>
+                  <p className="font-mono text-xs font-bold">
+                    Punto de Venta: {String(selectedFacturaRecord.puntoVenta).padStart(4, '0')} Comp. Nro: {String(selectedFacturaRecord.cbteNro).padStart(8, '0')}
+                  </p>
+                  <p className="text-[10px]">Fecha de Emisión: <strong>{selectedFacturaRecord.fechaEmision}</strong></p>
+                  <p className="text-[10px] font-mono">CUIT Emisor: <strong>20-41156455-0</strong></p>
+                </div>
+              </div>
+
+              {/* Client details */}
+              <div className="bg-zinc-100 p-3 rounded space-y-1 border border-zinc-200 text-[11px]">
+                <div className="grid grid-cols-2 gap-2">
+                  <div><strong>Cliente / Razón Social:</strong> {selectedFacturaRecord.clienteNombre}</div>
+                  <div><strong>Condición IVA:</strong> Consumidor Final</div>
+                  <div><strong>Documento:</strong> {selectedFacturaRecord.clienteDocTipo}: {selectedFacturaRecord.clienteDocNro}</div>
+                  <div><strong>Condición de Venta:</strong> Contado / Efectivo / Transferencia</div>
+                </div>
+              </div>
+
+              {/* Items Table */}
+              <div>
+                <table className="w-full text-left text-xs border border-zinc-300">
+                  <thead className="bg-zinc-100 border-b border-zinc-300 font-bold text-[10px] uppercase">
+                    <tr>
+                      <th className="p-2">Descripción del Servicio</th>
+                      <th className="p-2 text-center">Cant.</th>
+                      <th className="p-2 text-right">Precio Unit.</th>
+                      <th className="p-2 text-right">Subtotal</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr className="border-b border-zinc-200">
+                      <td className="p-2 font-medium">{selectedFacturaRecord.conceptoDescripcion}</td>
+                      <td className="p-2 text-center">1</td>
+                      <td className="p-2 text-right font-mono">${selectedFacturaRecord.total.toLocaleString('es-AR')}</td>
+                      <td className="p-2 text-right font-mono font-bold">${selectedFacturaRecord.total.toLocaleString('es-AR')}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Total */}
+              <div className="flex justify-end border-t border-black pt-2">
+                <div className="text-right space-y-1">
+                  <div className="text-sm font-black flex items-center gap-6 justify-between">
+                    <span>TOTAL A PAGAR:</span>
+                    <span className="font-mono text-base font-bold">${selectedFacturaRecord.total.toLocaleString('es-AR')}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* ARCA Official Footer with QR and CAE */}
+              <div className="border-t-2 border-black pt-4 flex flex-col sm:flex-row items-center justify-between gap-4">
+                <div className="flex items-center gap-4">
+                  {selectedFacturaRecord.qrBase64 && (
+                    <img 
+                      src={selectedFacturaRecord.qrBase64} 
+                      alt="Código QR ARCA" 
+                      className="w-24 h-24 border border-zinc-300 p-1 rounded" 
+                    />
+                  )}
+                  <div className="space-y-1 text-[10px]">
+                    <div className="font-black text-xs text-zinc-900 flex items-center gap-1.5">
+                      <ShieldCheck className="w-4 h-4 text-emerald-600 inline" /> Comprobante Autorizado por ARCA
+                    </div>
+                    <p className="text-zinc-600">Escanea el código QR con cualquier celular para validar la autenticidad fiscal de este comprobante en AFIP.</p>
+                  </div>
+                </div>
+
+                <div className="text-right space-y-1 font-mono text-[11px] bg-zinc-50 p-2.5 rounded border border-zinc-200">
+                  <div><strong>CAE Oficial:</strong> <span className="text-black font-black text-xs">{selectedFacturaRecord.cae}</span></div>
+                  <div><strong>Fecha de Vto. CAE:</strong> {selectedFacturaRecord.caeVto}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Delete Modal */}
       {deletingId && (

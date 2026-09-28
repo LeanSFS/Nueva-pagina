@@ -143,6 +143,10 @@ export interface Movement {
   factura: string;
   cliente: string;
   notas: string;
+  cae?: string;
+  caeVto?: string;
+  facturado?: boolean;
+  facturaId?: string;
 }
 
 export interface CatalogService {
