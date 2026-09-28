@@ -160,8 +160,10 @@ export default function AdminCaja({
     cliente: '',
     notes: ''
   });
+  const [emitirFacturaArca, setEmitirFacturaArca] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [altaSuccess, setAltaSuccess] = useState(false);
+  const [arcaSuccessMessage, setArcaSuccessMessage] = useState<string | null>(null);
 
   // Edit state
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -202,9 +204,71 @@ export default function AdminCaja({
     }
     setSubmitting(true);
     setAltaSuccess(false);
+    setArcaSuccessMessage(null);
     setError(null);
     try {
       const movementId = `mov_${Date.now()}_generic`;
+      let facturaNro = newMovement.factura || '';
+
+      // Si tiene activado emitir Factura Electrónica ARCA
+      if (emitirFacturaArca && newMovement.tipo === 'Ingreso') {
+        try {
+          const arcaConfig = await firestoreService.getArcaConfig();
+          const arcaRes = await fetch('/api/arca/emitir', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              cuit: arcaConfig.cuit || '20411564550',
+              puntoVenta: arcaConfig.puntoVenta || 2,
+              tipoComprobante: arcaConfig.tipoComprobanteDefault || 11, // Factura C
+              concepto: 2, // Servicios
+              docTipo: 99, // Consumidor Final
+              docNro: '0',
+              total: Number(newMovement.monto) || 0,
+              clienteNombre: newMovement.cliente?.trim() || 'Consumidor Final',
+              descripcionServicio: newMovement.concepto,
+              production: arcaConfig.production !== false
+            })
+          });
+
+          const ct = arcaRes.headers.get('content-type') || '';
+          if (ct.includes('application/json')) {
+            const arcaData = await arcaRes.json();
+            if (arcaRes.ok && arcaData.success) {
+              facturaNro = `FC-${String(arcaData.puntoVenta).padStart(4, '0')}-${String(arcaData.cbteNro).padStart(8, '0')}`;
+              setArcaSuccessMessage(`¡Factura Electrónica emitida con éxito en ARCA! ${facturaNro} (CAE: ${arcaData.cae})`);
+
+              // Guardar registro en colección facturas
+              await firestoreService.saveArcaFactura({
+                id: `arca_${arcaData.puntoVenta}_${arcaData.tipoComprobante}_${arcaData.cbteNro}`,
+                cae: arcaData.cae,
+                caeVto: arcaData.caeVto,
+                cbteNro: arcaData.cbteNro,
+                puntoVenta: arcaData.puntoVenta,
+                tipoComprobante: arcaData.tipoComprobante,
+                tipoComprobanteNombre: arcaData.tipoComprobanteNombre || 'FACTURA C',
+                fechaEmision: arcaData.fechaEmision || new Date().toLocaleDateString('es-AR'),
+                fechaIso: newMovement.fecha,
+                total: Number(newMovement.monto) || 0,
+                clienteNombre: newMovement.cliente?.trim() || 'Consumidor Final',
+                clienteDocTipo: 'Consumidor Final',
+                clienteDocNro: '0',
+                conceptoDescripcion: newMovement.concepto,
+                qrUrl: arcaData.qrUrl,
+                qrBase64: arcaData.qrBase64,
+                createdAt: new Date().toISOString(),
+                movementId: movementId
+              });
+            } else {
+              console.warn('Error emitiendo factura ARCA:', arcaData.error);
+              setError(`El movimiento se guardará, pero ARCA reportó: ${arcaData.error}`);
+            }
+          }
+        } catch (arcaErr: any) {
+          console.warn('Fallo al contactar ARCA:', arcaErr);
+          setError(`Movimiento guardado, pero ocurrió un aviso en ARCA: ${arcaErr.message}`);
+        }
+      }
 
       const val: Movement = {
         id: movementId,
@@ -215,7 +279,7 @@ export default function AdminCaja({
         monto_ars: Number(newMovement.monto) || 0,
         medio: newMovement.medio,
         estado: newMovement.estado as 'Pagado' | 'Pendiente',
-        factura: newMovement.factura || '',
+        factura: facturaNro,
         cliente: newMovement.cliente || '',
         notas: newMovement.notes || ''
       };
@@ -1498,14 +1562,54 @@ export default function AdminCaja({
               <input value={newMovement.cliente} onChange={e => setNewMovement({...newMovement, cliente: e.target.value})} placeholder="Cliente opcional" className="w-full bg-slate-950 border border-emerald-500/10 rounded-xl p-3 text-sm" />
             </div>
           </div>
-          <div className="mt-8 flex items-center justify-end gap-6">
-            {altaSuccess && <p className="text-emerald-500 font-black text-xs uppercase tracking-widest animate-fade-in">¡Agregado con éxito!</p>}
+
+          {/* Switch de Facturación Electrónica ARCA */}
+          {newMovement.tipo === 'Ingreso' && (
+            <div className="mt-6 pt-5 border-t border-emerald-500/10 flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-emerald-950/20 p-4 rounded-2xl border">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 shrink-0">
+                  <FileText className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-white uppercase tracking-wider">Emitir Factura Electrónica ARCA Automática</span>
+                    <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">Factura C</span>
+                  </div>
+                  <p className="text-[11px] text-zinc-400">Genera el comprobante oficial en AFIP con CAE y código QR al presionar Guardar.</p>
+                </div>
+              </div>
+
+              <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                <input 
+                  type="checkbox" 
+                  checked={emitirFacturaArca} 
+                  onChange={(e) => setEmitirFacturaArca(e.target.checked)} 
+                  className="sr-only peer"
+                />
+                <div className="w-11 h-6 bg-zinc-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-zinc-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500"></div>
+                <span className="ml-3 text-xs font-bold uppercase tracking-wider text-emerald-400">
+                  {emitirFacturaArca ? 'ACTIVADA' : 'DESACTIVADA'}
+                </span>
+              </label>
+            </div>
+          )}
+
+          <div className="mt-8 flex flex-col sm:flex-row items-center justify-end gap-6">
+            {arcaSuccessMessage && (
+              <p className="text-emerald-400 font-bold text-xs flex items-center gap-1.5 animate-fade-in bg-emerald-500/10 border border-emerald-500/20 px-3 py-1.5 rounded-xl">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                {arcaSuccessMessage}
+              </p>
+            )}
+            {altaSuccess && !arcaSuccessMessage && (
+              <p className="text-emerald-500 font-black text-xs uppercase tracking-widest animate-fade-in">¡Agregado con éxito!</p>
+            )}
             <button 
               disabled={submitting}
               onClick={handleAdd}
-              className="bg-emerald-500 text-night px-12 py-4 rounded-2xl font-display font-black italic text-lg hover:bg-emerald-400 transition-all disabled:opacity-50"
+              className="w-full sm:w-auto bg-emerald-500 text-night px-12 py-4 rounded-2xl font-display font-black italic text-lg hover:bg-emerald-400 transition-all disabled:opacity-50 cursor-pointer shadow-lg shadow-emerald-500/10"
             >
-              {submitting ? 'CARGANDO...' : 'CARGAR MOVIMIENTO'}
+              {submitting ? 'PROCESANDO...' : emitirFacturaArca && newMovement.tipo === 'Ingreso' ? 'CARGAR Y EMITIR FACTURA' : 'CARGAR MOVIMIENTO'}
             </button>
           </div>
         </div>

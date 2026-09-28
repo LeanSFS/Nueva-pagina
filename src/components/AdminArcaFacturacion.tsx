@@ -193,6 +193,16 @@ export default function AdminArcaFacturacion({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ production: config.production })
       });
+      
+      const contentType = res.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) {
+        const text = await res.text();
+        if (text.includes('<!DOCTYPE') || text.includes('<html')) {
+          throw new Error('El servidor web en este dominio es estático o no tiene habilitada la ruta Node.js (/api/arca/test-auth). Si estás probando en el dominio de producción, asegúrate de que el backend Node esté corriendo en el servidor.');
+        }
+        throw new Error(`Respuesta inesperada del servidor: ${text.slice(0, 150)}`);
+      }
+
       const data = await res.json();
 
       if (!res.ok || !data.success) {
@@ -214,7 +224,8 @@ export default function AdminArcaFacturacion({
     setLoadingLastVoucher(true);
     try {
       const res = await fetch(`/api/arca/ultimo-comprobante?cuit=${config.cuit}&puntoVenta=${config.puntoVenta}&tipoComprobante=${formInvoice.tipoComprobante}&production=${config.production}`);
-      if (res.ok) {
+      const contentType = res.headers.get('content-type') || '';
+      if (res.ok && contentType.includes('application/json')) {
         const data = await res.json();
         setLastVoucher(data.ultimoComprobante);
       }
@@ -352,6 +363,15 @@ export default function AdminArcaFacturacion({
           production: config.production
         })
       });
+
+      const contentType = res.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) {
+        const text = await res.text();
+        throw new Error(text.includes('<html') 
+          ? 'El servidor web no tiene activo el backend Node.js (/api/arca/emitir).'
+          : `Respuesta no esperada del servidor: ${text.slice(0, 150)}`
+        );
+      }
 
       const data = await res.json();
 
