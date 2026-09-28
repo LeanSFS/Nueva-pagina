@@ -1261,7 +1261,7 @@ export const firestoreService = {
       inicioActividades: '01/01/2024',
       condicionIva: 'Responsable Monotributo',
       production: true,
-      apiHost: 'https://nueva-pagina.onrender.com'
+      apiHost: ''
     };
 
     try {
@@ -1294,7 +1294,13 @@ export const firestoreService = {
     const serverFacturas: ArcaFacturaRecord[] = [];
     try {
       const cfg = await this.getArcaConfig().catch(() => null);
-      const base = cfg?.apiHost?.trim().replace(/\/$/, '') || '';
+      let base = cfg?.apiHost?.trim().replace(/\/$/, '') || '';
+      if (!base && typeof window !== 'undefined') {
+        const host = window.location.hostname;
+        if (!host.includes('localhost') && !host.includes('127.0.0.1') && !host.includes('run.app')) {
+          base = 'https://ais-pre-xhi2yqr5a2veqlnfganuuf-12804574784.us-east1.run.app';
+        }
+      }
       const endpoint = base ? `${base}/api/arca/facturas` : '/api/arca/facturas';
       const res = await fetch(endpoint).catch(() => null);
       if (res && res.ok) {

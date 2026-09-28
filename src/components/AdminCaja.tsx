@@ -230,7 +230,13 @@ export default function AdminCaja({
 
     try {
       const cfg = arcaConfig || await firestoreService.getArcaConfig();
-      const base = cfg.apiHost?.trim().replace(/\/$/, '') || '';
+      let base = cfg.apiHost?.trim().replace(/\/$/, '') || '';
+      if (!base && typeof window !== 'undefined') {
+        const host = window.location.hostname;
+        if (!host.includes('localhost') && !host.includes('127.0.0.1') && !host.includes('run.app')) {
+          base = 'https://ais-pre-xhi2yqr5a2veqlnfganuuf-12804574784.us-east1.run.app';
+        }
+      }
       const endpoint = base ? `${base}/api/arca/emitir` : '/api/arca/emitir';
 
       const res = await fetch(endpoint, {

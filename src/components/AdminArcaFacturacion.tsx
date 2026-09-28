@@ -123,9 +123,25 @@ export default function AdminArcaFacturacion({
   // Tutorial / Instructions accordion
   const [showTutorial, setShowTutorial] = useState(false);
 
+  // Production Applet Backend URL running the Node/Express server with ARCA certificates
+  const RUN_APP_BACKEND = 'https://ais-pre-xhi2yqr5a2veqlnfganuuf-12804574784.us-east1.run.app';
+
   // Helper to build API URLs with custom backend support
   const getApiUrl = (endpoint: string) => {
-    const base = config.apiHost?.trim().replace(/\/$/, '') || '';
+    let base = config.apiHost?.trim().replace(/\/$/, '') || '';
+    
+    // If not set, check if we are on a static host (GitHub Pages, custom static domain like lyslavados.com)
+    if (!base && typeof window !== 'undefined') {
+      const host = window.location.hostname;
+      const isLocal = host.includes('localhost') || host === '127.0.0.1';
+      const isRunApp = host.includes('run.app');
+      
+      // If user is accessing from static custom domain (lyslavados.com or github.io), route to active cloud run backend
+      if (!isLocal && !isRunApp) {
+        base = RUN_APP_BACKEND;
+      }
+    }
+
     return `${base}${endpoint}`;
   };
 
