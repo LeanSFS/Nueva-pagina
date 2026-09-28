@@ -44,6 +44,7 @@ export interface ArcaConfig {
   inicioActividades: string;
   condicionIva: string; // 'Responsable Monotributo'
   production: boolean;
+  apiHost?: string; // Optional custom Node.js backend URL (e.g. if frontend is on GitHub Pages or custom domain)
 }
 
 export interface ArcaFacturaRecord {

@@ -214,7 +214,8 @@ export default function AdminCaja({
       if (emitirFacturaArca && newMovement.tipo === 'Ingreso') {
         try {
           const arcaConfig = await firestoreService.getArcaConfig();
-          const arcaRes = await fetch('/api/arca/emitir', {
+          const base = arcaConfig.apiHost?.trim().replace(/\/$/, '') || '';
+          const arcaRes = await fetch(`${base}/api/arca/emitir`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({

@@ -123,6 +123,12 @@ export default function AdminArcaFacturacion({
   // Tutorial / Instructions accordion
   const [showTutorial, setShowTutorial] = useState(false);
 
+  // Helper to build API URLs with custom backend support
+  const getApiUrl = (endpoint: string) => {
+    const base = config.apiHost?.trim().replace(/\/$/, '') || '';
+    return `${base}${endpoint}`;
+  };
+
   useEffect(() => {
     loadInitialData();
   }, []);
@@ -153,7 +159,7 @@ export default function AdminArcaFacturacion({
 
   const checkCertInfo = async () => {
     try {
-      const res = await fetch('/api/arca/cert-info');
+      const res = await fetch(getApiUrl('/api/arca/cert-info'));
       if (res.ok) {
         const data = await res.json();
         setCertInfo(data);
@@ -166,7 +172,7 @@ export default function AdminArcaFacturacion({
   const checkArcaStatus = async () => {
     setLoadingStatus(true);
     try {
-      const res = await fetch(`/api/arca/status?production=${config.production}`);
+      const res = await fetch(getApiUrl(`/api/arca/status?production=${config.production}`));
       if (res.ok) {
         const data = await res.json();
         setServerStatus({
@@ -188,7 +194,7 @@ export default function AdminArcaFacturacion({
     setAuthError(null);
     setAuthSuccess(null);
     try {
-      const res = await fetch('/api/arca/test-auth', {
+      const res = await fetch(getApiUrl('/api/arca/test-auth'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ production: config.production })
@@ -198,7 +204,7 @@ export default function AdminArcaFacturacion({
       if (!contentType.includes('application/json')) {
         const text = await res.text();
         if (text.includes('<!DOCTYPE') || text.includes('<html')) {
-          throw new Error('El servidor web en este dominio es estático o no tiene habilitada la ruta Node.js (/api/arca/test-auth). Si estás probando en el dominio de producción, asegúrate de que el backend Node esté corriendo en el servidor.');
+          throw new Error('El servidor web en este dominio es un hosting estático (como GitHub Pages o Vercel estático) y no tiene activa la ruta Node.js (/api/arca/test-auth). Si tienes tu backend corriendo en Render/Railway/VPS o tu URL de applet, puedes configurar la URL del Backend en la tarjeta "Servidor Backend ARCA" más abajo.');
         }
         throw new Error(`Respuesta inesperada del servidor: ${text.slice(0, 150)}`);
       }
@@ -223,7 +229,7 @@ export default function AdminArcaFacturacion({
   const fetchLastVoucher = async () => {
     setLoadingLastVoucher(true);
     try {
-      const res = await fetch(`/api/arca/ultimo-comprobante?cuit=${config.cuit}&puntoVenta=${config.puntoVenta}&tipoComprobante=${formInvoice.tipoComprobante}&production=${config.production}`);
+      const res = await fetch(getApiUrl(`/api/arca/ultimo-comprobante?cuit=${config.cuit}&puntoVenta=${config.puntoVenta}&tipoComprobante=${formInvoice.tipoComprobante}&production=${config.production}`));
       const contentType = res.headers.get('content-type') || '';
       if (res.ok && contentType.includes('application/json')) {
         const data = await res.json();
@@ -244,7 +250,7 @@ export default function AdminArcaFacturacion({
 
     setSavingCerts(true);
     try {
-      const res = await fetch('/api/arca/save-certs', {
+      const res = await fetch(getApiUrl('/api/arca/save-certs'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -273,7 +279,7 @@ export default function AdminArcaFacturacion({
     setGeneratingCsr(true);
     setCsrMessage(null);
     try {
-      const res = await fetch('/api/arca/generate-csr', {
+      const res = await fetch(getApiUrl('/api/arca/generate-csr'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -346,7 +352,7 @@ export default function AdminArcaFacturacion({
     setIsSubmittingInvoice(true);
 
     try {
-      const res = await fetch('/api/arca/emitir', {
+      const res = await fetch(getApiUrl('/api/arca/emitir'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -621,6 +627,31 @@ export default function AdminArcaFacturacion({
                 className="text-[10px] bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white px-2 py-0.5 rounded cursor-pointer transition-all"
               >
                 Cambiar
+              </button>
+            </div>
+          </div>
+
+          <div className="bg-slate-950/60 p-4 rounded-xl border border-white/5">
+            <div className="text-[10px] font-black uppercase tracking-wider text-zinc-500 mb-1">Servidor Backend ARCA</div>
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-zinc-300 font-mono text-xs truncate max-w-[140px]" title={config.apiHost || 'Mismo Dominio (Local / Dev)'}>
+                {config.apiHost ? config.apiHost.replace(/^https?:\/\//, '') : 'Mismo Dominio'}
+              </span>
+              <button
+                type="button"
+                onClick={async () => {
+                  const nuevo = prompt('URL del backend Node.js (deja vacío para usar el mismo dominio o pega ej: https://ais-dev-...run.app):', config.apiHost || '');
+                  if (nuevo !== null) {
+                    const updated = { ...config, apiHost: nuevo.trim() };
+                    setConfig(updated);
+                    await firestoreService.saveArcaConfig(updated);
+                    checkCertInfo();
+                    checkArcaStatus();
+                  }
+                }}
+                className="text-[10px] bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded cursor-pointer transition-all shrink-0"
+              >
+                {config.apiHost ? 'Modificar' : 'Configurar URL'}
               </button>
             </div>
           </div>
