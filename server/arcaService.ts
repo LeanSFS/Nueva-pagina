@@ -1,8 +1,65 @@
 import fs from 'fs';
 import path from 'path';
+import https from 'https';
 import { execSync } from 'child_process';
 import { XMLParser } from 'fast-xml-parser';
 import QRCode from 'qrcode';
+
+// AFIP legacy servers require DEFAULT:@SECLEVEL=0 for Diffie-Hellman handshake
+const afipHttpsAgent = new https.Agent({
+  ciphers: 'DEFAULT:@SECLEVEL=0',
+  minVersion: 'TLSv1',
+  rejectUnauthorized: false
+});
+
+/**
+ * Execute SOAP POST request compatible with AFIP servers
+ */
+async function afipSoapPost(url: string, soapBody: string, soapAction: string = ''): Promise<string> {
+  return new Promise((resolve, reject) => {
+    try {
+      const parsedUrl = new URL(url);
+      const req = https.request(
+        {
+          hostname: parsedUrl.hostname,
+          port: parsedUrl.port || 443,
+          path: parsedUrl.pathname + parsedUrl.search,
+          method: 'POST',
+          agent: afipHttpsAgent,
+          headers: {
+            'Content-Type': 'text/xml; charset=utf-8',
+            'SOAPAction': soapAction,
+            'Content-Length': Buffer.byteLength(soapBody, 'utf8')
+          },
+          timeout: 15000
+        },
+        (res) => {
+          let data = '';
+          res.on('data', (chunk) => {
+            data += chunk;
+          });
+          res.on('end', () => {
+            resolve(data);
+          });
+        }
+      );
+
+      req.on('error', (err) => {
+        reject(err);
+      });
+
+      req.on('timeout', () => {
+        req.destroy();
+        reject(new Error('Tiempo de espera agotado al conectar con AFIP/ARCA (timeout)'));
+      });
+
+      req.write(soapBody);
+      req.end();
+    } catch (e) {
+      reject(e);
+    }
+  });
+}
 
 const CERTS_DIR = path.join(process.cwd(), 'certs');
 const CERT_FILE = path.join(CERTS_DIR, 'arca.crt');
@@ -245,21 +302,12 @@ export class ArcaService {
 </soap:Envelope>`;
 
     try {
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'text/xml; charset=utf-8',
-          'SOAPAction': 'http://ar.gov.afip.dif.FEV1/FEDummy'
-        },
-        body: soapBody
-      });
-
-      const xmlText = await res.text();
+      const xmlText = await afipSoapPost(url, soapBody, 'http://ar.gov.afip.dif.FEV1/FEDummy');
       const parsed = parser.parse(xmlText);
       const dummyResult = parsed?.Envelope?.Body?.FEDummyResponse?.FEDummyResult;
 
       return {
-        online: res.ok && dummyResult?.AppServer === 'OK',
+        online: dummyResult?.AppServer === 'OK',
         appServer: dummyResult?.AppServer || 'Desconocido',
         dbServer: dummyResult?.DbServer || 'Desconocido',
         authServer: dummyResult?.AuthServer || 'Desconocido',
@@ -368,18 +416,9 @@ export class ArcaService {
   </soapenv:Body>
 </soapenv:Envelope>`;
 
-    const wsaaRes = await fetch(wsaaUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'text/xml; charset=utf-8',
-        'SOAPAction': ''
-      },
-      body: soapEnvelope
-    });
+    const wsaaText = await afipSoapPost(wsaaUrl, soapEnvelope, '');
 
-    const wsaaText = await wsaaRes.text();
-
-    if (!wsaaRes.ok || wsaaText.includes('faultstring')) {
+    if (wsaaText.includes('faultstring')) {
       const faultParsed = parser.parse(wsaaText);
       const faultStr = faultParsed?.Envelope?.Body?.Fault?.faultstring || wsaaText;
       throw new Error(`Error de autenticación ARCA (WSAA): ${faultStr}`);
@@ -441,16 +480,7 @@ export class ArcaService {
   </soap:Body>
 </soap:Envelope>`;
 
-    const res = await fetch(wsfeUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'text/xml; charset=utf-8',
-        'SOAPAction': 'http://ar.gov.afip.dif.FEV1/FECompUltimoAutorizado'
-      },
-      body: soapBody
-    });
-
-    const text = await res.text();
+    const text = await afipSoapPost(wsfeUrl, soapBody, 'http://ar.gov.afip.dif.FEV1/FECompUltimoAutorizado');
     const parsed = parser.parse(text);
     const result = parsed?.Envelope?.Body?.FECompUltimoAutorizadoResponse?.FECompUltimoAutorizadoResult;
 
@@ -546,16 +576,7 @@ export class ArcaService {
   </soap:Body>
 </soap:Envelope>`;
 
-    const res = await fetch(wsfeUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'text/xml; charset=utf-8',
-        'SOAPAction': 'http://ar.gov.afip.dif.FEV1/FECAESolicitar'
-      },
-      body: soapBody
-    });
-
-    const text = await res.text();
+    const text = await afipSoapPost(wsfeUrl, soapBody, 'http://ar.gov.afip.dif.FEV1/FECAESolicitar');
     const parsed = parser.parse(text);
     const caeResult = parsed?.Envelope?.Body?.FECAESolicitarResponse?.FECAESolicitarResult;
 

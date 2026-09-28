@@ -125,7 +125,10 @@ export default function AdminArcaFacturacion({
 
   // Helper to build API URLs with custom backend support
   const getApiUrl = (endpoint: string) => {
-    const base = config.apiHost?.trim().replace(/\/$/, '') || '';
+    let base = config.apiHost?.trim().replace(/\/$/, '') || '';
+    if (!base && typeof window !== 'undefined' && !window.location.hostname.includes('localhost') && !window.location.hostname.includes('run.app')) {
+      base = 'https://nueva-pagina.onrender.com';
+    }
     return `${base}${endpoint}`;
   };
 
@@ -220,7 +223,16 @@ export default function AdminArcaFacturacion({
       // Also query last voucher
       await fetchLastVoucher();
     } catch (e: any) {
-      setAuthError(e.message || 'Error de conexión con ARCA.');
+      if (e?.name === 'TypeError' && e?.message === 'Failed to fetch') {
+        const isCustomDomain = window.location.hostname.includes('lyslavados.com') || window.location.hostname.includes('github.io');
+        if (isCustomDomain) {
+          setAuthError('Error de red ("Failed to fetch"): El dominio www.lyslavados.com está en un hosting estático (GitHub Pages) y el navegador bloqueó la conexión directa al backend externo por seguridad de cookies o CORS. Para facturar sin intermediarios ni restricciones del navegador, puedes ingresar directamente a la URL de la aplicación donde corre el servidor Node.');
+        } else {
+          setAuthError('Error de red al conectar con el servidor local ("Failed to fetch"). Verifica que el servidor Node esté activo.');
+        }
+      } else {
+        setAuthError(e.message || 'Error de conexión con ARCA.');
+      }
     } finally {
       setTestingAuth(false);
     }

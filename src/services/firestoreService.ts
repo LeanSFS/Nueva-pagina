@@ -1245,7 +1245,8 @@ export const firestoreService = {
       domicilioComercial: 'Venezuela 1659, Cipolletti, Río Negro',
       inicioActividades: '01/01/2024',
       condicionIva: 'Responsable Monotributo',
-      production: true
+      production: true,
+      apiHost: 'https://nueva-pagina.onrender.com'
     };
 
     try {
