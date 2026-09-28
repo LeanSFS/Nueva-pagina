@@ -345,6 +345,35 @@ export default function AdminArcaFacturacion({
     }
   };
 
+  const [syncingWithAfip, setSyncingWithAfip] = useState(false);
+
+  const handleSyncWithAfip = async () => {
+    setSyncingWithAfip(true);
+    try {
+      const res = await fetch(getApiUrl('/api/arca/sync-vouchers'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          cuit: config.cuit || '20411564550',
+          puntoVenta: config.puntoVenta || 2,
+          tipoComprobante: formInvoice.tipoComprobante || 11,
+          production: config.production !== false
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        await loadFacturas();
+        alert(`¡Sincronización con ARCA exitosa! Se verificaron ${data.lastVoucher} comprobantes oficiales en AFIP.`);
+      } else {
+        alert(data.error || 'Error al sincronizar con ARCA.');
+      }
+    } catch (e: any) {
+      alert(e.message || 'Error de conexión al sincronizar con ARCA.');
+    } finally {
+      setSyncingWithAfip(false);
+    }
+  };
+
   const handleEmitirFactura = async (e: React.FormEvent) => {
     e.preventDefault();
     setInvoiceError(null);
@@ -397,25 +426,25 @@ export default function AdminArcaFacturacion({
         throw new Error(data.error || 'No se pudo emitir la factura en ARCA.');
       }
 
-      // Record in Firestore
+      // Record in Firestore and backend
       const newFactura: ArcaFacturaRecord = {
         id: `arca_${data.puntoVenta}_${data.tipoComprobante}_${data.cbteNro}`,
-        cae: data.cae,
-        caeVto: data.caeVto,
-        cbteNro: data.cbteNro,
-        puntoVenta: data.puntoVenta,
-        tipoComprobante: data.tipoComprobante,
-        tipoComprobanteNombre: data.tipoComprobanteNombre || 'FACTURA C',
+        cae: String(data.cae || ''),
+        caeVto: String(data.caeVto || ''),
+        cbteNro: Number(data.cbteNro),
+        puntoVenta: Number(data.puntoVenta),
+        tipoComprobante: Number(data.tipoComprobante),
+        tipoComprobanteNombre: data.tipoComprobanteNombre || (Number(data.tipoComprobante) === 11 ? 'FACTURA C' : Number(data.tipoComprobante) === 6 ? 'FACTURA B' : 'FACTURA A'),
         fechaEmision: data.fechaEmision || new Date().toLocaleDateString('es-AR'),
         fechaIso: new Date().toISOString().split('T')[0],
         total: totalNum,
         clienteNombre: formInvoice.clienteNombre.trim() || 'Consumidor Final',
         clienteDocTipo: formInvoice.clienteDocTipo === '96' ? 'DNI' : formInvoice.clienteDocTipo === '80' ? 'CUIT' : 'Consumidor Final',
         clienteDocNro: formInvoice.clienteDocNro.trim() || '0',
-        clienteTelefono: formInvoice.clienteTelefono.trim(),
+        clienteTelefono: formInvoice.clienteTelefono.trim() || '',
         conceptoDescripcion: formInvoice.concepto,
-        qrUrl: data.qrUrl,
-        qrBase64: data.qrBase64,
+        qrUrl: data.qrUrl || '',
+        qrBase64: data.qrBase64 || '',
         createdAt: new Date().toISOString()
       };
 
@@ -1018,6 +1047,17 @@ export default function AdminArcaFacturacion({
                 className="bg-slate-950 border border-white/10 rounded-xl pl-9 pr-3 py-2 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-emerald-500 w-48 sm:w-64"
               />
             </div>
+
+            <button
+              type="button"
+              onClick={handleSyncWithAfip}
+              disabled={syncingWithAfip}
+              className="px-3 py-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
+              title="Recuperar y sincronizar facturas emitidas desde los servidores de ARCA / AFIP"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${syncingWithAfip ? 'animate-spin text-emerald-300' : ''}`} />
+              <span>{syncingWithAfip ? 'Sincronizando...' : 'Sincronizar con ARCA'}</span>
+            </button>
 
             <button
               onClick={loadFacturas}

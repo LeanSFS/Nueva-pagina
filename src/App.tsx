@@ -251,6 +251,10 @@ export default function App() {
         setView('express');
       } else if (isAdminPath()) {
         setView('admin');
+        const isAuth = typeof window !== 'undefined' && (localStorage.getItem('lys_admin_auth') === 'true' || sessionStorage.getItem('lys_admin_auth') === 'true');
+        if (!isAuth) {
+          setShowPasswordPrompt(true);
+        }
       } else {
         setView('home');
       }
@@ -345,7 +349,13 @@ export default function App() {
     return false;
   });
   const [adminPassword, setAdminPassword] = useState('');
-  const [showPasswordPrompt, setShowPasswordPrompt] = useState(false);
+  const [showPasswordPrompt, setShowPasswordPrompt] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      const isAuth = localStorage.getItem('lys_admin_auth') === 'true' || sessionStorage.getItem('lys_admin_auth') === 'true';
+      return isAdminPath() && !isAuth;
+    }
+    return false;
+  });
   const [passwordError, setPasswordError] = useState(false);
   const [showPasswordText, setShowPasswordText] = useState(false);
 

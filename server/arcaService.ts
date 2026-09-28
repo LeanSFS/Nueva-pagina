@@ -64,6 +64,7 @@ async function afipSoapPost(url: string, soapBody: string, soapAction: string = 
 const CERTS_DIR = path.join(process.cwd(), 'certs');
 const CERT_FILE = path.join(CERTS_DIR, 'arca.crt');
 const KEY_FILE = path.join(CERTS_DIR, 'arca.key');
+const FACTURAS_FILE = path.join(CERTS_DIR, 'facturas_arca.json');
 
 if (!fs.existsSync(CERTS_DIR)) {
   fs.mkdirSync(CERTS_DIR, { recursive: true });
@@ -494,6 +495,157 @@ export class ArcaService {
   }
 
   /**
+   * Consult Invoice Information from AFIP (FECompConsultar)
+   */
+  static async getVoucherInfo(
+    cuit: string,
+    puntoVenta: number = 2,
+    tipoComprobante: number = 11,
+    cbteNro: number = 1,
+    production: boolean = true
+  ): Promise<any> {
+    const cleanCuit = cuit.replace(/\D/g, '');
+    const { token, sign } = await this.getAuth(production);
+    const wsfeUrl = this.getWsfeUrl(production);
+
+    const soapBody = `<?xml version="1.0" encoding="utf-8"?>
+<soap:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
+  <soap:Body>
+    <FECompConsultar xmlns="http://ar.gov.afip.dif.FEV1/">
+      <Auth>
+        <Token>${token}</Token>
+        <Sign>${sign}</Sign>
+        <Cuit>${cleanCuit}</Cuit>
+      </Auth>
+      <FeCompConsReq>
+        <CbteTipo>${tipoComprobante}</CbteTipo>
+        <CbteNro>${cbteNro}</CbteNro>
+        <PtoVta>${puntoVenta}</PtoVta>
+      </FeCompConsReq>
+    </FECompConsultar>
+  </soap:Body>
+</soap:Envelope>`;
+
+    const text = await afipSoapPost(wsfeUrl, soapBody, 'http://ar.gov.afip.dif.FEV1/FECompConsultar');
+    const parsed = parser.parse(text);
+    const result = parsed?.Envelope?.Body?.FECompConsultarResponse?.FECompConsultarResult;
+
+    if (result?.Errors) {
+      const err = result.Errors?.Err;
+      const errMsg = Array.isArray(err) ? err.map((e: any) => e.Msg).join('. ') : (err?.Msg || 'Error al consultar comprobante');
+      throw new Error(errMsg);
+    }
+
+    const item = result?.ResultGet;
+    if (!item) {
+      throw new Error(`Comprobante ${cbteNro} no encontrado en ARCA.`);
+    }
+
+    const cae = String(item.CodAutorizacion || '');
+    const caeVtoRaw = String(item.FchVto || '');
+    const caeVto = caeVtoRaw.length === 8 
+      ? `${caeVtoRaw.substring(6, 8)}/${caeVtoRaw.substring(4, 6)}/${caeVtoRaw.substring(0, 4)}` 
+      : caeVtoRaw;
+    
+    const cbteFchRaw = String(item.CbteFch || '');
+    const fechaEmision = cbteFchRaw.length === 8
+      ? `${cbteFchRaw.substring(6, 8)}/${cbteFchRaw.substring(4, 6)}/${cbteFchRaw.substring(0, 4)}`
+      : new Date().toLocaleDateString('es-AR');
+    const fechaIso = cbteFchRaw.length === 8
+      ? `${cbteFchRaw.substring(0, 4)}-${cbteFchRaw.substring(4, 6)}-${cbteFchRaw.substring(6, 8)}`
+      : new Date().toISOString().split('T')[0];
+
+    const total = Number(item.ImpTotal) || 0;
+    const docTipo = Number(item.DocTipo) || 99;
+    const docNro = Number(item.DocNro) || 0;
+
+    // Generate Official ARCA QR Code
+    const qrData = {
+      ver: 1,
+      fecha: fechaIso,
+      cuit: Number(cleanCuit),
+      ptoVta: puntoVenta,
+      tipoCmp: tipoComprobante,
+      nroCmp: cbteNro,
+      importe: total,
+      moneda: 'PES',
+      ctz: 1,
+      tipoDocRec: docTipo,
+      nroDocRec: docNro,
+      tipoCodAut: 'E',
+      codAut: Number(cae)
+    };
+
+    const qrJsonBase64 = Buffer.from(JSON.stringify(qrData)).toString('base64');
+    const qrUrl = `https://www.afip.gob.ar/fe/qr/?p=${qrJsonBase64}`;
+
+    let qrBase64 = '';
+    try {
+      qrBase64 = await QRCode.toDataURL(qrUrl, {
+        margin: 1,
+        width: 250,
+        color: { dark: '#000000', light: '#ffffff' }
+      });
+    } catch {}
+
+    const tipoNombre = tipoComprobante === 11 ? 'FACTURA C' : tipoComprobante === 6 ? 'FACTURA B' : 'FACTURA A';
+
+    return {
+      id: `arca_${puntoVenta}_${tipoComprobante}_${cbteNro}`,
+      cae,
+      caeVto,
+      cbteNro,
+      puntoVenta,
+      tipoComprobante,
+      tipoComprobanteNombre: tipoNombre,
+      fechaEmision,
+      fechaIso,
+      total,
+      clienteNombre: docNro > 0 ? `Cliente Doc ${docNro}` : 'Consumidor Final',
+      clienteDocTipo: docTipo === 96 ? 'DNI' : docTipo === 80 ? 'CUIT' : 'Consumidor Final',
+      clienteDocNro: String(docNro),
+      clienteTelefono: '',
+      conceptoDescripcion: 'Servicio de Estética y Lavado Automotor',
+      qrUrl,
+      qrBase64,
+      createdAt: new Date().toISOString()
+    };
+  }
+
+  /**
+   * Sync and Recover All Past Issued Vouchers from AFIP
+   */
+  static async syncVouchersFromAfip(
+    cuit: string, 
+    puntoVenta: number = 2, 
+    tipoComprobante: number = 11, 
+    production: boolean = true
+  ): Promise<{ lastVoucher: number; recoveredCount: number; facturas: any[] }> {
+    const lastVoucher = await this.getLastVoucher(cuit, puntoVenta, tipoComprobante, production);
+    const saved = this.getSavedFacturas();
+    const recovered: any[] = [];
+
+    for (let num = 1; num <= lastVoucher; num++) {
+      const exists = saved.some((s: any) => Number(s.cbteNro) === num && Number(s.puntoVenta) === puntoVenta);
+      if (!exists) {
+        try {
+          const info = await this.getVoucherInfo(cuit, puntoVenta, tipoComprobante, num, production);
+          this.saveFacturaRecord(info);
+          recovered.push(info);
+        } catch (e: any) {
+          console.warn(`Could not recover voucher ${num}:`, e.message);
+        }
+      }
+    }
+
+    return { 
+      lastVoucher, 
+      recoveredCount: recovered.length, 
+      facturas: this.getSavedFacturas() 
+    };
+  }
+
+  /**
    * Emit Electronic Invoice (FECAESolicitar)
    */
   static async emitirFactura(params: EmitirFacturaParams): Promise<EmitirFacturaResult> {
@@ -638,6 +790,33 @@ export class ArcaService {
 
     const tipoNombre = tipoComprobante === 11 ? 'FACTURA C' : tipoComprobante === 6 ? 'FACTURA B' : 'FACTURA A';
 
+    const facturaRecord = {
+      id: `arca_${puntoVenta}_${tipoComprobante}_${nextCbte}`,
+      cae,
+      caeVto,
+      cbteNro: nextCbte,
+      puntoVenta,
+      tipoComprobante,
+      tipoComprobanteNombre: tipoNombre,
+      fechaEmision: `${todayStr.substring(6, 8)}/${todayStr.substring(4, 6)}/${todayStr.substring(0, 4)}`,
+      fechaIso: `${todayStr.substring(0, 4)}-${todayStr.substring(4, 6)}-${todayStr.substring(6, 8)}`,
+      total,
+      clienteNombre: params.clienteNombre || 'Consumidor Final',
+      clienteDocTipo: docTipo === 96 ? 'DNI' : docTipo === 80 ? 'CUIT' : 'Consumidor Final',
+      clienteDocNro: String(docNro),
+      clienteTelefono: params.clienteTelefono || '',
+      conceptoDescripcion: params.descripcionServicio || 'Servicio de Estética y Lavado Automotor',
+      qrUrl,
+      qrBase64,
+      createdAt: new Date().toISOString()
+    };
+
+    try {
+      ArcaService.saveFacturaRecord(facturaRecord);
+    } catch (saveErr) {
+      console.error('Error saving factura record:', saveErr);
+    }
+
     return {
       success: true,
       cae,
@@ -655,5 +834,32 @@ export class ArcaService {
       qrBase64,
       resultado: 'Aprobado'
     };
+  }
+
+  static getSavedFacturas(): any[] {
+    try {
+      if (fs.existsSync(FACTURAS_FILE)) {
+        const raw = fs.readFileSync(FACTURAS_FILE, 'utf8');
+        return JSON.parse(raw);
+      }
+    } catch (e) {
+      console.error('Error reading facturas file:', e);
+    }
+    return [];
+  }
+
+  static saveFacturaRecord(factura: any): void {
+    try {
+      const list = ArcaService.getSavedFacturas();
+      const existingIdx = list.findIndex((f: any) => f.id === factura.id || (Number(f.cbteNro) === Number(factura.cbteNro) && Number(f.puntoVenta) === Number(factura.puntoVenta)));
+      if (existingIdx >= 0) {
+        list[existingIdx] = { ...list[existingIdx], ...factura };
+      } else {
+        list.unshift(factura);
+      }
+      fs.writeFileSync(FACTURAS_FILE, JSON.stringify(list, null, 2), 'utf8');
+    } catch (e) {
+      console.error('Error saving factura record to file:', e);
+    }
   }
 }

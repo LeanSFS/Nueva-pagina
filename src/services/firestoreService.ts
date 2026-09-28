@@ -90,6 +90,16 @@ function setLocalCache<T>(key: string, value: T): void {
   } catch (e) {}
 }
 
+function cleanFirestoreData<T extends Record<string, any>>(obj: T): T {
+  const clean: any = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (value !== undefined) {
+      clean[key] = value;
+    }
+  }
+  return clean;
+}
+
 function isUserAdmin(): boolean {
   const user = auth.currentUser;
   if (!user) return false;
@@ -561,7 +571,8 @@ export const firestoreService = {
     setLocalCache('lys_unsynced_movements', filteredUnsynced);
 
     try {
-      await withTimeout(setDoc(doc(db, colPath, movement.id), movement), 2500);
+      const cleanMov = cleanFirestoreData(movement);
+      await withTimeout(setDoc(doc(db, colPath, movement.id), cleanMov), 4000);
       
       // Successfully saved to Firestore! Remove from unsynced queue
       const updatedUnsynced = getLocalCache<Movement[]>('lys_unsynced_movements', []).filter(m => m.id !== movement.id);
@@ -1280,28 +1291,74 @@ export const firestoreService = {
   },
 
   async getArcaFacturas(): Promise<ArcaFacturaRecord[]> {
+    const serverFacturas: ArcaFacturaRecord[] = [];
+    try {
+      const cfg = await this.getArcaConfig().catch(() => null);
+      const base = cfg?.apiHost?.trim().replace(/\/$/, '') || '';
+      const endpoint = base ? `${base}/api/arca/facturas` : '/api/arca/facturas';
+      const res = await fetch(endpoint).catch(() => null);
+      if (res && res.ok) {
+        const json = await res.json().catch(() => null);
+        if (json && json.success && Array.isArray(json.facturas)) {
+          serverFacturas.push(...json.facturas);
+        }
+      }
+    } catch (e) {
+      console.warn('Could not fetch facturas from backend server:', e);
+    }
+
+    const firestoreFacturas: ArcaFacturaRecord[] = [];
     try {
       const col = collection(db, 'facturas');
-      const snap = await withTimeout(getDocs(col), 3500);
-      const rows: ArcaFacturaRecord[] = [];
-      snap.forEach(d => rows.push(d.data() as ArcaFacturaRecord));
-      rows.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-      setLocalCache('lys_arca_facturas', rows);
-      return rows;
+      const snap = await withTimeout(getDocs(col), 2500);
+      snap.forEach(d => {
+        const item = d.data() as ArcaFacturaRecord;
+        if (item && item.id) firestoreFacturas.push(item);
+      });
     } catch (e) {
-      console.warn('Using local cache for arca facturas:', e);
-      return getLocalCache<ArcaFacturaRecord[]>('lys_arca_facturas', []);
+      console.warn('Could not fetch facturas from firestore:', e);
     }
+
+    const cachedFacturas = getLocalCache<ArcaFacturaRecord[]>('lys_arca_facturas', []);
+
+    // Merge without duplicates
+    const map = new Map<string, ArcaFacturaRecord>();
+    for (const f of [...serverFacturas, ...firestoreFacturas, ...cachedFacturas]) {
+      if (f && f.id) {
+        map.set(f.id, f);
+      }
+    }
+
+    const merged = Array.from(map.values()).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+    setLocalCache('lys_arca_facturas', merged);
+    return merged;
   },
 
   async saveArcaFactura(factura: ArcaFacturaRecord): Promise<void> {
+    // 1. Cache locally
     const cached = getLocalCache<ArcaFacturaRecord[]>('lys_arca_facturas', []);
     const updated = [factura, ...cached.filter(f => f.id !== factura.id)];
     setLocalCache('lys_arca_facturas', updated);
 
+    // 2. Persist to Node backend server
+    try {
+      const cfg = await this.getArcaConfig().catch(() => null);
+      const base = cfg?.apiHost?.trim().replace(/\/$/, '') || '';
+      const endpoint = base ? `${base}/api/arca/facturas` : '/api/arca/facturas';
+      fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(factura)
+      }).catch(err => console.warn('Could not sync factura to backend:', err));
+    } catch (e) {
+      console.warn('Could not send factura to backend server:', e);
+    }
+
+    // 3. Persist to Firestore
     try {
       const docRef = doc(db, 'facturas', factura.id);
-      await withTimeout(setDoc(docRef, factura), 4000);
+      const cleanFactura = cleanFirestoreData(factura);
+      await withTimeout(setDoc(docRef, cleanFactura), 3500);
     } catch (e) {
       handleFirestoreError(e, OperationType.CREATE, `facturas/${factura.id}`);
     }

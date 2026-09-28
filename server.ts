@@ -305,6 +305,45 @@ app.post("/api/arca/emitir", async (req, res) => {
   }
 });
 
+// 8. Facturas Persistence Endpoints
+app.get("/api/arca/facturas", (req, res) => {
+  try {
+    const facturas = ArcaService.getSavedFacturas();
+    return res.json({ success: true, facturas });
+  } catch (e: any) {
+    return res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+app.post("/api/arca/facturas", (req, res) => {
+  try {
+    const factura = req.body;
+    if (!factura || !factura.id) {
+      return res.status(400).json({ success: false, error: "Factura requerida." });
+    }
+    ArcaService.saveFacturaRecord(factura);
+    return res.json({ success: true });
+  } catch (e: any) {
+    return res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// 9. Sync Past Vouchers directly from AFIP / ARCA
+app.post("/api/arca/sync-vouchers", async (req, res) => {
+  try {
+    const cuit = String(req.body.cuit || "20411564550");
+    const puntoVenta = Number(req.body.puntoVenta || 2);
+    const tipoComprobante = Number(req.body.tipoComprobante || 11);
+    const isProd = req.body.production !== false;
+
+    const result = await ArcaService.syncVouchersFromAfip(cuit, puntoVenta, tipoComprobante, isProd);
+    return res.json({ success: true, ...result });
+  } catch (e: any) {
+    console.error("Error syncing vouchers from AFIP:", e);
+    return res.status(500).json({ success: false, error: e.message });
+  }
+});
+
 // AI / LLMs and SEO Knowledge Endpoints
 app.get("/llms.txt", (req, res) => {
   const filePath = path.join(process.cwd(), "public", "llms.txt");

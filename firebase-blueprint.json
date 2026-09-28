@@ -118,6 +118,33 @@
         "createdAt": { "type": "string" }
       },
       "required": ["id", "url", "createdAt"]
+    },
+    "ArcaFactura": {
+      "title": "ArcaFactura",
+      "description": "Registro de comprobante electrónico emitido con CAE oficial ante ARCA.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "cae": { "type": "string" },
+        "caeVto": { "type": "string" },
+        "cbteNro": { "type": "number" },
+        "puntoVenta": { "type": "number" },
+        "tipoComprobante": { "type": "number" },
+        "total": { "type": "number" },
+        "clienteNombre": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "cae", "caeVto", "cbteNro", "puntoVenta", "tipoComprobante", "total"]
+    },
+    "Config": {
+      "title": "Config",
+      "description": "Configuraciones operativas del sistema (ARCA, taller).",
+      "type": "object",
+      "properties": {
+        "cuit": { "type": "string" },
+        "puntoVenta": { "type": "number" },
+        "production": { "type": "boolean" }
+      }
     }
   },
   "firestore": {
@@ -148,6 +175,14 @@
     "gallery/{photoId}": {
       "schema": "Photo",
       "description": "Lista de fotos y resultados detallados expuestos en la web."
+    },
+    "facturas/{facturaId}": {
+      "schema": "ArcaFactura",
+      "description": "Comprobantes electrónicos autorizados por ARCA."
+    },
+    "config/{configId}": {
+      "schema": "Config",
+      "description": "Configuración del emisor ARCA y parámetros del sistema."
     }
   }
 }

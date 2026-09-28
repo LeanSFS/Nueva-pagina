@@ -78,19 +78,41 @@ export default function AdminCaja({
   const [unsyncedCount, setUnsyncedCount] = useState(0);
   const [syncingNow, setSyncingNow] = useState(false);
 
+  const [manualAuth, setManualAuth] = useState(false);
+  const [lockedPassword, setLockedPassword] = useState('');
+  const [lockedPasswordError, setLockedPasswordError] = useState(false);
+  const [showLockedPasswordText, setShowLockedPasswordText] = useState(false);
+
+  const handleUnlockWithPassword = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const clean = lockedPassword.trim().toLowerCase();
+    if (clean === 'lys' || clean === 'lys lavados' || clean === 'admin') {
+      try {
+        localStorage.setItem('lys_admin_auth', 'true');
+        sessionStorage.setItem('lys_admin_auth', 'true');
+      } catch (err) {}
+      setManualAuth(true);
+      setLockedPasswordError(false);
+      setLockedPassword('');
+    } else {
+      setLockedPasswordError(true);
+    }
+  };
+
   const isUserAdmin = (user: any) => {
     if (!user) return false;
     return user.email?.toLowerCase() === 'leandro.saralegui@gmail.com' || user.uid === 'AYbEVBVfFxcx9vgxAWb83cJvDV02';
   };
 
   const isAuthorized = useMemo(() => {
+    if (manualAuth) return true;
     if (isPasswordAuthenticated) return true;
     if (currentUser && isUserAdmin(currentUser)) return true;
     if (typeof window !== 'undefined') {
       return localStorage.getItem('lys_admin_auth') === 'true' || sessionStorage.getItem('lys_admin_auth') === 'true';
     }
     return false;
-  }, [isPasswordAuthenticated, currentUser]);
+  }, [manualAuth, isPasswordAuthenticated, currentUser]);
 
   const updateUnsyncedCount = () => {
     try {
@@ -248,22 +270,22 @@ export default function AdminCaja({
 
       const newFactura: ArcaFacturaRecord = {
         id: facturaId,
-        cae: data.cae,
-        caeVto: data.caeVto,
-        cbteNro: data.cbteNro,
-        puntoVenta: data.puntoVenta,
-        tipoComprobante: data.tipoComprobante,
-        tipoComprobanteNombre: data.tipoComprobanteNombre || 'FACTURA C',
+        cae: String(data.cae || ''),
+        caeVto: String(data.caeVto || ''),
+        cbteNro: Number(data.cbteNro),
+        puntoVenta: Number(data.puntoVenta),
+        tipoComprobante: Number(data.tipoComprobante),
+        tipoComprobanteNombre: data.tipoComprobanteNombre || (Number(data.tipoComprobante) === 11 ? 'FACTURA C' : Number(data.tipoComprobante) === 6 ? 'FACTURA B' : 'FACTURA A'),
         fechaEmision: data.fechaEmision || new Date().toLocaleDateString('es-AR'),
         fechaIso: facturarTarget.fecha || new Date().toISOString().split('T')[0],
         total: montoNum,
         clienteNombre: facturarForm.clienteNombre.trim() || 'Consumidor Final',
         clienteDocTipo: facturarForm.clienteDocTipo === '96' ? 'DNI' : facturarForm.clienteDocTipo === '80' ? 'CUIT' : 'Consumidor Final',
         clienteDocNro: facturarForm.clienteDocNro.trim() || '0',
-        clienteTelefono: facturarForm.clienteTelefono.trim(),
+        clienteTelefono: facturarForm.clienteTelefono.trim() || '',
         conceptoDescripcion: facturarForm.concepto,
-        qrUrl: data.qrUrl,
-        qrBase64: data.qrBase64,
+        qrUrl: data.qrUrl || '',
+        qrBase64: data.qrBase64 || '',
         createdAt: new Date().toISOString(),
         movementId: facturarTarget.id
       };
@@ -1009,6 +1031,47 @@ ${factura.qrUrl ? `🔗 Validar en ARCA/AFIP: ${factura.qrUrl}` : ''}
             </div>
           )}
 
+          {/* Password Login Option */}
+          <form onSubmit={handleUnlockWithPassword} className="space-y-3 bg-slate-950/80 p-4 rounded-2xl border border-white/5">
+            <label className="text-[10px] font-black uppercase tracking-widest text-emerald-400 block flex items-center justify-between">
+              <span>Ingresar con Contraseña del Taller</span>
+            </label>
+            <div className="relative">
+              <input
+                type={showLockedPasswordText ? "text" : "password"}
+                value={lockedPassword}
+                onChange={e => {
+                  setLockedPassword(e.target.value);
+                  if (lockedPasswordError) setLockedPasswordError(false);
+                }}
+                placeholder="Contraseña del taller..."
+                className={`w-full bg-zinc-900 border ${lockedPasswordError ? 'border-rose-500' : 'border-white/10'} rounded-xl py-3 pl-4 pr-10 text-sm text-white focus:outline-none focus:border-emerald-500`}
+              />
+              <button
+                type="button"
+                onClick={() => setShowLockedPasswordText(!showLockedPasswordText)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-white p-1 cursor-pointer"
+              >
+                {showLockedPasswordText ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
+            {lockedPasswordError && (
+              <p className="text-rose-400 text-[11px] font-bold">Contraseña incorrecta.</p>
+            )}
+            <button
+              type="submit"
+              className="w-full bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-display font-black italic py-3 rounded-xl uppercase tracking-wider text-xs shadow-lg shadow-emerald-500/10 cursor-pointer transition-all active:scale-98"
+            >
+              DESBLOQUEAR PANEL ADMIN
+            </button>
+          </form>
+
+          <div className="flex items-center gap-3">
+            <div className="h-px bg-white/10 flex-1" />
+            <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500">o autenticar con Google</span>
+            <div className="h-px bg-white/10 flex-1" />
+          </div>
+
           <div className="space-y-4">
             <div className="space-y-1">
               <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 block">
@@ -1105,6 +1168,18 @@ ${factura.qrUrl ? `🔗 Validar en ARCA/AFIP: ${factura.qrUrl}` : ''}
                 <span className="hidden lg:inline text-zinc-400 font-normal">({currentUser.email})</span>
               )}
             </div>
+            {!currentUser && (
+              <button
+                type="button"
+                onClick={loginWithGoogle}
+                disabled={submittingGoogleAuth}
+                className="flex items-center gap-1.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-[10px] uppercase tracking-wider px-3 py-1 rounded-lg transition-all shadow-md shadow-emerald-500/10 cursor-pointer active:scale-95"
+                title="Vincular con tu cuenta de Google leandro.saralegui@gmail.com para habilitar permisos de Firestore en este dispositivo"
+              >
+                <Sparkles className="w-3.5 h-3.5 fill-slate-950" />
+                <span>{submittingGoogleAuth ? 'Conectando...' : 'Vincular Google Admin'}</span>
+              </button>
+            )}
             <button
               onClick={handleLogout}
               className="text-[10px] font-black uppercase tracking-widest text-zinc-400 hover:text-red-400 px-2.5 py-1 rounded-lg border border-white/5 hover:border-red-500/20 hover:bg-red-500/5 transition-all cursor-pointer"
@@ -1118,6 +1193,30 @@ ${factura.qrUrl ? `🔗 Validar en ARCA/AFIP: ${factura.qrUrl}` : ''}
             LyS Lavados <span className="text-emerald-500">Admin</span>
           </h1>
         </div>
+
+        {/* Banner de Sincronización para Incógnito / Dispositivos Nuevos */}
+        {!currentUser && (
+          <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-4 sm:p-5 mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 animate-fade-in">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2 text-amber-400 font-bold text-xs uppercase tracking-wider">
+                <AlertTriangle className="w-4 h-4 shrink-0 text-amber-400" />
+                <span>Dispositivo Nuevo o Modo Incógnito Detectado</span>
+              </div>
+              <p className="text-zinc-300 text-xs leading-relaxed max-w-2xl">
+                Estás dentro del panel con la contraseña del taller. Para que la base de datos en la nube (Firestore) te descargue la <strong className="text-white">Caja</strong> y la <strong className="text-white">Agenda</strong> en vivo, vinculá tu cuenta de Google autorizada (<strong className="text-emerald-400 font-mono">leandro.saralegui@gmail.com</strong>).
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={loginWithGoogle}
+              disabled={submittingGoogleAuth}
+              className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-display font-black italic text-xs px-5 py-3 rounded-xl uppercase tracking-wider transition-all shadow-lg shadow-emerald-500/20 shrink-0 flex items-center justify-center gap-2 cursor-pointer active:scale-95"
+            >
+              {submittingGoogleAuth ? <Loader2 className="w-4 h-4 animate-spin text-slate-950" /> : <Sparkles className="w-4 h-4 fill-slate-950" />}
+              <span>VINCULAR GOOGLE AHORA</span>
+            </button>
+          </div>
+        )}
 
         {/* ASISTENTE DE IA ADMIN */}
         <AdminAssistant
