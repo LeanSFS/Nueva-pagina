@@ -231,10 +231,13 @@ export default function AdminCaja({
     try {
       const cfg = arcaConfig || await firestoreService.getArcaConfig();
       let base = cfg.apiHost?.trim().replace(/\/$/, '') || '';
-      if (!base && typeof window !== 'undefined') {
+      if (typeof window !== 'undefined') {
         const host = window.location.hostname;
-        if (!host.includes('localhost') && !host.includes('127.0.0.1') && !host.includes('run.app')) {
-          base = 'https://ais-pre-xhi2yqr5a2veqlnfganuuf-12804574784.us-east1.run.app';
+        const isLocalOrRunApp = host.includes('localhost') || host === '127.0.0.1' || host.includes('run.app');
+        if (isLocalOrRunApp) {
+          base = '';
+        } else if (!base) {
+          base = 'https://nueva-pagina.onrender.com';
         }
       }
       const endpoint = base ? `${base}/api/arca/emitir` : '/api/arca/emitir';

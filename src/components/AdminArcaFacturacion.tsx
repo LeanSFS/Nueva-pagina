@@ -123,22 +123,23 @@ export default function AdminArcaFacturacion({
   // Tutorial / Instructions accordion
   const [showTutorial, setShowTutorial] = useState(false);
 
-  // Production Applet Backend URL running the Node/Express server with ARCA certificates
-  const RUN_APP_BACKEND = 'https://ais-pre-xhi2yqr5a2veqlnfganuuf-12804574784.us-east1.run.app';
-
   // Helper to build API URLs with custom backend support
   const getApiUrl = (endpoint: string) => {
     let base = config.apiHost?.trim().replace(/\/$/, '') || '';
     
-    // If not set, check if we are on a static host (GitHub Pages, custom static domain like lyslavados.com)
-    if (!base && typeof window !== 'undefined') {
+    if (typeof window !== 'undefined') {
       const host = window.location.hostname;
-      const isLocal = host.includes('localhost') || host === '127.0.0.1';
-      const isRunApp = host.includes('run.app');
+      const isLocalOrRunApp = host.includes('localhost') || host === '127.0.0.1' || host.includes('run.app');
       
-      // If user is accessing from static custom domain (lyslavados.com or github.io), route to active cloud run backend
-      if (!isLocal && !isRunApp) {
-        base = RUN_APP_BACKEND;
+      // When running in the AI Studio environment or local dev server,
+      // always route directly to the local full-stack Express server
+      if (isLocalOrRunApp) {
+        return endpoint;
+      }
+      
+      // If accessing from a static host (e.g., lyslavados.com or github.io)
+      if (!base) {
+        base = 'https://nueva-pagina.onrender.com';
       }
     }
 
@@ -363,22 +364,42 @@ export default function AdminArcaFacturacion({
   const handleSyncWithAfip = async () => {
     setSyncingWithAfip(true);
     try {
-      const res = await fetch(getApiUrl('/api/arca/sync-vouchers'), {
+      const primaryUrl = getApiUrl('/api/arca/sync-vouchers');
+      const payload = {
+        cuit: config.cuit || '20411564550',
+        puntoVenta: config.puntoVenta || 2,
+        tipoComprobante: formInvoice.tipoComprobante || 11,
+        production: config.production !== false
+      };
+
+      let res = await fetch(primaryUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          cuit: config.cuit || '20411564550',
-          puntoVenta: config.puntoVenta || 2,
-          tipoComprobante: formInvoice.tipoComprobante || 11,
-          production: config.production !== false
-        })
+        body: JSON.stringify(payload)
       });
 
-      const contentType = res.headers.get('content-type') || '';
+      let contentType = res.headers.get('content-type') || '';
+
+      // If external backend returned HTML (e.g. 404 from Render before route was deployed), try relative local fallback
+      if (!contentType.includes('application/json') && primaryUrl !== '/api/arca/sync-vouchers') {
+        try {
+          const fallbackRes = await fetch('/api/arca/sync-vouchers', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+          const fbType = fallbackRes.headers.get('content-type') || '';
+          if (fbType.includes('application/json')) {
+            res = fallbackRes;
+            contentType = fbType;
+          }
+        } catch {}
+      }
+
       if (!contentType.includes('application/json')) {
         const text = await res.text();
         if (text.includes('<!DOCTYPE') || text.includes('<html')) {
-          throw new Error('El servidor actual no tiene habilitada la ruta de sincronización en este dominio. Asegúrate de estar usando la URL del applet o configurar la URL del backend en la tarjeta "Servidor Backend ARCA".');
+          throw new Error('El backend externo configurado aún no tiene instalada la ruta de sincronización masiva de comprobantes anteriores. Tus comprobantes emitidos están resguardados en el sistema y se pueden consultar en la tabla.');
         }
         throw new Error(`Respuesta no esperada del servidor: ${text.slice(0, 100)}`);
       }
@@ -696,27 +717,52 @@ export default function AdminArcaFacturacion({
           </div>
 
           <div className="bg-slate-950/60 p-4 rounded-xl border border-white/5">
-            <div className="text-[10px] font-black uppercase tracking-wider text-zinc-500 mb-1">Servidor Backend ARCA</div>
+            <div className="text-[10px] font-black uppercase tracking-wider text-zinc-500 mb-1 flex items-center justify-between">
+              <span>Servidor Backend ARCA</span>
+              {typeof window !== 'undefined' && (window.location.hostname.includes('localhost') || window.location.hostname.includes('run.app')) && (
+                <span className="text-[9px] text-emerald-400 font-bold bg-emerald-500/10 px-1.5 py-0.2 rounded border border-emerald-500/20">
+                  Applet Activo
+                </span>
+              )}
+            </div>
             <div className="flex items-center justify-between gap-2">
-              <span className="text-zinc-300 font-mono text-xs truncate max-w-[140px]" title={config.apiHost || 'Mismo Dominio (Local / Dev)'}>
+              <span className="text-zinc-300 font-mono text-xs truncate max-w-[130px]" title={config.apiHost || 'Mismo Dominio (Local / Applet)'}>
                 {config.apiHost ? config.apiHost.replace(/^https?:\/\//, '') : 'Mismo Dominio'}
               </span>
-              <button
-                type="button"
-                onClick={async () => {
-                  const nuevo = prompt('URL del backend Node.js (deja vacío para usar el mismo dominio o pega ej: https://ais-dev-...run.app):', config.apiHost || '');
-                  if (nuevo !== null) {
-                    const updated = { ...config, apiHost: nuevo.trim() };
-                    setConfig(updated);
-                    await firestoreService.saveArcaConfig(updated);
-                    checkCertInfo();
-                    checkArcaStatus();
-                  }
-                }}
-                className="text-[10px] bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded cursor-pointer transition-all shrink-0"
-              >
-                {config.apiHost ? 'Modificar' : 'Configurar URL'}
-              </button>
+              <div className="flex items-center gap-1 shrink-0">
+                {config.apiHost && (
+                  <button
+                    type="button"
+                    title="Usar servidor interno del applet"
+                    onClick={async () => {
+                      const updated = { ...config, apiHost: '' };
+                      setConfig(updated);
+                      await firestoreService.saveArcaConfig(updated);
+                      checkCertInfo();
+                      checkArcaStatus();
+                    }}
+                    className="text-[10px] bg-zinc-800 hover:bg-zinc-700 text-zinc-300 px-2 py-0.5 rounded cursor-pointer transition-all"
+                  >
+                    Restablecer
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const nuevo = prompt('URL del backend Node.js (deja vacío para usar el mismo dominio del applet o escribe tu backend ej: https://nueva-pagina.onrender.com):', config.apiHost || '');
+                    if (nuevo !== null) {
+                      const updated = { ...config, apiHost: nuevo.trim() };
+                      setConfig(updated);
+                      await firestoreService.saveArcaConfig(updated);
+                      checkCertInfo();
+                      checkArcaStatus();
+                    }
+                  }}
+                  className="text-[10px] bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded cursor-pointer transition-all"
+                >
+                  {config.apiHost ? 'Cambiar' : 'Configurar'}
+                </button>
+              </div>
             </div>
           </div>
         </div>
