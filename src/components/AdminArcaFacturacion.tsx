@@ -125,10 +125,7 @@ export default function AdminArcaFacturacion({
 
   // Helper to build API URLs with custom backend support
   const getApiUrl = (endpoint: string) => {
-    let base = config.apiHost?.trim().replace(/\/$/, '') || '';
-    if (!base && typeof window !== 'undefined' && !window.location.hostname.includes('localhost') && !window.location.hostname.includes('run.app')) {
-      base = 'https://nueva-pagina.onrender.com';
-    }
+    const base = config.apiHost?.trim().replace(/\/$/, '') || '';
     return `${base}${endpoint}`;
   };
 
@@ -360,6 +357,16 @@ export default function AdminArcaFacturacion({
           production: config.production !== false
         })
       });
+
+      const contentType = res.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) {
+        const text = await res.text();
+        if (text.includes('<!DOCTYPE') || text.includes('<html')) {
+          throw new Error('El servidor actual no tiene habilitada la ruta de sincronización en este dominio. Asegúrate de estar usando la URL del applet o configurar la URL del backend en la tarjeta "Servidor Backend ARCA".');
+        }
+        throw new Error(`Respuesta no esperada del servidor: ${text.slice(0, 100)}`);
+      }
+
       const data = await res.json();
       if (data.success) {
         await loadFacturas();
