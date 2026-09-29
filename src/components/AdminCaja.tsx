@@ -318,9 +318,8 @@ export default function AdminCaja({
       setAllMovements(prev => prev.map(m => m.id === facturarTarget.id ? updatedMovement : m));
       setArcaFacturas(prev => [newFactura, ...prev.filter(f => f.id !== newFactura.id)]);
 
-      // 4. Cerrar formulario y abrir comprobante emitido
+      // 4. Cerrar formulario de verificación sin abrir popup posterior con la factura
       setFacturarTarget(null);
-      setSelectedFacturaRecord(newFactura);
     } catch (err: any) {
       console.error('Error emitiendo factura desde caja:', err);
       setFacturaError(err.message || 'Error al emitir factura en ARCA');
@@ -560,7 +559,6 @@ ${factura.qrUrl ? `🔗 Validar en ARCA/AFIP: ${factura.qrUrl}` : ''}
         // Guardar factura en colección facturas y en estado local reactivo
         await firestoreService.saveArcaFactura(newFacturaRecord);
         setArcaFacturas(prev => [newFacturaRecord, ...prev.filter(f => f.id !== facturaId)]);
-        setSelectedFacturaRecord(newFacturaRecord);
         setArcaSuccessMessage(`¡Factura Electrónica emitida con éxito en ARCA! ${facturaNro} (CAE: ${arcaData.cae})`);
       }
 
