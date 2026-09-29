@@ -516,43 +516,85 @@ export const firestoreService = {
 
   async getMovements(): Promise<Movement[]> {
     const colPath = 'movements';
+    const firestoreList: Movement[] = [];
+
+    // 1. Fetch remote from Firestore
     try {
       const snap = await withTimeout(getDocs(collection(db, colPath)), 3000);
-      const list: Movement[] = [];
       snap.forEach(d => {
-        list.push(d.data() as Movement);
+        firestoreList.push(d.data() as Movement);
       });
+    } catch (e) {
+      console.warn("Firestore getMovements notice, reading local/static fallback:", e);
+    }
 
-      // If remote list is empty, but cache has items, salvage them into unsynced
-      if (list.length === 0) {
-        const locals = getLocalCache<Movement[]>('lys_cache_movements', []);
-        if (locals.length > 0) {
-          const unsynced = getLocalCache<Movement[]>('lys_unsynced_movements', []);
-          const merged = [...unsynced];
-          locals.forEach(l => {
-            if (!merged.some(m => m.id === l.id)) {
-              merged.push(l);
-            }
-          });
-          setLocalCache('lys_unsynced_movements', merged);
+    // 2. Fetch bundled static movements (/movements.json)
+    const staticMovements: Movement[] = [];
+    try {
+      const staticRes = await fetch('/movements.json').catch(() => null);
+      if (staticRes && staticRes.ok) {
+        const json = await staticRes.json().catch(() => null);
+        if (Array.isArray(json)) {
+          staticMovements.push(...json);
         }
       }
+    } catch (e) {}
 
-      // Merge remote list with local unsynced so they don't disappear from the UI
-      const unsynced = getLocalCache<Movement[]>('lys_unsynced_movements', []);
-      const mergedList = [...list];
-      unsynced.forEach(u => {
-        if (!mergedList.some(m => m.id === u.id)) {
-          mergedList.push(u);
+    // 3. Local cached and unsynced
+    const cached = getLocalCache<Movement[]>('lys_cache_movements', []);
+    const unsynced = getLocalCache<Movement[]>('lys_unsynced_movements', []);
+
+    // 4. Synthesize movements from any ARCA facturas
+    const facturasMovements: Movement[] = [];
+    try {
+      const allFacturas = await this.getArcaFacturas().catch(() => []);
+      for (const f of allFacturas) {
+        if (!f || !f.id) continue;
+        const movId = f.movementId || `mov_${f.id}`;
+        facturasMovements.push({
+          id: movId,
+          fecha: f.fechaIso || (f.fechaEmision ? f.fechaEmision.split('/').reverse().join('-') : new Date().toISOString().split('T')[0]),
+          tipo: 'Ingreso',
+          categoria: 'Lavado',
+          concepto: f.conceptoDescripcion || 'Servicio de Estética y Lavado Automotor',
+          monto_ars: Number(f.total),
+          medio: 'Efectivo',
+          estado: 'Pagado',
+          factura: `${f.tipoComprobanteNombre || 'FACTURA C'} Nº ${String(f.puntoVenta).padStart(4, '0')}-${String(f.cbteNro).padStart(8, '0')}`,
+          cliente: f.clienteNombre || 'Consumidor Final',
+          facturado: true,
+          cae: f.cae,
+          caeVto: f.caeVto,
+          facturaId: f.id,
+          notas: `Factura oficial ARCA emitida con CAE ${f.cae}`
+        });
+      }
+    } catch (e) {}
+
+    // 5. Merge all without duplicates (preferring firestore/unsynced/cached with richest details)
+    const map = new Map<string, Movement>();
+    for (const m of [...facturasMovements, ...staticMovements, ...cached, ...firestoreList, ...unsynced]) {
+      if (m && m.id) {
+        const existing = map.get(m.id);
+        if (!existing) {
+          map.set(m.id, m);
+        } else {
+          // Merge fields so factura info is not lost
+          map.set(m.id, {
+            ...m,
+            factura: m.factura || existing.factura,
+            cae: m.cae || existing.cae,
+            caeVto: m.caeVto || existing.caeVto,
+            facturaId: m.facturaId || existing.facturaId,
+            facturado: m.facturado ?? existing.facturado
+          });
         }
-      });
-
-      setLocalCache('lys_cache_movements', mergedList);
-      return mergedList;
-    } catch (e) {
-      console.warn("Firestore getMovements error/timeout, using local cache:", e);
-      return getLocalCache<Movement[]>('lys_cache_movements', []);
+      }
     }
+
+    const mergedList = Array.from(map.values()).sort((a, b) => (b.fecha || '').localeCompare(a.fecha || ''));
+    setLocalCache('lys_cache_movements', mergedList);
+    return mergedList;
   },
 
   async saveMovement(movement: Movement): Promise<void> {
@@ -1291,6 +1333,19 @@ export const firestoreService = {
   },
 
   async getArcaFacturas(): Promise<ArcaFacturaRecord[]> {
+    // 1. Fetch bundled static facturas (/facturas_arca.json)
+    const staticFacturas: ArcaFacturaRecord[] = [];
+    try {
+      const staticRes = await fetch('/facturas_arca.json').catch(() => null);
+      if (staticRes && staticRes.ok) {
+        const json = await staticRes.json().catch(() => null);
+        if (Array.isArray(json)) {
+          staticFacturas.push(...json);
+        }
+      }
+    } catch (e) {}
+
+    // 2. Fetch from backend server
     const serverFacturas: ArcaFacturaRecord[] = [];
     try {
       const cfg = await this.getArcaConfig().catch(() => null);
@@ -1316,6 +1371,7 @@ export const firestoreService = {
       console.warn('Could not fetch facturas from backend server:', e);
     }
 
+    // 3. Fetch from Firestore
     const firestoreFacturas: ArcaFacturaRecord[] = [];
     try {
       const col = collection(db, 'facturas');
@@ -1328,11 +1384,12 @@ export const firestoreService = {
       console.warn('Could not fetch facturas from firestore:', e);
     }
 
+    // 4. Local cached facturas
     const cachedFacturas = getLocalCache<ArcaFacturaRecord[]>('lys_arca_facturas', []);
 
     // Merge without duplicates
     const map = new Map<string, ArcaFacturaRecord>();
-    for (const f of [...serverFacturas, ...firestoreFacturas, ...cachedFacturas]) {
+    for (const f of [...staticFacturas, ...serverFacturas, ...firestoreFacturas, ...cachedFacturas]) {
       if (f && f.id) {
         map.set(f.id, f);
       }

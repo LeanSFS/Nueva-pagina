@@ -60,7 +60,7 @@ service cloud.firestore {
 
     function isValidMovement(mov) {
       return mov.keys().hasAll(['id', 'fecha', 'tipo', 'categoria', 'concepto', 'monto_ars'])
-          && mov.keys().size() >= 6 && mov.keys().size() <= 14
+          && mov.keys().size() >= 6 && mov.keys().size() <= 20
           && mov.id is string && mov.id.size() <= 128
           && mov.fecha is string && mov.fecha.size() == 10
           && mov.tipo is string && (mov.tipo == 'Ingreso' || mov.tipo == 'Gasto' || mov.tipo == 'ingreso' || mov.tipo == 'gasto')
@@ -72,7 +72,20 @@ service cloud.firestore {
           && (!('factura' in mov) || mov.factura is string && mov.factura.size() <= 200)
           && (!('cliente' in mov) || mov.cliente is string && mov.cliente.size() <= 200)
           && (!('notas' in mov) || mov.notas is string && mov.notas.size() <= 2000)
-          && (!('notes' in mov) || mov.notes is string && mov.notes.size() <= 2000);
+          && (!('notes' in mov) || mov.notes is string && mov.notes.size() <= 2000)
+          && (!('facturado' in mov) || mov.facturado is bool)
+          && (!('cae' in mov) || mov.cae is string && mov.cae.size() <= 100)
+          && (!('caeVto' in mov) || mov.caeVto is string && mov.caeVto.size() <= 50)
+          && (!('facturaId' in mov) || mov.facturaId is string && mov.facturaId.size() <= 128);
+    }
+
+    function isValidArcaFactura(f) {
+      return f.keys().hasAll(['id', 'cae', 'cbteNro', 'puntoVenta', 'total'])
+          && f.id is string && f.id.size() <= 128
+          && f.cae is string && f.cae.size() <= 100
+          && (f.cbteNro is int || f.cbteNro is float)
+          && (f.puntoVenta is int || f.puntoVenta is float)
+          && (f.total is int || f.total is float);
     }
 
     function isValidService(srv) {
