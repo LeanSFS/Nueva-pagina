@@ -1,5 +1,25 @@
 [
   {
+    "id": "arca_2_11_5",
+    "cae": "86395198345850",
+    "caeVto": "09/10/2026",
+    "cbteNro": 5,
+    "puntoVenta": 2,
+    "tipoComprobante": 11,
+    "tipoComprobanteNombre": "FACTURA C",
+    "fechaEmision": "29/09/2026",
+    "fechaIso": "2026-09-29",
+    "total": 100,
+    "clienteNombre": "Consumidor Final",
+    "clienteDocTipo": "Consumidor Final",
+    "clienteDocNro": "0",
+    "clienteTelefono": "",
+    "conceptoDescripcion": "Servicio de Estética y Lavado Automotor",
+    "qrUrl": "https://www.afip.gob.ar/fe/qr/?p=eyJ2ZXIiOjEsImZlY2hhIjoiMjAyNi0wOS0yOSIsImN1aXQiOjIwNDExNTY0NTUwLCJwdG9WdGEiOjIsInRpcG9DbXAiOjExLCJucm9DbXAiOjUsImltcG9ydGUiOjEwMCwibW9uZWRhIjoiUEVTIiwiY3R6IjoxLCJ0aXBvRG9jUmVjIjo5OSwibnJvRG9jUmVjIjowLCJ0aXBvQ29kQXV0IjoiRSIsImNvZEF1dCI6ODYzOTUxOTgzNDU4NTB9",
+    "createdAt": "2026-09-29T15:24:43.263Z",
+    "movementId": "mov_arca_2_11_5"
+  },
+  {
     "id": "arca_2_11_4",
     "cae": "86395050811004",
     "caeVto": "08/10/2026",

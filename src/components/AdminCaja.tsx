@@ -479,66 +479,89 @@ ${factura.qrUrl ? `🔗 Validar en ARCA/AFIP: ${factura.qrUrl}` : ''}
     try {
       const movementId = `mov_${Date.now()}_generic`;
       let facturaNro = newMovement.factura || '';
+      let isFacturado = false;
+      let facturaCae: string | undefined;
+      let facturaCaeVto: string | undefined;
+      let facturaId: string | undefined;
 
       // Si tiene activado emitir Factura Electrónica ARCA
-      if (emitirFacturaArca && newMovement.tipo === 'Ingreso') {
-        try {
-          const arcaConfig = await firestoreService.getArcaConfig();
-          const base = arcaConfig.apiHost?.trim().replace(/\/$/, '') || '';
-          const arcaRes = await fetch(`${base}/api/arca/emitir`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              cuit: arcaConfig.cuit || '20411564550',
-              puntoVenta: arcaConfig.puntoVenta || 2,
-              tipoComprobante: arcaConfig.tipoComprobanteDefault || 11, // Factura C
-              concepto: 2, // Servicios
-              docTipo: 99, // Consumidor Final
-              docNro: '0',
-              total: Number(newMovement.monto) || 0,
-              clienteNombre: newMovement.cliente?.trim() || 'Consumidor Final',
-              descripcionServicio: newMovement.concepto,
-              production: arcaConfig.production !== false
-            })
-          });
-
-          const ct = arcaRes.headers.get('content-type') || '';
-          if (ct.includes('application/json')) {
-            const arcaData = await arcaRes.json();
-            if (arcaRes.ok && arcaData.success) {
-              facturaNro = `FC-${String(arcaData.puntoVenta).padStart(4, '0')}-${String(arcaData.cbteNro).padStart(8, '0')}`;
-              setArcaSuccessMessage(`¡Factura Electrónica emitida con éxito en ARCA! ${facturaNro} (CAE: ${arcaData.cae})`);
-
-              // Guardar registro en colección facturas
-              await firestoreService.saveArcaFactura({
-                id: `arca_${arcaData.puntoVenta}_${arcaData.tipoComprobante}_${arcaData.cbteNro}`,
-                cae: arcaData.cae,
-                caeVto: arcaData.caeVto,
-                cbteNro: arcaData.cbteNro,
-                puntoVenta: arcaData.puntoVenta,
-                tipoComprobante: arcaData.tipoComprobante,
-                tipoComprobanteNombre: arcaData.tipoComprobanteNombre || 'FACTURA C',
-                fechaEmision: arcaData.fechaEmision || new Date().toLocaleDateString('es-AR'),
-                fechaIso: newMovement.fecha,
-                total: Number(newMovement.monto) || 0,
-                clienteNombre: newMovement.cliente?.trim() || 'Consumidor Final',
-                clienteDocTipo: 'Consumidor Final',
-                clienteDocNro: '0',
-                conceptoDescripcion: newMovement.concepto,
-                qrUrl: arcaData.qrUrl,
-                qrBase64: arcaData.qrBase64,
-                createdAt: new Date().toISOString(),
-                movementId: movementId
-              });
-            } else {
-              console.warn('Error emitiendo factura ARCA:', arcaData.error);
-              setError(`El movimiento se guardará, pero ARCA reportó: ${arcaData.error}`);
-            }
+      if (emitirFacturaArca && newMovement.tipo?.toLowerCase() === 'ingreso') {
+        const arcaConfig = await firestoreService.getArcaConfig().catch(() => null) || {} as ArcaConfig;
+        let base = arcaConfig.apiHost?.trim().replace(/\/$/, '') || '';
+        if (typeof window !== 'undefined') {
+          const host = window.location.hostname;
+          const isLocalOrRunApp = host.includes('localhost') || host === '127.0.0.1' || host.includes('run.app');
+          if (isLocalOrRunApp) {
+            base = '';
+          } else if (!base) {
+            base = 'https://nueva-pagina.onrender.com';
           }
-        } catch (arcaErr: any) {
-          console.warn('Fallo al contactar ARCA:', arcaErr);
-          setError(`Movimiento guardado, pero ocurrió un aviso en ARCA: ${arcaErr.message}`);
         }
+        const endpoint = base ? `${base}/api/arca/emitir` : '/api/arca/emitir';
+
+        const arcaRes = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            cuit: arcaConfig.cuit || '20411564550',
+            puntoVenta: arcaConfig.puntoVenta || 2,
+            tipoComprobante: arcaConfig.tipoComprobanteDefault || 11, // Factura C
+            concepto: 2, // Servicios
+            docTipo: 99, // Consumidor Final
+            docNro: '0',
+            total: Number(newMovement.monto) || 0,
+            clienteNombre: newMovement.cliente?.trim() || 'Consumidor Final',
+            descripcionServicio: newMovement.concepto || 'Servicio de Estética y Lavado Automotor',
+            production: arcaConfig.production !== false
+          })
+        });
+
+        const ct = arcaRes.headers.get('content-type') || '';
+        if (!ct.includes('application/json')) {
+          const txt = await arcaRes.text();
+          throw new Error(txt.includes('<html') 
+            ? 'El servidor backend de ARCA no respondió en formato JSON. Verifica la conexión a ARCA.'
+            : `Respuesta de ARCA: ${txt.slice(0, 100)}`
+          );
+        }
+
+        const arcaData = await arcaRes.json();
+        if (!arcaRes.ok || !arcaData.success) {
+          throw new Error(arcaData.error || 'No se pudo emitir la factura en ARCA.');
+        }
+
+        facturaNro = `FC-${String(arcaData.puntoVenta).padStart(4, '0')}-${String(arcaData.cbteNro).padStart(8, '0')}`;
+        facturaCae = String(arcaData.cae || '');
+        facturaCaeVto = String(arcaData.caeVto || '');
+        facturaId = `arca_${arcaData.puntoVenta}_${arcaData.tipoComprobante}_${arcaData.cbteNro}`;
+        isFacturado = true;
+
+        const newFacturaRecord: ArcaFacturaRecord = {
+          id: facturaId,
+          cae: facturaCae,
+          caeVto: facturaCaeVto,
+          cbteNro: Number(arcaData.cbteNro),
+          puntoVenta: Number(arcaData.puntoVenta),
+          tipoComprobante: Number(arcaData.tipoComprobante),
+          tipoComprobanteNombre: arcaData.tipoComprobanteNombre || 'FACTURA C',
+          fechaEmision: arcaData.fechaEmision || new Date().toLocaleDateString('es-AR'),
+          fechaIso: newMovement.fecha,
+          total: Number(newMovement.monto) || 0,
+          clienteNombre: newMovement.cliente?.trim() || 'Consumidor Final',
+          clienteDocTipo: 'Consumidor Final',
+          clienteDocNro: '0',
+          conceptoDescripcion: newMovement.concepto,
+          qrUrl: arcaData.qrUrl,
+          qrBase64: arcaData.qrBase64,
+          createdAt: new Date().toISOString(),
+          movementId: movementId
+        };
+
+        // Guardar factura en colección facturas y en estado local reactivo
+        await firestoreService.saveArcaFactura(newFacturaRecord);
+        setArcaFacturas(prev => [newFacturaRecord, ...prev.filter(f => f.id !== facturaId)]);
+        setSelectedFacturaRecord(newFacturaRecord);
+        setArcaSuccessMessage(`¡Factura Electrónica emitida con éxito en ARCA! ${facturaNro} (CAE: ${arcaData.cae})`);
       }
 
       const val: Movement = {
@@ -552,7 +575,11 @@ ${factura.qrUrl ? `🔗 Validar en ARCA/AFIP: ${factura.qrUrl}` : ''}
         estado: newMovement.estado as 'Pagado' | 'Pendiente',
         factura: facturaNro,
         cliente: newMovement.cliente || '',
-        notas: newMovement.notes || ''
+        notas: newMovement.notes || '',
+        facturado: isFacturado,
+        cae: facturaCae,
+        caeVto: facturaCaeVto,
+        facturaId: facturaId
       };
 
       await firestoreService.saveMovement(val);
@@ -567,7 +594,8 @@ ${factura.qrUrl ? `🔗 Validar en ARCA/AFIP: ${factura.qrUrl}` : ''}
       });
       fetchRows();
     } catch (err: any) {
-      setError(err.message || 'Error al guardar movimiento');
+      console.error('Error in handleAdd:', err);
+      setError(err.message || 'Error al guardar movimiento o emitir factura');
     } finally {
       setSubmitting(false);
     }
@@ -1951,6 +1979,12 @@ ${factura.qrUrl ? `🔗 Validar en ARCA/AFIP: ${factura.qrUrl}` : ''}
           )}
 
           <div className="mt-8 flex flex-col sm:flex-row items-center justify-end gap-6">
+            {error && (
+              <p className="text-rose-400 font-bold text-xs flex items-center gap-1.5 animate-fade-in bg-rose-500/10 border border-rose-500/20 px-3 py-1.5 rounded-xl">
+                <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+                {error}
+              </p>
+            )}
             {arcaSuccessMessage && (
               <p className="text-emerald-400 font-bold text-xs flex items-center gap-1.5 animate-fade-in bg-emerald-500/10 border border-emerald-500/20 px-3 py-1.5 rounded-xl">
                 <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
