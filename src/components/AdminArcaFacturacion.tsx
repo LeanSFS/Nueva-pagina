@@ -148,6 +148,13 @@ export default function AdminArcaFacturacion({
 
   useEffect(() => {
     loadInitialData();
+
+    // Real-time synchronization of ARCA Facturas across devices
+    const unsub = firestoreService.subscribeArcaFacturas((updatedFacturas) => {
+      setFacturas(updatedFacturas);
+    });
+
+    return () => unsub();
   }, []);
 
   const loadInitialData = async () => {

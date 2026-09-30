@@ -830,11 +830,14 @@ ${factura.qrUrl ? `🔗 Validar en ARCA/AFIP: ${factura.qrUrl}` : ''}
       setCurrentUser(user);
       setAuthChecking(false);
       if (user && isUserAdmin(user)) {
-        // Auto-synchronize any offline/local movements upon successful login
-        firestoreService.syncUnsyncedMovements()
-          .then((syncedCount) => {
-            if (syncedCount > 0) {
-              console.log(`Auto-sincronizados ${syncedCount} movimientos locales.`);
+        // Auto-synchronize any offline/local movements and facturas upon successful login
+        Promise.all([
+          firestoreService.syncUnsyncedMovements(),
+          firestoreService.syncUnsyncedFacturas()
+        ])
+          .then(([syncedMovements, syncedFacturas]) => {
+            if (syncedMovements > 0 || syncedFacturas > 0) {
+              console.log(`Auto-sincronizados ${syncedMovements} movimientos y ${syncedFacturas} facturas.`);
             }
             updateUnsyncedCount();
             fetchRows();
@@ -851,6 +854,12 @@ ${factura.qrUrl ? `🔗 Validar en ARCA/AFIP: ${factura.qrUrl}` : ''}
       }
     });
 
+    // Real-time listener for ARCA facturas across devices
+    const unsubFacturas = firestoreService.subscribeArcaFacturas((updatedFacturas) => {
+      setArcaFacturas(updatedFacturas);
+      fetchRows();
+    });
+
     getRedirectResult(auth)
       .then((result) => {
         if (result?.user) {
@@ -862,7 +871,10 @@ ${factura.qrUrl ? `🔗 Validar en ARCA/AFIP: ${factura.qrUrl}` : ''}
         setAuthError(err.code || err.message || "No se pudo completar el redireccionamiento para Google.");
       });
 
-    return () => unsubscribe();
+    return () => {
+      unsubscribe();
+      unsubFacturas();
+    };
   }, []);
 
   const loginWithGoogle = async () => {

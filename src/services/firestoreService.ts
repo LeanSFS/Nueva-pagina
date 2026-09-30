@@ -8,11 +8,14 @@ import {
   deleteDoc, 
   query, 
   where,
-  writeBatch
+  writeBatch,
+  onSnapshot
 } from 'firebase/firestore';
 import { db, auth } from './firebase.ts';
 import { SERVICES, VEHICLES } from '../constants.ts';
 import { ArcaConfig, ArcaFacturaRecord } from '../types.ts';
+import bundledFacturasJson from '../../public/facturas_arca.json';
+import bundledMovementsJson from '../../public/movements.json';
 
 // --- Error Handler conformance with FirestoreErrorInfo schema ---
 export enum OperationType {
@@ -528,8 +531,19 @@ export const firestoreService = {
       console.warn("Firestore getMovements notice, reading local/static fallback:", e);
     }
 
+    // 1b. Fetch shared movements registry from settings
+    try {
+      const regSnap = await withTimeout(getDoc(doc(db, 'settings', 'movements_registry')), 3000).catch(() => null);
+      if (regSnap && regSnap.exists()) {
+        const regData = regSnap.data();
+        if (Array.isArray(regData?.movements)) {
+          firestoreList.push(...regData.movements);
+        }
+      }
+    } catch (e) {}
+
     // 2. Fetch bundled static movements (/movements.json)
-    const staticMovements: Movement[] = [];
+    const staticMovements: Movement[] = Array.isArray(bundledMovementsJson) ? [...(bundledMovementsJson as Movement[])] : [];
     try {
       const staticRes = await fetch('/movements.json').catch(() => null);
       if (staticRes && staticRes.ok) {
@@ -622,6 +636,15 @@ export const firestoreService = {
     } catch (e) {
       handleFirestoreError(e, OperationType.WRITE, `${colPath}/${movement.id}`);
     }
+
+    // Sync to shared settings/movements_registry
+    try {
+      const regRef = doc(db, 'settings', 'movements_registry');
+      const regSnap = await withTimeout(getDoc(regRef), 3000).catch(() => null);
+      const currentList: Movement[] = regSnap?.exists() && Array.isArray(regSnap.data()?.movements) ? regSnap.data().movements : [];
+      const updatedList = [movement, ...currentList.filter(m => m.id !== movement.id)];
+      await withTimeout(setDoc(regRef, { movements: updatedList, lastUpdated: new Date().toISOString() }), 4000).catch(() => null);
+    } catch (e) {}
   },
 
   async deleteMovement(id: string): Promise<void> {
@@ -1334,7 +1357,7 @@ export const firestoreService = {
 
   async getArcaFacturas(): Promise<ArcaFacturaRecord[]> {
     // 1. Fetch bundled static facturas (/facturas_arca.json)
-    const staticFacturas: ArcaFacturaRecord[] = [];
+    const staticFacturas: ArcaFacturaRecord[] = Array.isArray(bundledFacturasJson) ? [...(bundledFacturasJson as ArcaFacturaRecord[])] : [];
     try {
       const staticRes = await fetch('/facturas_arca.json').catch(() => null);
       if (staticRes && staticRes.ok) {
@@ -1345,7 +1368,46 @@ export const firestoreService = {
       }
     } catch (e) {}
 
-    // 2. Fetch from backend server
+    // 2. Fetch shared registry from Firestore settings (accessible to all devices)
+    const sharedSettingsFacturas: ArcaFacturaRecord[] = [];
+    try {
+      const settingsRef = doc(db, 'settings', 'arca_facturas');
+      const settingsSnap = await withTimeout(getDoc(settingsRef), 3000).catch(() => null);
+      if (settingsSnap && settingsSnap.exists()) {
+        const data = settingsSnap.data();
+        if (Array.isArray(data?.facturas)) {
+          sharedSettingsFacturas.push(...data.facturas);
+        }
+      }
+    } catch (e) {}
+
+    // 2b. Fetch individual factura docs from settings collection
+    try {
+      const settingsDocs = await withTimeout(getDocs(collection(db, 'settings')), 3000).catch(() => null);
+      if (settingsDocs) {
+        settingsDocs.forEach(d => {
+          if (d.id.startsWith('factura_')) {
+            const f = d.data() as ArcaFacturaRecord;
+            if (f && f.id) sharedSettingsFacturas.push(f);
+          }
+        });
+      }
+    } catch (e) {}
+
+    // 3. Fetch from dedicated facturas collection in Firestore
+    const firestoreFacturas: ArcaFacturaRecord[] = [];
+    try {
+      const col = collection(db, 'facturas');
+      const snap = await withTimeout(getDocs(col), 2500).catch(() => null);
+      if (snap) {
+        snap.forEach(d => {
+          const item = d.data() as ArcaFacturaRecord;
+          if (item && item.id) firestoreFacturas.push(item);
+        });
+      }
+    } catch (e) {}
+
+    // 4. Fetch from backend server
     const serverFacturas: ArcaFacturaRecord[] = [];
     try {
       const cfg = await this.getArcaConfig().catch(() => null);
@@ -1362,71 +1424,198 @@ export const firestoreService = {
       const endpoint = base ? `${base}/api/arca/facturas` : '/api/arca/facturas';
       const res = await fetch(endpoint).catch(() => null);
       if (res && res.ok) {
-        const json = await res.json().catch(() => null);
-        if (json && json.success && Array.isArray(json.facturas)) {
-          serverFacturas.push(...json.facturas);
+        const ct = res.headers.get('content-type') || '';
+        if (ct.includes('application/json')) {
+          const json = await res.json().catch(() => null);
+          if (json && json.success && Array.isArray(json.facturas)) {
+            serverFacturas.push(...json.facturas);
+          }
         }
       }
-    } catch (e) {
-      console.warn('Could not fetch facturas from backend server:', e);
-    }
+    } catch (e) {}
 
-    // 3. Fetch from Firestore
-    const firestoreFacturas: ArcaFacturaRecord[] = [];
-    try {
-      const col = collection(db, 'facturas');
-      const snap = await withTimeout(getDocs(col), 2500);
-      snap.forEach(d => {
-        const item = d.data() as ArcaFacturaRecord;
-        if (item && item.id) firestoreFacturas.push(item);
-      });
-    } catch (e) {
-      console.warn('Could not fetch facturas from firestore:', e);
-    }
-
-    // 4. Local cached facturas
+    // 5. Local cached and unsynced facturas
     const cachedFacturas = getLocalCache<ArcaFacturaRecord[]>('lys_arca_facturas', []);
+    const unsyncedFacturas = getLocalCache<ArcaFacturaRecord[]>('lys_unsynced_facturas', []);
 
-    // Merge without duplicates
+    // Merge and deduplicate by key (puntoVenta + cbteNro) and id
     const map = new Map<string, ArcaFacturaRecord>();
-    for (const f of [...staticFacturas, ...serverFacturas, ...firestoreFacturas, ...cachedFacturas]) {
-      if (f && f.id) {
-        map.set(f.id, f);
+    for (const f of [
+      ...staticFacturas, 
+      ...serverFacturas, 
+      ...firestoreFacturas, 
+      ...sharedSettingsFacturas, 
+      ...cachedFacturas,
+      ...unsyncedFacturas
+    ]) {
+      if (f && f.cbteNro) {
+        const key = `${f.puntoVenta || 2}_${f.cbteNro}`;
+        const existing = map.get(key);
+        if (!existing) {
+          map.set(key, f);
+        } else {
+          // Merge preserving QR and details
+          map.set(key, {
+            ...existing,
+            ...f,
+            qrBase64: f.qrBase64 || existing.qrBase64,
+            qrUrl: f.qrUrl || existing.qrUrl
+          });
+        }
       }
     }
 
-    const merged = Array.from(map.values()).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+    const merged = Array.from(map.values()).sort((a, b) => Number(b.cbteNro) - Number(a.cbteNro));
     setLocalCache('lys_arca_facturas', merged);
+
+    // If user is admin and the shared settings registry is missing entries, backfill it in background
+    if (auth.currentUser && auth.currentUser.email?.toLowerCase() === 'leandro.saralegui@gmail.com') {
+      if (merged.length > sharedSettingsFacturas.length) {
+        const sRef = doc(db, 'settings', 'arca_facturas');
+        setDoc(sRef, { facturas: merged, lastUpdated: new Date().toISOString() }, { merge: true }).catch(() => null);
+      }
+    }
+
     return merged;
   },
 
   async saveArcaFactura(factura: ArcaFacturaRecord): Promise<void> {
     // 1. Cache locally
     const cached = getLocalCache<ArcaFacturaRecord[]>('lys_arca_facturas', []);
-    const updated = [factura, ...cached.filter(f => f.id !== factura.id)];
+    const updated = [factura, ...cached.filter(f => f.id !== factura.id && Number(f.cbteNro) !== Number(factura.cbteNro))];
     setLocalCache('lys_arca_facturas', updated);
 
-    // 2. Persist to Node backend server
+    // Add to unsynced queue
+    const unsynced = getLocalCache<ArcaFacturaRecord[]>('lys_unsynced_facturas', []);
+    const updatedUnsynced = [factura, ...unsynced.filter(f => f.id !== factura.id)];
+    setLocalCache('lys_unsynced_facturas', updatedUnsynced);
+
+    let writeSucceeded = false;
+
+    // 2. Persist to shared Firestore settings/arca_facturas (cross-device source of truth)
+    try {
+      const settingsRef = doc(db, 'settings', 'arca_facturas');
+      const snap = await withTimeout(getDoc(settingsRef), 3000).catch(() => null);
+      const currentList: ArcaFacturaRecord[] = snap?.exists() && Array.isArray(snap.data()?.facturas) ? snap.data().facturas : [];
+      const mergedList = [factura, ...currentList.filter(f => f.id !== factura.id && Number(f.cbteNro) !== Number(factura.cbteNro))];
+      await withTimeout(setDoc(settingsRef, { facturas: mergedList, lastUpdated: new Date().toISOString() }), 4000);
+      writeSucceeded = true;
+    } catch (err) {
+      console.warn('Could not save to settings/arca_facturas:', err);
+    }
+
+    // 2b. Persist individual factura to settings/factura_{id}
+    try {
+      const cleanDoc = cleanFirestoreData(factura);
+      await withTimeout(setDoc(doc(db, 'settings', `factura_${factura.id}`), cleanDoc), 3000);
+      writeSucceeded = true;
+    } catch (e) {}
+
+    // 3. Persist to dedicated collection facturas/{id}
+    try {
+      const docRef = doc(db, 'facturas', factura.id);
+      const cleanFactura = cleanFirestoreData(factura);
+      await withTimeout(setDoc(docRef, cleanFactura), 3500);
+      writeSucceeded = true;
+    } catch (e) {
+      handleFirestoreError(e, OperationType.CREATE, `facturas/${factura.id}`);
+    }
+
+    // 4. Persist to Node backend server
     try {
       const cfg = await this.getArcaConfig().catch(() => null);
-      const base = cfg?.apiHost?.trim().replace(/\/$/, '') || '';
+      let base = cfg?.apiHost?.trim().replace(/\/$/, '') || '';
+      if (typeof window !== 'undefined') {
+        const host = window.location.hostname;
+        const isLocalOrRunApp = host.includes('localhost') || host === '127.0.0.1' || host.includes('run.app');
+        if (isLocalOrRunApp) {
+          base = '';
+        } else if (!base) {
+          base = 'https://nueva-pagina.onrender.com';
+        }
+      }
       const endpoint = base ? `${base}/api/arca/facturas` : '/api/arca/facturas';
       fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(factura)
       }).catch(err => console.warn('Could not sync factura to backend:', err));
-    } catch (e) {
-      console.warn('Could not send factura to backend server:', e);
+    } catch (e) {}
+
+    // If successfully written remotely, remove from unsynced queue
+    if (writeSucceeded) {
+      const freshQueue = getLocalCache<ArcaFacturaRecord[]>('lys_unsynced_facturas', []);
+      setLocalCache('lys_unsynced_facturas', freshQueue.filter(f => f.id !== factura.id));
     }
 
-    // 3. Persist to Firestore
+    // 5. Also synthesize and save the corresponding Movement in Caja
+    const movId = factura.movementId || `mov_${factura.id}`;
+    const movVal: Movement = {
+      id: movId,
+      fecha: factura.fechaIso || (factura.fechaEmision ? factura.fechaEmision.split('/').reverse().join('-') : new Date().toISOString().split('T')[0]),
+      tipo: 'Ingreso',
+      categoria: 'Lavado',
+      concepto: factura.conceptoDescripcion || 'Servicio de Estética y Lavado Automotor',
+      monto_ars: Number(factura.total) || 0,
+      medio: 'Efectivo',
+      estado: 'Pagado',
+      factura: `${factura.tipoComprobanteNombre || 'FACTURA C'} Nº ${String(factura.puntoVenta).padStart(4, '0')}-${String(factura.cbteNro).padStart(8, '0')}`,
+      cliente: factura.clienteNombre || 'Consumidor Final',
+      facturado: true,
+      cae: factura.cae,
+      caeVto: factura.caeVto,
+      facturaId: factura.id,
+      notas: `Factura oficial ARCA emitida con CAE ${factura.cae}`
+    };
+    await this.saveMovement(movVal).catch(() => null);
+  },
+
+  /**
+   * Real-time subscription to ARCA Facturas across devices
+   */
+  subscribeArcaFacturas(callback: (facturas: ArcaFacturaRecord[]) => void): () => void {
     try {
-      const docRef = doc(db, 'facturas', factura.id);
-      const cleanFactura = cleanFirestoreData(factura);
-      await withTimeout(setDoc(docRef, cleanFactura), 3500);
+      const settingsRef = doc(db, 'settings', 'arca_facturas');
+      return onSnapshot(settingsRef, (snap) => {
+        if (snap.exists() && Array.isArray(snap.data()?.facturas)) {
+          const remoteFacturas: ArcaFacturaRecord[] = snap.data().facturas;
+          const cached = getLocalCache<ArcaFacturaRecord[]>('lys_arca_facturas', []);
+          const map = new Map<string, ArcaFacturaRecord>();
+          for (const f of [...remoteFacturas, ...cached]) {
+            if (f && f.cbteNro) {
+              const key = `${f.puntoVenta || 2}_${f.cbteNro}`;
+              if (!map.has(key)) map.set(key, f);
+            }
+          }
+          const merged = Array.from(map.values()).sort((a, b) => Number(b.cbteNro) - Number(a.cbteNro));
+          setLocalCache('lys_arca_facturas', merged);
+          callback(merged);
+        }
+      }, (err) => {
+        console.warn('subscribeArcaFacturas notice:', err);
+      });
     } catch (e) {
-      handleFirestoreError(e, OperationType.CREATE, `facturas/${factura.id}`);
+      return () => {};
     }
+  },
+
+  /**
+   * Syncs any locally stored invoices that were created offline or before login
+   */
+  async syncUnsyncedFacturas(): Promise<number> {
+    const unsynced = getLocalCache<ArcaFacturaRecord[]>('lys_unsynced_facturas', []);
+    if (unsynced.length === 0) return 0;
+    let count = 0;
+    for (const f of unsynced) {
+      try {
+        await this.saveArcaFactura(f);
+        count++;
+        const current = getLocalCache<ArcaFacturaRecord[]>('lys_unsynced_facturas', []);
+        setLocalCache('lys_unsynced_facturas', current.filter(x => x.id !== f.id));
+      } catch (e) {
+        console.warn('Could not sync factura to Firestore:', e);
+      }
+    }
+    return count;
   }
 };
