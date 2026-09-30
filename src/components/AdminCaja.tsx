@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   ArrowLeft, 
   Search, 
@@ -169,6 +169,49 @@ export default function AdminCaja({
   // Modal para ver comprobante oficial / imprimir / enviar WhatsApp
   const [selectedFacturaRecord, setSelectedFacturaRecord] = useState<ArcaFacturaRecord | null>(null);
 
+  // Cola secuencial de facturación en segundo plano
+  interface FacturaQueueItem {
+    movement: Movement;
+    form: {
+      puntoVenta: number;
+      tipoComprobante: number;
+      clienteDocTipo: string;
+      clienteDocNro: string;
+      clienteNombre: string;
+      clienteTelefono: string;
+      montoTotal: number;
+      concepto: string;
+    };
+  }
+
+  interface CajaToastNotification {
+    id: string;
+    type: 'success' | 'error' | 'info';
+    message: string;
+  }
+
+  const [pendingFacturaIds, setPendingFacturaIds] = useState<Set<string>>(new Set());
+  const [queueStatus, setQueueStatus] = useState<{ isProcessing: boolean; currentClient?: string; remaining: number }>({
+    isProcessing: false,
+    remaining: 0
+  });
+  const [toasts, setToasts] = useState<CajaToastNotification[]>([]);
+
+  const facturaQueueRef = useRef<FacturaQueueItem[]>([]);
+  const isProcessingQueueRef = useRef<boolean>(false);
+
+  const addToast = (type: 'success' | 'error' | 'info', message: string, durationMs = 6000) => {
+    const id = `toast_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    setToasts(prev => [...prev, { id, type, message }]);
+    setTimeout(() => {
+      setToasts(prev => prev.filter(t => t.id !== id));
+    }, durationMs);
+  };
+
+  const removeToast = (id: string) => {
+    setToasts(prev => prev.filter(t => t.id !== id));
+  };
+
   // Helper para saber si un movimiento ya fue facturado
   const isMovementFacturado = (m: Movement) => {
     if (m.facturado) return true;
@@ -209,24 +252,21 @@ export default function AdminCaja({
     });
   };
 
-  // Emitir Factura Electrónica ARCA para el movimiento
-  const handleEmitirFacturaMovimiento = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    if (!facturarTarget) return;
-
-    const montoNum = Number(facturarForm.montoTotal);
-    if (!montoNum || montoNum <= 0) {
-      setFacturaError('El monto debe ser mayor a $0.');
+  // Procesador secuencial de la cola de facturación en segundo plano
+  const processNextQueueItem = async () => {
+    if (isProcessingQueueRef.current) return;
+    if (facturaQueueRef.current.length === 0) {
+      setQueueStatus({ isProcessing: false, remaining: 0 });
       return;
     }
 
-    if (facturarForm.clienteDocTipo !== '99' && !facturarForm.clienteDocNro.trim()) {
-      setFacturaError('Por favor ingrese el número de documento del cliente.');
-      return;
-    }
-
-    setIsSubmittingFactura(true);
-    setFacturaError(null);
+    isProcessingQueueRef.current = true;
+    const currentItem = facturaQueueRef.current.shift()!;
+    setQueueStatus({
+      isProcessing: true,
+      currentClient: currentItem.form.clienteNombre,
+      remaining: facturaQueueRef.current.length
+    });
 
     try {
       const cfg = arcaConfig || await firestoreService.getArcaConfig();
@@ -247,15 +287,15 @@ export default function AdminCaja({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           cuit: cfg.cuit || '20411564550',
-          puntoVenta: facturarForm.puntoVenta,
-          tipoComprobante: facturarForm.tipoComprobante,
+          puntoVenta: currentItem.form.puntoVenta,
+          tipoComprobante: currentItem.form.tipoComprobante,
           concepto: 2, // Servicios
-          docTipo: Number(facturarForm.clienteDocTipo),
-          docNro: facturarForm.clienteDocTipo === '99' ? '0' : facturarForm.clienteDocNro.trim(),
-          total: montoNum,
-          clienteNombre: facturarForm.clienteNombre.trim() || 'Consumidor Final',
-          clienteTelefono: facturarForm.clienteTelefono.trim(),
-          descripcionServicio: facturarForm.concepto,
+          docTipo: Number(currentItem.form.clienteDocTipo),
+          docNro: currentItem.form.clienteDocTipo === '99' ? '0' : currentItem.form.clienteDocNro,
+          total: currentItem.form.montoTotal,
+          clienteNombre: currentItem.form.clienteNombre,
+          clienteTelefono: currentItem.form.clienteTelefono,
+          descripcionServicio: currentItem.form.concepto,
           production: cfg.production !== false
         })
       });
@@ -286,46 +326,117 @@ export default function AdminCaja({
         tipoComprobante: Number(data.tipoComprobante),
         tipoComprobanteNombre: data.tipoComprobanteNombre || (Number(data.tipoComprobante) === 11 ? 'FACTURA C' : Number(data.tipoComprobante) === 6 ? 'FACTURA B' : 'FACTURA A'),
         fechaEmision: data.fechaEmision || new Date().toLocaleDateString('es-AR'),
-        fechaIso: facturarTarget.fecha || new Date().toISOString().split('T')[0],
-        total: montoNum,
-        clienteNombre: facturarForm.clienteNombre.trim() || 'Consumidor Final',
-        clienteDocTipo: facturarForm.clienteDocTipo === '96' ? 'DNI' : facturarForm.clienteDocTipo === '80' ? 'CUIT' : 'Consumidor Final',
-        clienteDocNro: facturarForm.clienteDocNro.trim() || '0',
-        clienteTelefono: facturarForm.clienteTelefono.trim() || '',
-        conceptoDescripcion: facturarForm.concepto,
+        fechaIso: currentItem.movement.fecha || new Date().toISOString().split('T')[0],
+        total: currentItem.form.montoTotal,
+        clienteNombre: currentItem.form.clienteNombre,
+        clienteDocTipo: currentItem.form.clienteDocTipo === '96' ? 'DNI' : currentItem.form.clienteDocTipo === '80' ? 'CUIT' : 'Consumidor Final',
+        clienteDocNro: currentItem.form.clienteDocNro || '0',
+        clienteTelefono: currentItem.form.clienteTelefono || '',
+        conceptoDescripcion: currentItem.form.concepto,
         qrUrl: data.qrUrl || '',
         qrBase64: data.qrBase64 || '',
         createdAt: new Date().toISOString(),
-        movementId: facturarTarget.id
+        movementId: currentItem.movement.id
       };
 
-      // 1. Guardar factura en colección Firestore
+      // 1. Guardar factura en colección Firestore y caché
       await firestoreService.saveArcaFactura(newFactura);
 
       // 2. Actualizar movimiento en Firestore
       const updatedMovement: Movement = {
-        ...facturarTarget,
+        ...currentItem.movement,
         factura: facturaNro,
         facturado: true,
         cae: data.cae,
         caeVto: data.caeVto,
         facturaId: facturaId,
-        cliente: facturarForm.clienteNombre.trim() || facturarTarget.cliente
+        cliente: currentItem.form.clienteNombre || currentItem.movement.cliente
       };
       await firestoreService.saveMovement(updatedMovement);
 
       // 3. Actualizar estados locales reactivos
-      setAllMovements(prev => prev.map(m => m.id === facturarTarget.id ? updatedMovement : m));
+      setAllMovements(prev => prev.map(m => m.id === currentItem.movement.id ? updatedMovement : m));
       setArcaFacturas(prev => [newFactura, ...prev.filter(f => f.id !== newFactura.id)]);
 
-      // 4. Cerrar formulario de verificación sin abrir popup posterior con la factura
-      setFacturarTarget(null);
+      // 4. Notificar éxito en pantalla
+      addToast('success', `✅ Factura ${facturaNro} autorizada con éxito para ${currentItem.form.clienteNombre} (CAE: ${data.cae})`, 7000);
     } catch (err: any) {
-      console.error('Error emitiendo factura desde caja:', err);
-      setFacturaError(err.message || 'Error al emitir factura en ARCA');
+      console.error('Error emitiendo factura en segundo plano:', err);
+      addToast('error', `❌ Error emitiendo factura de ${currentItem.form.clienteNombre}: ${err.message || 'Error en ARCA'}`, 9000);
     } finally {
-      setIsSubmittingFactura(false);
+      // Remover de pendingFacturaIds
+      setPendingFacturaIds(prev => {
+        const next = new Set(prev);
+        next.delete(currentItem.movement.id);
+        return next;
+      });
+
+      isProcessingQueueRef.current = false;
+      setQueueStatus({
+        isProcessing: false,
+        remaining: facturaQueueRef.current.length
+      });
+
+      // Pausa de seguridad de 400ms para no solapar llamadas con AFIP
+      setTimeout(() => {
+        processNextQueueItem();
+      }, 400);
     }
+  };
+
+  // Emitir Factura Electrónica ARCA para el movimiento (se cierra inmediatamente y se ejecuta en segundo plano)
+  const handleEmitirFacturaMovimiento = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!facturarTarget) return;
+
+    const montoNum = Number(facturarForm.montoTotal);
+    if (!montoNum || montoNum <= 0) {
+      setFacturaError('El monto debe ser mayor a $0.');
+      return;
+    }
+
+    if (facturarForm.clienteDocTipo !== '99' && !facturarForm.clienteDocNro.trim()) {
+      setFacturaError('Por favor ingrese el número de documento del cliente.');
+      return;
+    }
+
+    const queueItem: FacturaQueueItem = {
+      movement: { ...facturarTarget },
+      form: {
+        puntoVenta: facturarForm.puntoVenta,
+        tipoComprobante: facturarForm.tipoComprobante,
+        clienteDocTipo: facturarForm.clienteDocTipo,
+        clienteDocNro: facturarForm.clienteDocNro.trim(),
+        clienteNombre: facturarForm.clienteNombre.trim() || 'Consumidor Final',
+        clienteTelefono: facturarForm.clienteTelefono.trim(),
+        montoTotal: montoNum,
+        concepto: facturarForm.concepto
+      }
+    };
+
+    const targetMovementId = facturarTarget.id;
+    const clientName = queueItem.form.clienteNombre;
+
+    // 1. CERRAR EL POPUP INMEDIATAMENTE
+    setFacturarTarget(null);
+    setFacturaError(null);
+    setIsSubmittingFactura(false);
+
+    // 2. Marcar el movimiento en la tabla como "facturando en segundo plano"
+    setPendingFacturaIds(prev => new Set(prev).add(targetMovementId));
+
+    // 3. Encolar
+    facturaQueueRef.current.push(queueItem);
+    setQueueStatus(prev => ({
+      ...prev,
+      remaining: facturaQueueRef.current.length
+    }));
+
+    // 4. Notificar al usuario que quedó encolado
+    addToast('info', `⚡ Factura de ${clientName} ($${montoNum.toLocaleString('es-AR')}) agregada a la cola en segundo plano.`);
+
+    // 5. Procesar cola
+    processNextQueueItem();
   };
 
   // Abrir comprobante
@@ -2072,6 +2183,11 @@ ${factura.qrUrl ? `🔗 Validar en ARCA/AFIP: ${factura.qrUrl}` : ''}
                               <Printer className="w-3.5 h-3.5" />
                             </button>
                           </div>
+                        ) : pendingFacturaIds.has(r.id) ? (
+                          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-500/15 text-amber-300 border border-amber-500/30 text-[10px] font-bold animate-pulse">
+                            <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-400 shrink-0" />
+                            <span>Facturando en 2º plano...</span>
+                          </div>
                         ) : (
                           <div className="flex items-center gap-2">
                             <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-zinc-800 text-zinc-400 border border-white/5">
@@ -2486,6 +2602,65 @@ ${factura.qrUrl ? `🔗 Validar en ARCA/AFIP: ${factura.qrUrl}` : ''}
               <button onClick={handleDelete} className="flex-1 px-4 py-3 rounded-xl bg-red-500 text-white font-black uppercase text-[10px] hover:bg-red-400 transition-all">Borrar</button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* WIDGET FLOTANTE: COLA DE FACTURACIÓN EN SEGUNDO PLANO */}
+      {queueStatus.isProcessing && (
+        <aside aria-label="Estado de facturación en segundo plano" className="fixed bottom-6 right-6 z-[600] bg-zinc-950/95 border border-emerald-500/40 rounded-2xl p-4 shadow-2xl backdrop-blur-xl flex items-center gap-3.5 max-w-sm animate-fade-in border-l-4 border-l-emerald-500">
+          <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 shrink-0">
+            <Loader2 className="w-5 h-5 text-emerald-400 animate-spin" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] font-black uppercase tracking-wider text-emerald-400">ARCA En Segundo Plano</span>
+              {queueStatus.remaining > 0 && (
+                <span className="text-[10px] bg-white/10 px-1.5 py-0.5 rounded-full text-zinc-300 font-mono">
+                  +{queueStatus.remaining} en espera
+                </span>
+              )}
+            </div>
+            <p className="text-xs font-bold text-white truncate">
+              {queueStatus.currentClient ? `Emitiendo para ${queueStatus.currentClient}` : 'Autorizando con AFIP...'}
+            </p>
+            <p className="text-[10px] text-zinc-400">Podés seguir facturando otros cobros sin esperar.</p>
+          </div>
+        </aside>
+      )}
+
+      {/* NOTIFICACIONES TOAST FLOTANTES */}
+      {toasts.length > 0 && (
+        <div className="fixed top-6 right-6 z-[700] space-y-2.5 max-w-md w-full pointer-events-none p-4">
+          {toasts.map(t => (
+            <div
+              key={t.id}
+              className={`pointer-events-auto flex items-start gap-3 p-4 rounded-2xl border shadow-2xl backdrop-blur-xl animate-fade-in ${
+                t.type === 'success'
+                  ? 'bg-zinc-950/95 border-emerald-500/40 text-emerald-300 border-l-4 border-l-emerald-500'
+                  : t.type === 'error'
+                  ? 'bg-zinc-950/95 border-rose-500/40 text-rose-300 border-l-4 border-l-rose-500'
+                  : 'bg-zinc-950/95 border-white/20 text-zinc-200 border-l-4 border-l-cyan-500'
+              }`}
+            >
+              {t.type === 'success' ? (
+                <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
+              ) : t.type === 'error' ? (
+                <AlertCircle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
+              ) : (
+                <Loader2 className="w-5 h-5 text-cyan-400 animate-spin shrink-0 mt-0.5" />
+              )}
+              <div className="flex-1 text-xs font-medium leading-relaxed">
+                {t.message}
+              </div>
+              <button
+                type="button"
+                onClick={() => removeToast(t.id)}
+                className="text-zinc-500 hover:text-white p-1 rounded-lg cursor-pointer shrink-0"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          ))}
         </div>
       )}
     </div>
