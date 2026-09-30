@@ -93,14 +93,23 @@ function setLocalCache<T>(key: string, value: T): void {
   } catch (e) {}
 }
 
-function cleanFirestoreData<T extends Record<string, any>>(obj: T): T {
-  const clean: any = {};
-  for (const [key, value] of Object.entries(obj)) {
-    if (value !== undefined) {
-      clean[key] = value;
+function cleanFirestoreData<T>(obj: T): T {
+  if (obj === undefined) return null as any;
+  const deepClean = (item: any): any => {
+    if (item === undefined) return null;
+    if (item === null || typeof item !== 'object') return item;
+    if (Array.isArray(item)) {
+      return item.map(deepClean);
     }
-  }
-  return clean;
+    const res: Record<string, any> = {};
+    for (const [key, val] of Object.entries(item)) {
+      if (val !== undefined) {
+        res[key] = deepClean(val);
+      }
+    }
+    return res;
+  };
+  return deepClean(obj);
 }
 
 function isUserAdmin(): boolean {
@@ -643,7 +652,8 @@ export const firestoreService = {
       const regSnap = await withTimeout(getDoc(regRef), 3000).catch(() => null);
       const currentList: Movement[] = regSnap?.exists() && Array.isArray(regSnap.data()?.movements) ? regSnap.data().movements : [];
       const updatedList = [movement, ...currentList.filter(m => m.id !== movement.id)];
-      await withTimeout(setDoc(regRef, { movements: updatedList, lastUpdated: new Date().toISOString() }), 4000).catch(() => null);
+      const cleanReg = cleanFirestoreData({ movements: updatedList, lastUpdated: new Date().toISOString() });
+      await withTimeout(setDoc(regRef, cleanReg), 4000).catch(() => null);
     } catch (e) {}
   },
 
@@ -1349,7 +1359,7 @@ export const firestoreService = {
     setLocalCache('lys_arca_config', config);
     try {
       const docRef = doc(db, 'config', 'arca');
-      await withTimeout(setDoc(docRef, config, { merge: true }), 4000);
+      await withTimeout(setDoc(docRef, cleanFirestoreData(config), { merge: true }), 4000);
     } catch (e) {
       handleFirestoreError(e, OperationType.WRITE, 'config/arca');
     }
@@ -1472,7 +1482,8 @@ export const firestoreService = {
     if (auth.currentUser && auth.currentUser.email?.toLowerCase() === 'leandro.saralegui@gmail.com') {
       if (merged.length > sharedSettingsFacturas.length) {
         const sRef = doc(db, 'settings', 'arca_facturas');
-        setDoc(sRef, { facturas: merged, lastUpdated: new Date().toISOString() }, { merge: true }).catch(() => null);
+        const cleanPayload = cleanFirestoreData({ facturas: merged, lastUpdated: new Date().toISOString() });
+        setDoc(sRef, cleanPayload, { merge: true }).catch(() => null);
       }
     }
 
@@ -1498,7 +1509,8 @@ export const firestoreService = {
       const snap = await withTimeout(getDoc(settingsRef), 3000).catch(() => null);
       const currentList: ArcaFacturaRecord[] = snap?.exists() && Array.isArray(snap.data()?.facturas) ? snap.data().facturas : [];
       const mergedList = [factura, ...currentList.filter(f => f.id !== factura.id && Number(f.cbteNro) !== Number(factura.cbteNro))];
-      await withTimeout(setDoc(settingsRef, { facturas: mergedList, lastUpdated: new Date().toISOString() }), 4000);
+      const cleanPayload = cleanFirestoreData({ facturas: mergedList, lastUpdated: new Date().toISOString() });
+      await withTimeout(setDoc(settingsRef, cleanPayload), 4000);
       writeSucceeded = true;
     } catch (err) {
       console.warn('Could not save to settings/arca_facturas:', err);
