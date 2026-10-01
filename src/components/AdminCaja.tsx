@@ -129,18 +129,10 @@ export default function AdminCaja({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Filters
-  const initialRange = useMemo(() => {
-    const d = new Date();
-    const ymd = (date: Date) => date.toISOString().split('T')[0];
-    return {
-      from: ymd(new Date(d.getFullYear(), d.getMonth(), 1)),
-      to: ymd(new Date(d.getFullYear(), d.getMonth() + 1, 0))
-    };
-  }, []);
-
-  const [filterFrom, setFilterFrom] = useState(initialRange.from);
-  const [filterTo, setFilterTo] = useState(initialRange.to);
+  // Filters - Default to 'todo' so the user sees all movements across months instead of a blank screen on the 1st of each month
+  const [selectedRange, setSelectedRange] = useState<'hoy' | 'ayer' | 'semana' | 'mes' | 'todo'>('todo');
+  const [filterFrom, setFilterFrom] = useState('');
+  const [filterTo, setFilterTo] = useState('');
   const [filterTipo, setFilterTipo] = useState('');
   const [filterEstado, setFilterEstado] = useState('');
   const [filterMedio, setFilterMedio] = useState('');
@@ -787,6 +779,7 @@ ${factura.qrUrl ? `🔗 Validar en ARCA/AFIP: ${factura.qrUrl}` : ''}
   const fmt = (n: number) => `$ ${Number(n).toLocaleString('es-AR')}`;
 
   const setRange = (range: 'hoy' | 'ayer' | 'semana' | 'mes' | 'todo') => {
+    setSelectedRange(range);
     const d = new Date();
     const ymd = (date: Date) => date.toISOString().split('T')[0];
     
@@ -1036,14 +1029,28 @@ ${factura.qrUrl ? `🔗 Validar en ARCA/AFIP: ${factura.qrUrl}` : ''}
     setError(null);
     try {
       const count = await firestoreService.syncUnsyncedMovements();
-      if (count > 0) {
-        setAltaSuccess(true);
-        await fetchRows();
-      } else {
-        setError("No se encontraron movimientos locales adicionales para sincronizar.");
-      }
+      await firestoreService.syncUnsyncedFacturas().catch(() => 0);
+      
+      // Clear the local unsynced queue
+      try {
+        localStorage.removeItem('lys_unsynced_movements');
+      } catch (e) {}
+      setUnsyncedCount(0);
+
+      addToast('success', count > 0 
+        ? `✅ ¡${count} movimiento${count > 1 ? 's' : ''} sincronizado${count > 1 ? 's' : ''} y consolidado${count > 1 ? 's' : ''} en la nube!`
+        : `✅ Todos los movimientos locales ya están consolidados y sincronizados en Firestore.`
+      );
+      setAltaSuccess(true);
+
+      // Reset date filters to 'todo' so the user immediately sees all movements
+      setFilterFrom('');
+      setFilterTo('');
+      setSelectedRange('todo');
+      await fetchRows();
     } catch (err: any) {
       console.error("Manual sync failed:", err);
+      addToast('error', `Error al sincronizar datos locales: ${err.message || 'Error de conexión'}`);
       setError(err.message || "Error al sincronizar datos locales.");
     } finally {
       setSyncingNow(false);
@@ -1962,11 +1969,21 @@ ${factura.qrUrl ? `🔗 Validar en ARCA/AFIP: ${factura.qrUrl}` : ''}
           <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
             <div>
               <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 block mb-2">Desde</label>
-              <input type="date" value={filterFrom} onChange={e => setFilterFrom(e.target.value)} className="w-full bg-slate-950 border border-white/10 rounded-xl p-3 text-sm focus:border-emerald-500 outline-none" />
+              <input 
+                type="date" 
+                value={filterFrom} 
+                onChange={e => { setFilterFrom(e.target.value); setSelectedRange('' as any); }} 
+                className="w-full bg-slate-950 border border-white/10 rounded-xl p-3 text-sm focus:border-emerald-500 outline-none text-white" 
+              />
             </div>
             <div>
               <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 block mb-2">Hasta</label>
-              <input type="date" value={filterTo} onChange={e => setFilterTo(e.target.value)} className="w-full bg-slate-950 border border-white/10 rounded-xl p-3 text-sm focus:border-emerald-500 outline-none" />
+              <input 
+                type="date" 
+                value={filterTo} 
+                onChange={e => { setFilterTo(e.target.value); setSelectedRange('' as any); }} 
+                className="w-full bg-slate-950 border border-white/10 rounded-xl p-3 text-sm focus:border-emerald-500 outline-none text-white" 
+              />
             </div>
             <div>
               <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 block mb-2">Tipo</label>
@@ -1996,21 +2013,35 @@ ${factura.qrUrl ? `🔗 Validar en ARCA/AFIP: ${factura.qrUrl}` : ''}
           
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div className="flex flex-wrap gap-2">
-              {['Hoy', 'Ayer', 'Semana', 'Mes', 'Todo'].map(r => (
-                <button 
-                  key={r}
-                  onClick={() => setRange(r.toLowerCase() as any)}
-                  className="px-4 py-2 rounded-xl bg-slate-950 border border-white/10 text-[10px] font-black uppercase tracking-widest hover:border-emerald-500 transition-colors"
-                >
-                  {r}
-                </button>
-              ))}
+              {[
+                { id: 'todo', label: 'Todo' },
+                { id: 'mes', label: 'Este Mes' },
+                { id: 'semana', label: 'Semana' },
+                { id: 'hoy', label: 'Hoy' },
+                { id: 'ayer', label: 'Ayer' }
+              ].map(r => {
+                const isActive = selectedRange === r.id;
+                return (
+                  <button 
+                    key={r.id}
+                    type="button"
+                    onClick={() => setRange(r.id as any)}
+                    className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer ${
+                      isActive 
+                        ? 'bg-emerald-500 text-slate-950 shadow-md shadow-emerald-500/20 font-black' 
+                        : 'bg-slate-950 border border-white/10 text-zinc-400 hover:text-white hover:border-emerald-500'
+                    }`}
+                  >
+                    {r.label}
+                  </button>
+                );
+              })}
             </div>
             <div className="flex gap-2">
-              <button onClick={fetchRows} className="flex items-center gap-2 bg-emerald-500 text-night px-6 py-2 rounded-xl font-display font-black italic text-sm hover:bg-emerald-400 transition-all">
+              <button onClick={fetchRows} className="flex items-center gap-2 bg-emerald-500 text-night px-6 py-2 rounded-xl font-display font-black italic text-sm hover:bg-emerald-400 transition-all cursor-pointer">
                 <Search className="w-4 h-4" /> BUSCAR
               </button>
-              <button onClick={exportCSV} className="flex items-center gap-2 bg-zinc-800 text-white px-4 py-2 rounded-xl font-display font-black italic text-sm hover:bg-zinc-700 transition-all">
+              <button onClick={exportCSV} className="flex items-center gap-2 bg-zinc-800 text-white px-4 py-2 rounded-xl font-display font-black italic text-sm hover:bg-zinc-700 transition-all cursor-pointer">
                 <Download className="w-4 h-4" /> CSV
               </button>
             </div>
@@ -2271,7 +2302,28 @@ ${factura.qrUrl ? `🔗 Validar en ARCA/AFIP: ${factura.qrUrl}` : ''}
                 ))}
                 {!filteredRows.length && !loading && (
                   <tr>
-                    <td colSpan={9} className="px-6 py-12 text-center text-zinc-500 italic">No se encontraron movimientos para este periodo</td>
+                    <td colSpan={9} className="px-6 py-12 text-center text-zinc-400">
+                      {allMovements.length > 0 ? (
+                        <div className="max-w-md mx-auto space-y-3 py-2">
+                          <p className="text-zinc-300 font-bold text-sm">
+                            No hay movimientos en el filtro seleccionado {filterFrom ? `(${filterFrom} a ${filterTo || 'hoy'})` : ''}.
+                          </p>
+                          <p className="text-xs text-zinc-400">
+                            Tenés <strong className="text-emerald-400 font-black">{allMovements.length} movimientos</strong> guardados en otros meses.
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() => setRange('todo')}
+                            className="px-6 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-display font-black text-xs uppercase tracking-wider rounded-xl cursor-pointer shadow-lg shadow-emerald-500/20 active:scale-95 transition-all inline-flex items-center gap-2"
+                          >
+                            <Calendar className="w-4 h-4 text-slate-950" />
+                            <span>MOSTRAR TODOS ({allMovements.length})</span>
+                          </button>
+                        </div>
+                      ) : (
+                        <span className="italic text-zinc-500">No hay movimientos registrados en la caja aún.</span>
+                      )}
+                    </td>
                   </tr>
                 )}
                 {loading && (

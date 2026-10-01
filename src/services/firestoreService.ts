@@ -685,16 +685,37 @@ export const firestoreService = {
     const colPath = 'movements';
     
     for (const m of unsynced) {
+      if (!m || !m.id) continue;
       try {
-        await withTimeout(setDoc(doc(db, colPath, m.id), m), 2500);
+        const cleanMov = cleanFirestoreData(m);
+        await withTimeout(setDoc(doc(db, colPath, m.id), cleanMov), 6000);
         count++;
-        // Remove from queue
+        // Remove from unsynced queue
         const current = getLocalCache<Movement[]>('lys_unsynced_movements', []);
         setLocalCache('lys_unsynced_movements', current.filter(x => x.id !== m.id));
       } catch (err) {
-        console.warn(`Could not sync movement ${m.id} to Firestore:`, err);
+        console.warn(`Could not sync movement ${m.id} to Firestore collection, trying fallback:`, err);
+        try {
+          await this.saveMovement(m);
+          count++;
+          const current = getLocalCache<Movement[]>('lys_unsynced_movements', []);
+          setLocalCache('lys_unsynced_movements', current.filter(x => x.id !== m.id));
+        } catch (e2) {
+          console.warn(`Fallback sync for ${m.id} also failed:`, e2);
+        }
       }
     }
+
+    // Always push current consolidated list to shared movements_registry
+    try {
+      const allLocal = getLocalCache<Movement[]>('lys_cache_movements', []);
+      if (allLocal.length > 0) {
+        const regRef = doc(db, 'settings', 'movements_registry');
+        const cleanReg = cleanFirestoreData({ movements: allLocal, lastUpdated: new Date().toISOString() });
+        await withTimeout(setDoc(regRef, cleanReg), 6000).catch(() => null);
+      }
+    } catch (e) {}
+
     return count;
   },
 
