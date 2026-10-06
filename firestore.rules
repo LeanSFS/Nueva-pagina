@@ -36,7 +36,7 @@ service cloud.firestore {
 
     function isValidBooking(booking) {
       return booking.keys().hasAll(['id', 'fecha', 'hora', 'tipo', 'servicio', 'nombre', 'telefono', 'direccion', 'estado'])
-          && booking.keys().size() >= 9 && booking.keys().size() <= 10
+          && booking.keys().size() >= 9 && booking.keys().size() <= 16
           && booking.id is string && booking.id.size() <= 128
           && booking.fecha is string && booking.fecha.size() == 10
           && booking.hora is string && booking.hora.size() == 5
@@ -46,7 +46,12 @@ service cloud.firestore {
           && booking.telefono is string && booking.telefono.size() <= 50
           && booking.direccion is string && booking.direccion.size() <= 500
           && booking.estado is string && booking.estado in ['pendiente', 'confirmado', 'hecho', 'cancelado']
-          && (!('blockedSlots' in booking) || booking.blockedSlots is list);
+          && (!('blockedSlots' in booking) || booking.blockedSlots is list)
+          && (!('modalidad' in booking) || booking.modalidad is string && (booking.modalidad == 'taller' || booking.modalidad == 'domicilio'))
+          && (!('recargoDomicilio' in booking) || booking.recargoDomicilio is int || booking.recargoDomicilio is float)
+          && (!('precioTotal' in booking) || booking.precioTotal is int || booking.precioTotal is float)
+          && (!('indicacionesDomicilio' in booking) || booking.indicacionesDomicilio is string && booking.indicacionesDomicilio.size() <= 500)
+          && (!('cumpleRequisitosDomicilio' in booking) || booking.cumpleRequisitosDomicilio is bool);
     }
 
     function isValidTakenSlot(slot) {

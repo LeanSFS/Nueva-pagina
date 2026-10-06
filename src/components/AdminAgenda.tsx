@@ -26,7 +26,8 @@ import {
   RotateCcw,
   SlidersHorizontal,
   ArrowRight,
-  Filter
+  Filter,
+  MapPin
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -85,6 +86,8 @@ export default function AdminAgenda({
   const [mbDurationHours, setMbDurationHours] = useState('1.5');
   const [mbPrice, setMbPrice] = useState('');
   const [mbNotes, setMbNotes] = useState('');
+  const [mbModalidad, setMbModalidad] = useState<'taller' | 'domicilio'>('taller');
+  const [mbAddress, setMbAddress] = useState('');
   const [isSavingManual, setIsSavingManual] = useState(false);
 
   // Search tab state
@@ -462,9 +465,13 @@ export default function AdminAgenda({
         telefono: mbPhone.trim() || 'No informado',
         tipo: vehicleName,
         servicio: `${mbService}${priceText}`,
-        direccion: mbNotes ? `Venezuela 1659 (${mbNotes})` : 'Venezuela 1659 (Domicilio)',
+        direccion: mbModalidad === 'domicilio'
+          ? (mbAddress.trim() ? `${mbAddress.trim()}, Cipolletti` : 'Domicilio en Cipolletti')
+          : (mbNotes ? `Venezuela 1659 (${mbNotes})` : 'Venezuela 1659, Cipolletti'),
         estado: 'confirmado',
-        blockedSlots: blocked
+        blockedSlots: blocked,
+        modalidad: mbModalidad,
+        recargoDomicilio: mbModalidad === 'domicilio' ? 5000 : 0
       };
 
       await firestoreService.createBooking(newBooking, false);
@@ -475,6 +482,8 @@ export default function AdminAgenda({
       setMbName('');
       setMbPhone('');
       setMbNotes('');
+      setMbAddress('');
+      setMbModalidad('taller');
       setMbPrice('');
       showToast('¡Turno manual registrado y sincronizado en Firestore!');
     } catch (e: any) {
@@ -814,7 +823,7 @@ export default function AdminAgenda({
                 Domingo de Descanso
               </h4>
               <p className="text-xs text-zinc-400 mb-6">
-                El taller permanece cerrado los domingos. Los clientes no pueden reservar en este día a través de la web.
+                Domingos sin atención. Los clientes no pueden reservar en este día a través de la web.
               </p>
               <button 
                 onClick={() => shiftDay(1)}
@@ -938,6 +947,16 @@ export default function AdminAgenda({
                                   : 'Duración: 1 hora'}
                               </span>
                             </span>
+
+                            {book.modalidad === 'domicilio' || (book.direccion && !book.direccion.includes('Venezuela 1659') && book.direccion !== 'ADMIN') ? (
+                              <span className="px-2.5 py-0.5 rounded-lg bg-purple-500/20 text-purple-300 border border-purple-500/30 text-[10px] font-black uppercase tracking-wider flex items-center gap-1">
+                                🏠 Domicilio {book.recargoDomicilio ? `(+$${book.recargoDomicilio.toLocaleString('es-AR')})` : ''}
+                              </span>
+                            ) : !isBlocked ? (
+                              <span className="px-2 py-0.5 rounded-md bg-zinc-800 text-zinc-400 border border-white/5 text-[10px] font-bold uppercase tracking-wider">
+                                🚗 En Venezuela 1659
+                              </span>
+                            ) : null}
                           </div>
 
                           <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
@@ -1008,6 +1027,22 @@ export default function AdminAgenda({
                             >
                               <Phone className="w-3.5 h-3.5" />
                               <span>WhatsApp</span>
+                            </a>
+                          )}
+
+                          {/* GPS / Maps button */}
+                          {!isBlocked && book.direccion && book.direccion !== 'ADMIN' && (
+                            <a 
+                              href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+                                book.direccion.includes('Cipolletti') ? book.direccion : `${book.direccion}, Cipolletti, Río Negro`
+                              )}`} 
+                              target="_blank" 
+                              rel="noreferrer"
+                              className="flex items-center gap-1.5 px-3 py-2 bg-purple-500/15 hover:bg-purple-500 text-purple-300 hover:text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all"
+                              title="Abrir dirección en Google Maps / Waze"
+                            >
+                              <MapPin className="w-3.5 h-3.5" />
+                              <span>GPS / Maps</span>
                             </a>
                           )}
 
@@ -1320,6 +1355,15 @@ export default function AdminAgenda({
                           {book.fecha} • {book.hora} hs
                         </span>
                         {getStatusBadge(book.estado, isBlocked)}
+                        {book.modalidad === 'domicilio' || (book.direccion && !book.direccion.includes('Venezuela 1659') && book.direccion !== 'ADMIN') ? (
+                          <span className="px-2 py-0.5 rounded-md bg-purple-500/20 text-purple-300 border border-purple-500/30 text-[9px] font-black uppercase tracking-wider">
+                            🏠 Domicilio
+                          </span>
+                        ) : !isBlocked ? (
+                          <span className="px-2 py-0.5 rounded-md bg-zinc-800 text-zinc-400 text-[9px] font-bold uppercase tracking-wider">
+                            🚗 Venezuela 1659
+                          </span>
+                        ) : null}
                         <span className="text-xs font-black text-zinc-300">
                           {book.tipo}
                         </span>
@@ -1357,6 +1401,20 @@ export default function AdminAgenda({
                           title="WhatsApp"
                         >
                           <Phone className="w-4 h-4" />
+                        </a>
+                      )}
+
+                      {!isBlocked && book.direccion && book.direccion !== 'ADMIN' && (
+                        <a 
+                          href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+                            book.direccion.includes('Cipolletti') ? book.direccion : `${book.direccion}, Cipolletti, Río Negro`
+                          )}`} 
+                          target="_blank" 
+                          rel="noreferrer"
+                          className="p-2 bg-purple-500/10 text-purple-400 hover:bg-purple-500 hover:text-white rounded-xl transition-all"
+                          title="Abrir en Maps / GPS"
+                        >
+                          <MapPin className="w-4 h-4" />
                         </a>
                       )}
                     </div>
@@ -1511,6 +1569,53 @@ export default function AdminAgenda({
                     <option value="Tratamiento Acrílico / Cerámico">Tratamiento Acrílico / Cerámico</option>
                   </select>
                 </div>
+
+                {/* Modalidad de atención */}
+                <div>
+                  <label className="text-[10px] font-black uppercase tracking-wider text-zinc-400 block mb-1.5">
+                    Modalidad del Servicio
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setMbModalidad('taller')}
+                      className={`py-2 px-3 rounded-xl border text-xs font-black uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                        mbModalidad === 'taller'
+                          ? 'bg-emerald-500 text-slate-950 border-emerald-400 shadow-md shadow-emerald-500/20'
+                          : 'bg-slate-950 border-white/10 text-zinc-400 hover:text-white'
+                      }`}
+                    >
+                      🚗 Lo trae a Venezuela 1659
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setMbModalidad('domicilio')}
+                      className={`py-2 px-3 rounded-xl border text-xs font-black uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                        mbModalidad === 'domicilio'
+                          ? 'bg-purple-500 text-white border-purple-400 shadow-md shadow-purple-500/20'
+                          : 'bg-slate-950 border-white/10 text-zinc-400 hover:text-white'
+                      }`}
+                    >
+                      🏠 A Domicilio (Cipolletti)
+                    </button>
+                  </div>
+                </div>
+
+                {mbModalidad === 'domicilio' && (
+                  <div>
+                    <label className="text-[10px] font-black uppercase tracking-wider text-purple-300 block mb-1">
+                      Dirección en Cipolletti (Calle y Altura / Indicaciones) *
+                    </label>
+                    <input 
+                      type="text" 
+                      required={mbModalidad === 'domicilio'}
+                      value={mbAddress}
+                      onChange={(e) => setMbAddress(e.target.value)}
+                      placeholder="Ej: Mariano Moreno 450, Bº San Pablo"
+                      className="w-full bg-slate-950 border border-purple-500/40 rounded-xl px-4 py-2 text-xs text-white placeholder-zinc-600 outline-none focus:border-purple-400 font-medium"
+                    />
+                  </div>
+                )}
 
                 <div>
                   <label className="text-[10px] font-black uppercase tracking-wider text-zinc-400 block mb-1">

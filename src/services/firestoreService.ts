@@ -144,6 +144,19 @@ export interface Booking {
   estado: 'pendiente' | 'confirmado' | 'hecho' | 'cancelado';
   direccion: string;
   blockedSlots?: string[];
+  modalidad?: 'taller' | 'domicilio';
+  recargoDomicilio?: number;
+  precioTotal?: number;
+  indicacionesDomicilio?: string;
+  cumpleRequisitosDomicilio?: boolean;
+}
+
+export interface DomicilioConfig {
+  enabled: boolean;
+  extraPrice: number;
+  bufferMinutes: number;
+  city: string;
+  whatsappHelpPhone: string;
 }
 
 export interface TakenSlot {
@@ -238,24 +251,30 @@ export function sanitizeImageUrl(rawUrl: string): string {
   return url;
 }
 
-export function calculateDurationFromServiceName(serviceName: string): number {
-  if (!serviceName) return 90;
+export function calculateDurationFromServiceName(serviceName: string, modalidad?: string): number {
+  if (!serviceName) return modalidad === 'domicilio' ? 135 : 90;
   const lower = serviceName.toLowerCase();
   
   // Check for Full / Combo / Exterior + Interior
-  if (lower.includes('full') || lower.includes('combo') || (lower.includes('exterior') && lower.includes('interior'))) {
-    return 180; // 3 hours
-  }
-  
   let total = 0;
-  if (lower.includes('exterior')) total += 90;
-  if (lower.includes('interior')) total += 90;
-  if (lower.includes('tapizados de tela') || lower.includes('tapizados tela')) total += 90;
-  if (lower.includes('tapizados de cuero') || lower.includes('cuero')) total += 60;
-  if (lower.includes('techo')) total += 60;
-  if (lower.includes('vidrios')) total += 60;
+  if (lower.includes('full') || lower.includes('combo') || (lower.includes('exterior') && lower.includes('interior'))) {
+    total = 180; // 3 hours
+  } else {
+    if (lower.includes('exterior')) total += 90;
+    if (lower.includes('interior')) total += 90;
+    if (lower.includes('tapizados de tela') || lower.includes('tapizados tela')) total += 90;
+    if (lower.includes('tapizados de cuero') || lower.includes('cuero')) total += 60;
+    if (lower.includes('techo')) total += 60;
+    if (lower.includes('vidrios')) total += 60;
+    if (total === 0) total = 90;
+  }
 
-  return total > 0 ? total : 90;
+  // 45 min buffer logístico para viaje y armado/desarmado en domicilio
+  if (modalidad === 'domicilio' || lower.includes('domicilio')) {
+    total += 45;
+  }
+
+  return total;
 }
 
 export function calculateBlockedSlotsForStart(startHour: string, durationMinutes: number): string[] {
@@ -288,7 +307,7 @@ export const firestoreService = {
       snap.forEach(docSnap => {
         const data = docSnap.data() as Booking;
         if (!data.blockedSlots || data.blockedSlots.length === 0) {
-          const dur = calculateDurationFromServiceName(data.servicio);
+          const dur = calculateDurationFromServiceName(data.servicio, data.modalidad);
           data.blockedSlots = calculateBlockedSlotsForStart(data.hora, dur);
         }
         rows.push(data);
@@ -300,7 +319,7 @@ export const firestoreService = {
       const cached = getLocalCache<Booking[]>('lys_cache_bookings', []);
       return cached.map(b => {
         if (!b.blockedSlots || b.blockedSlots.length === 0) {
-          const dur = calculateDurationFromServiceName(b.servicio);
+          const dur = calculateDurationFromServiceName(b.servicio, b.modalidad);
           return { ...b, blockedSlots: calculateBlockedSlotsForStart(b.hora, dur) };
         }
         return b;
@@ -309,7 +328,7 @@ export const firestoreService = {
   },
 
   async createBooking(booking: Booking, isBlocked = false): Promise<void> {
-    const duration = calculateDurationFromServiceName(booking.servicio);
+    const duration = calculateDurationFromServiceName(booking.servicio, booking.modalidad);
     const calculatedSlots = calculateBlockedSlotsForStart(booking.hora, duration);
     const hoursToBlock = (booking.blockedSlots && booking.blockedSlots.length > 0)
       ? booking.blockedSlots
@@ -360,7 +379,7 @@ export const firestoreService = {
     const localBookings = getLocalCache<Booking[]>('lys_cache_bookings', []);
     const bk = localBookings.find(b => b.id === bookingId);
     
-    const duration = calculateDurationFromServiceName(bk?.servicio || '');
+    const duration = calculateDurationFromServiceName(bk?.servicio || '', bk?.modalidad);
     const calculatedSlots = calculateBlockedSlotsForStart(bk?.hora || hora, duration);
     const hoursToBlock = bk && bk.blockedSlots && bk.blockedSlots.length > 0
       ? bk.blockedSlots
@@ -1028,6 +1047,39 @@ export const firestoreService = {
       console.warn("restoreDefaultGallery cloud write failed, saved locally:", e);
     }
     return defaultPhotos;
+  },
+
+  // ------------------ 8. DOMICILIO CONFIG ------------------
+  async getDomicilioConfig(): Promise<DomicilioConfig> {
+    const defaults: DomicilioConfig = {
+      enabled: true,
+      extraPrice: 5000,
+      bufferMinutes: 45,
+      city: 'Cipolletti',
+      whatsappHelpPhone: '2995760611'
+    };
+    try {
+      const snap = await withTimeout(getDoc(doc(db, 'settings', 'domicilio_config')), 3000);
+      if (snap.exists()) {
+        const data = snap.data() as DomicilioConfig;
+        const merged = { ...defaults, ...data };
+        setLocalCache('lys_cache_domicilio_config', merged);
+        return merged;
+      }
+    } catch (e) {
+      console.warn('Error fetching domicilio config, using local:', e);
+    }
+    return getLocalCache<DomicilioConfig>('lys_cache_domicilio_config', defaults);
+  },
+
+  async saveDomicilioConfig(config: DomicilioConfig): Promise<void> {
+    setLocalCache('lys_cache_domicilio_config', config);
+    try {
+      const clean = cleanFirestoreData(config);
+      await withTimeout(setDoc(doc(db, 'settings', 'domicilio_config'), clean, { merge: true }), 4000);
+    } catch (e) {
+      console.warn('Error saving domicilio config to Firestore:', e);
+    }
   },
 
   async importFromGoogleSheets(customUrl?: string): Promise<{ success: boolean; count: number; error?: string }> {

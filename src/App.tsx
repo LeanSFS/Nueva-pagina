@@ -33,13 +33,14 @@ import {
   Zap,
   Lock,
   Eye,
-  EyeOff
+  EyeOff,
+  Check
 } from 'lucide-react';
 import { SERVICES, VEHICLES, BASE_PRICES, TYPE_EXTRA } from './constants.ts';
 import { VehicleType, ServiceKey } from './types.ts';
 import { fetchSlots, createBooking, TimeSlot } from './services/availabilityService.ts';
 import { metricsService } from './services/metricsService.ts';
-import { firestoreService, CatalogService, CatalogVehicle, GalleryPhoto } from './services/firestoreService.ts';
+import { firestoreService, CatalogService, CatalogVehicle, GalleryPhoto, DomicilioConfig } from './services/firestoreService.ts';
 import { telegramService } from './services/telegramService.ts';
 import { GlowCard } from './components/GlowCard.tsx';
 import { AIKnowledgeContent } from './components/AIKnowledgeContent.tsx';
@@ -52,8 +53,8 @@ const TurnoExpress = React.lazy(() => import('./components/TurnoExpress.tsx'));
 const FAQ_ITEMS = [
   {
     id: 1,
-    question: "📍 ¿Dónde realizan el servicio? ¿Hacen a domicilio?",
-    answer: "No realizo servicios a domicilio. Todos los trabajos los hago de forma profesional en mi domicilio particular en Venezuela 1659, Cipolletti. Al tener todas mis herramientas acá, puedo asegurarte un nivel de detalle y acabado que sería imposible lograr de otra manera."
+    question: "📍 ¿Dónde realizás el servicio? ¿Hacés a domicilio?",
+    answer: "¡Sí! Trabajo en mi domicilio particular en Venezuela 1659 (Cipolletti), donde podés traer tu vehículo, y también brindo servicio a domicilio en toda la ciudad de Cipolletti. Voy a tu casa o cochera con todas mis máquinas y productos (solo necesito una canilla con agua y un enchufe para conectar). Para otras localidades vecinas, consultame previamente por WhatsApp."
   },
   {
     id: 2,
@@ -405,6 +406,20 @@ export default function App() {
   const [clientName, setClientName] = useState('');
   const [clientPhone, setClientPhone] = useState('');
   const [clientConfirmedLocation, setClientConfirmedLocation] = useState(false);
+
+  // Modalidad de atención (Taller vs Domicilio)
+  const [bookingModalidad, setBookingModalidad] = useState<'taller' | 'domicilio'>('taller');
+  const [domicilioDireccion, setDomicilioDireccion] = useState('');
+  const [domicilioEntreCalles, setDomicilioEntreCalles] = useState('');
+  const [domicilioRequisitosConfirmed, setDomicilioRequisitosConfirmed] = useState(false);
+  const [domicilioConfig, setDomicilioConfig] = useState<DomicilioConfig>({
+    enabled: true,
+    extraPrice: 5000,
+    bufferMinutes: 45,
+    city: 'Cipolletti',
+    whatsappHelpPhone: '2995760611'
+  });
+
   const [openFaq, setOpenFaq] = useState<number | null>(null);
   const clientAddress = "Venezuela 1659, Cipolletti";
 
@@ -584,6 +599,9 @@ export default function App() {
   // 0. Refresh immediately on initial app load so landing page shows next availability instantly
   useEffect(() => {
     refreshSlotsData(true);
+    firestoreService.getDomicilioConfig().then(cfg => {
+      if (cfg) setDomicilioConfig(cfg);
+    }).catch(() => {});
   }, [refreshSlotsData]);
 
   // 1. Refresh whenever we change step (especially when arriving at the calendar)
@@ -731,12 +749,15 @@ export default function App() {
 
   const totalDuration = useMemo(() => {
     if (selectedServices.length === 0) return 60;
-    return selectedServices.reduce((total, sId) => {
+    const baseDur = selectedServices.reduce((total, sId) => {
       const srv = activeServices.find(s => s.id === sId);
       const defaultDuration = SERVICES.find(st => st.id === sId)?.duration || 60;
       return total + (srv?.duration || defaultDuration);
     }, 0);
-  }, [selectedServices, activeServices]);
+    return bookingModalidad === 'domicilio' 
+      ? baseDur + (domicilioConfig.bufferMinutes || 45) 
+      : baseDur;
+  }, [selectedServices, activeServices, bookingModalidad, domicilioConfig.bufferMinutes]);
 
   // Helper to check if a start time can fit the required duration given available free slots on that day
   const isStartSlotAvailableForDuration = useCallback((startStr: string, freeSlots: string[], durationMinutes: number) => {
@@ -837,9 +858,22 @@ export default function App() {
     }, 0);
   };
   
-  const currentPrice = useMemo(() => {
+  const baseServicesPrice = useMemo(() => {
     return calculatePrice(selectedServices, vehicle);
-  }, [vehicle, selectedServices]);
+  }, [vehicle, selectedServices, activeServices]);
+
+  const currentPrice = useMemo(() => {
+    const extra = bookingModalidad === 'domicilio' ? (domicilioConfig.extraPrice || 5000) : 0;
+    return baseServicesPrice + extra;
+  }, [baseServicesPrice, bookingModalidad, domicilioConfig.extraPrice]);
+
+  const isStep4Valid = useMemo(() => {
+    if (!clientName.trim() || !clientPhone.trim()) return false;
+    if (bookingModalidad === 'domicilio') {
+      return Boolean(domicilioDireccion.trim() && domicilioRequisitosConfirmed);
+    }
+    return Boolean(clientConfirmedLocation);
+  }, [clientName, clientPhone, bookingModalidad, domicilioDireccion, domicilioRequisitosConfirmed, clientConfirmedLocation]);
 
   const firstAvailableInfo = useMemo(() => {
     if (isLoadingSlots) return { day: 'Cargando...', times: 'Buscando horarios disponibles...' };
@@ -899,7 +933,7 @@ export default function App() {
   }, [filteredSlotsData, isLoadingSlots, availableDates, isStartSlotAvailableForDuration]);
 
   const handleFinalBooking = async () => {
-    if (!selectedDateStr || !selectedTime || !vehicle || selectedServices.length === 0 || !clientName || !clientPhone || !clientConfirmedLocation) return;
+    if (!selectedDateStr || !selectedTime || !vehicle || selectedServices.length === 0 || !isStep4Valid) return;
 
     setIsSubmitting(true);
     const serviceName = selectedServices.map(sId => activeServices.find(s => s.id === sId)?.name || sId).join(' + ');
@@ -907,15 +941,24 @@ export default function App() {
     
     const blocked = getBlockedSlotsList(selectedTime, totalDuration);
 
+    const fullAddress = bookingModalidad === 'domicilio'
+      ? `${domicilioDireccion.trim()}, Cipolletti${domicilioEntreCalles.trim() ? ` (${domicilioEntreCalles.trim()})` : ''}`
+      : "Venezuela 1659, Cipolletti";
+
     const result = await createBooking({
       fecha: selectedDateStr,
       hora: selectedTime,
       tipo: vehicleName,
-      servicio: `${serviceName} – $${currentPrice}`,
-      nombre: clientName,
-      telefono: clientPhone,
-      direccion: "Venezuela 1659 (Domicilio)",
-      blockedSlots: blocked
+      servicio: `${serviceName} – $${currentPrice.toLocaleString('es-AR')}`,
+      nombre: clientName.trim(),
+      telefono: clientPhone.trim(),
+      direccion: fullAddress,
+      blockedSlots: blocked,
+      modalidad: bookingModalidad,
+      recargoDomicilio: bookingModalidad === 'domicilio' ? (domicilioConfig.extraPrice || 5000) : 0,
+      precioTotal: currentPrice,
+      indicacionesDomicilio: domicilioEntreCalles.trim(),
+      cumpleRequisitosDomicilio: bookingModalidad === 'domicilio' ? domicilioRequisitosConfirmed : undefined
     });
 
     if (result.ok) {
@@ -923,27 +966,34 @@ export default function App() {
       
       // Send Telegram notification in background
       telegramService.sendBookingNotification({
-        nombre: clientName,
-        telefono: clientPhone,
+        nombre: clientName.trim(),
+        telefono: clientPhone.trim(),
         tipo: vehicleName,
-        servicio: `${serviceName} ($${currentPrice})`,
+        servicio: `${serviceName} ($${currentPrice.toLocaleString('es-AR')}) [${bookingModalidad === 'domicilio' ? 'A DOMICILIO 🏠' : 'EN VENEZUELA 1659 🚗'}]`,
         fecha: selectedDateStr,
         hora: selectedTime,
-        direccion: "Venezuela 1659 (Cipolletti, Domicilio)"
+        direccion: fullAddress + (bookingModalidad === 'domicilio' ? ' [CON CANILLA Y LUZ]' : '')
       }).catch(err => console.error('Silent error triggering Telegram notify:', err));
 
       // Generate WhatsApp msg
       const [y, m, d] = selectedDateStr.split('-');
       const formattedDate = `${d}/${m}/${y}`;
 
+      const modalidadWp = bookingModalidad === 'domicilio'
+        ? `*Modalidad:* 🏠 A Domicilio (Cipolletti)%0A` +
+          `*Dirección:* ${encodeURIComponent(domicilioDireccion.trim())}${domicilioEntreCalles ? ` (${encodeURIComponent(domicilioEntreCalles.trim())})` : ''}%0A` +
+          `*Requisitos:* Cuento con canilla y toma de luz%0A`
+        : `*Modalidad:* 🚗 Lo llevo a Venezuela 1659 (Cipolletti)%0A`;
+
       const text = `*Nueva Reserva LyS Lavados*%0A%0A` +
-        `*Servicio:* ${serviceName}%0A` +
-        `*Vehículo:* ${vehicleName}%0A` +
+        `*Servicio:* ${encodeURIComponent(serviceName)}%0A` +
+        `*Vehículo:* ${encodeURIComponent(vehicleName)}%0A` +
         `*Fecha:* ${formattedDate}%0A` +
-        `*Hora:* ${selectedTime}hs%0A%0A` +
-        `*Cliente:* ${clientName}%0A` +
-        `*Teléfono:* ${clientPhone}%0A` +
-        `*Ubicación:* Venezuela 1659 (Domicilio)%0A%0A` +
+        `*Hora:* ${selectedTime} hs%0A` +
+        modalidadWp +
+        `*Inversión:* $${currentPrice.toLocaleString('es-AR')}${bookingModalidad === 'domicilio' ? ` (incluye viático +$${(domicilioConfig.extraPrice || 5000).toLocaleString('es-AR')})` : ''}%0A%0A` +
+        `*Cliente:* ${encodeURIComponent(clientName.trim())}%0A` +
+        `*Teléfono:* ${encodeURIComponent(clientPhone.trim())}%0A%0A` +
         `_¿Podrían confirmarme el turno?_`;
 
       window.open(`https://wa.me/2995760611?text=${text}`, '_blank');
@@ -1114,7 +1164,7 @@ export default function App() {
                   </h1>
                   
                   <p className="text-zinc-400 text-sm sm:text-base md:text-xl leading-relaxed max-w-xl mb-8 md:mb-10 text-balance font-medium">
-                    Tratamientos de detailing con enfoque artesanal. Cuidado meticuloso y terminaciones de exhibición, ahora exclusivamente en mi domicilio particular en Cipolletti.
+                    Lavado y estética vehicular con dedicación en cada detalle. Cuidado artesanal para tu auto: podés traerlo a mi casa en Venezuela 1659 o voy a tu domicilio en Cipolletti.
                   </p>
                   
                   <div className="flex flex-col sm:flex-row items-center gap-4 mb-12">
@@ -2575,90 +2625,242 @@ export default function App() {
                           </div>
                         </div>
 
+                        {/* SELECTOR DE MODALIDAD: EN TALLER O A DOMICILIO */}
                         <div className="space-y-4 md:col-span-2">
                           <label className="text-xs md:text-sm font-extrabold uppercase tracking-wider text-zinc-200 ml-1 flex items-center gap-2">
                             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                            Confirmar la Ubicación de entrega
+                            ¿Dónde realizamos el servicio?
                           </label>
-                          <div className="space-y-4">
-                            {/* Location confirmation button placed ABOVE the map */}
-                            <div 
-                              id="location-confirm-box"
-                              onClick={() => setClientConfirmedLocation(!clientConfirmedLocation)}
-                              className={`p-4 md:p-6 rounded-xl md:rounded-2xl border-2 transition-all cursor-pointer flex items-center gap-3.5 md:gap-5 group relative overflow-hidden text-left ${
-                                clientConfirmedLocation 
-                                ? 'bg-emerald-500/15 border-emerald-500 shadow-[0_0_30px_rgba(16,185,129,0.25)] scale-[1.01]' 
-                                : 'bg-zinc-900 border-zinc-700 hover:border-emerald-500 hover:bg-zinc-800/80 shadow-[0_0_20px_rgba(16,185,129,0.05)]'
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                            {/* OPCION 1: EN TALLER */}
+                            <div
+                              onClick={() => setBookingModalidad('taller')}
+                              className={`p-4 md:p-5 rounded-2xl border-2 transition-all cursor-pointer flex items-start gap-3.5 text-left relative ${
+                                bookingModalidad === 'taller'
+                                  ? 'bg-emerald-500/15 border-emerald-500 shadow-[0_0_25px_rgba(16,185,129,0.2)]'
+                                  : 'bg-zinc-900 border-white/10 hover:border-white/20'
                               }`}
                             >
-                              <div className={`shrink-0 w-10 h-10 md:w-12 md:h-12 rounded-lg md:rounded-xl border-2 flex items-center justify-center transition-all duration-300 ${
-                                clientConfirmedLocation 
-                                ? 'bg-emerald-500 border-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.5)] rotate-0 scale-110' 
-                                : 'border-emerald-500/50 bg-zinc-950 group-hover:border-emerald-500 animate-pulse rotate-[-3deg]'
+                              <div className={`p-2.5 rounded-xl border shrink-0 transition-colors ${
+                                bookingModalidad === 'taller'
+                                  ? 'bg-emerald-500 text-slate-950 border-emerald-400 font-bold'
+                                  : 'bg-zinc-800 text-zinc-400 border-white/5'
                               }`}>
-                                {clientConfirmedLocation ? (
-                                  <CheckCircle2 className="w-5.5 h-5.5 md:w-7 md:h-7 text-night" />
-                                ) : (
-                                  <div className="w-3.5 h-3.5 rounded-full bg-emerald-500 animate-ping" />
-                                )}
+                                <MapIcon className="w-5 h-5" />
                               </div>
-                              
                               <div className="flex-1 min-w-0">
-                                <p className={`text-sm md:text-xl font-display font-black italic tracking-tight leading-none mb-1 transition-colors uppercase truncate ${
-                                  clientConfirmedLocation ? 'text-emerald-400' : 'text-zinc-100 group-hover:text-emerald-400'
-                                }`}>
-                                  {clientConfirmedLocation ? 'Ubicación confirmada ✓' : 'Clic para confirmar ubicación'}
-                                </p>
-                                <p className={`text-[10px] md:text-xs font-semibold leading-snug transition-colors ${
-                                  clientConfirmedLocation ? 'text-zinc-300' : 'text-zinc-400'
-                                }`}>
-                                  Debo traer mi auto a <span className="text-white underline decoration-emerald-500 decoration-2 font-bold">Venezuela 1659</span>.
-                                </p>
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className="font-display font-black text-sm md:text-base text-white">LO TRAÉS A MI CASA</span>
+                                  <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-md bg-zinc-800 text-zinc-300 border border-white/5">
+                                    Sin costo extra
+                                  </span>
+                                </div>
+                                <p className="text-xs text-zinc-300 font-semibold mt-1">Venezuela 1659, Cipolletti</p>
+                                <p className="text-[11px] text-zinc-400 mt-0.5">Traés tu auto a mi casa en el horario agendado.</p>
                               </div>
-
-                              {!clientConfirmedLocation && (
-                                <div className="absolute right-4 animate-bounce-horizontal hidden md:block">
-                                  <ArrowRight className="w-6 h-6 text-emerald-500" />
+                              {bookingModalidad === 'taller' && (
+                                <div className="w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center shrink-0">
+                                  <Check className="w-3.5 h-3.5 text-slate-950 font-black" />
                                 </div>
                               )}
                             </div>
 
-                            <div className="bg-red-500/10 border border-red-500/35 rounded-xl p-4 flex items-start gap-3">
-                              <div className="w-6 h-6 rounded-full bg-red-500/20 flex items-center justify-center shrink-0 mt-0.5">
-                                <span className="text-red-400 text-xs font-black italic">!</span>
+                            {/* OPCION 2: A DOMICILIO */}
+                            <div
+                              onClick={() => setBookingModalidad('domicilio')}
+                              className={`p-4 md:p-5 rounded-2xl border-2 transition-all cursor-pointer flex items-start gap-3.5 text-left relative ${
+                                bookingModalidad === 'domicilio'
+                                  ? 'bg-purple-500/15 border-purple-500 shadow-[0_0_25px_rgba(168,85,247,0.25)]'
+                                  : 'bg-zinc-900 border-white/10 hover:border-purple-500/40'
+                              }`}
+                            >
+                              <div className={`p-2.5 rounded-xl border shrink-0 transition-colors ${
+                                bookingModalidad === 'domicilio'
+                                  ? 'bg-purple-500 text-white border-purple-400 font-bold'
+                                  : 'bg-zinc-800 text-zinc-400 border-white/5'
+                              }`}>
+                                <Sparkles className="w-5 h-5 text-amber-300" />
                               </div>
-                              <p className="text-xs text-zinc-300 font-semibold leading-relaxed text-left">
-                                Por favor ten en cuenta: <span className="text-red-400 font-black uppercase tracking-tight">no realizo servicios a domicilio</span>. Los lavados se realizan únicamente trayendo el auto a la dirección indicada arriba.
-                              </p>
-                            </div>
-
-                            <div className="aspect-video w-full rounded-2xl overflow-hidden border border-white/10 grayscale-[0.2] contrast-[1.05] hover:grayscale-0 transition-all">
-                              <iframe 
-                                src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3102.13456789!2d-68.010!3d-38.932!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x960a3162383c9b7f%3A0xc6cb1c986c757c4c!2sVenezuela%201659%2C%20Cipolletti%2C%20R%C3%ADo%20Negro!5e0!3m2!1ses!2sar!4v1713965211234!5m2!1ses!2sar" 
-                                width="100%" 
-                                height="100%" 
-                                style={{ border: 0 }} 
-                                allowFullScreen={false} 
-                                loading="lazy" 
-                                referrerPolicy="no-referrer-when-downgrade"
-                              />
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className="font-display font-black text-sm md:text-base text-white">A TU DOMICILIO</span>
+                                  <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-md bg-purple-500/30 text-purple-200 border border-purple-500/40">
+                                    +${(domicilioConfig.extraPrice || 5000).toLocaleString('es-AR')}
+                                  </span>
+                                  <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded-md bg-emerald-500/20 text-emerald-400">
+                                    Cipolletti
+                                  </span>
+                                </div>
+                                <p className="text-xs text-zinc-300 font-semibold mt-1">Voy a tu casa o cochera con máquinas y productos.</p>
+                                <p className="text-[11px] text-zinc-400 mt-0.5">Requiere canilla de agua y enchufe de luz.</p>
+                              </div>
+                              {bookingModalidad === 'domicilio' && (
+                                <div className="w-5 h-5 rounded-full bg-purple-500 flex items-center justify-center shrink-0">
+                                  <Check className="w-3.5 h-3.5 text-white font-black" />
+                                </div>
+                              )}
                             </div>
                           </div>
+
+                          {/* CONTENIDO SEGÚN MODALIDAD */}
+                          {bookingModalidad === 'taller' ? (
+                            <div className="space-y-4 pt-2">
+                              {/* Botón de confirmación de ubicación */}
+                              <div 
+                                id="location-confirm-box"
+                                onClick={() => setClientConfirmedLocation(!clientConfirmedLocation)}
+                                className={`p-4 md:p-6 rounded-xl md:rounded-2xl border-2 transition-all cursor-pointer flex items-center gap-3.5 md:gap-5 group relative overflow-hidden text-left ${
+                                  clientConfirmedLocation 
+                                  ? 'bg-emerald-500/15 border-emerald-500 shadow-[0_0_30px_rgba(16,185,129,0.25)] scale-[1.01]' 
+                                  : 'bg-zinc-900 border-zinc-700 hover:border-emerald-500 hover:bg-zinc-800/80 shadow-[0_0_20px_rgba(16,185,129,0.05)]'
+                                }`}
+                              >
+                                <div className={`shrink-0 w-10 h-10 md:w-12 md:h-12 rounded-lg md:rounded-xl border-2 flex items-center justify-center transition-all duration-300 ${
+                                  clientConfirmedLocation 
+                                  ? 'bg-emerald-500 border-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.5)] rotate-0 scale-110' 
+                                  : 'border-emerald-500/50 bg-zinc-950 group-hover:border-emerald-500 animate-pulse rotate-[-3deg]'
+                                }`}>
+                                  {clientConfirmedLocation ? (
+                                    <CheckCircle2 className="w-5.5 h-5.5 md:w-7 md:h-7 text-night" />
+                                  ) : (
+                                    <div className="w-3.5 h-3.5 rounded-full bg-emerald-500 animate-ping" />
+                                  )}
+                                </div>
+                                
+                                <div className="flex-1 min-w-0">
+                                  <p className={`text-sm md:text-xl font-display font-black italic tracking-tight leading-none mb-1 transition-colors uppercase truncate ${
+                                    clientConfirmedLocation ? 'text-emerald-400' : 'text-zinc-100 group-hover:text-emerald-400'
+                                  }`}>
+                                    {clientConfirmedLocation ? 'Ubicación confirmada ✓' : 'Clic para confirmar ubicación'}
+                                  </p>
+                                  <p className={`text-[10px] md:text-xs font-semibold leading-snug transition-colors ${
+                                    clientConfirmedLocation ? 'text-zinc-300' : 'text-zinc-400'
+                                  }`}>
+                                    Traigo mi auto a tu casa en <span className="text-white underline decoration-emerald-500 decoration-2 font-bold">Venezuela 1659, Cipolletti</span> en el horario acordado.
+                                  </p>
+                                </div>
+
+                                {!clientConfirmedLocation && (
+                                  <div className="absolute right-4 animate-bounce-horizontal hidden md:block">
+                                    <ArrowRight className="w-6 h-6 text-emerald-500" />
+                                  </div>
+                                )}
+                              </div>
+
+                              <div className="aspect-video w-full rounded-2xl overflow-hidden border border-white/10 grayscale-[0.2] contrast-[1.05] hover:grayscale-0 transition-all">
+                                <iframe 
+                                  src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3102.13456789!2d-68.010!3d-38.932!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x960a3162383c9b7f%3A0xc6cb1c986c757c4c!2sVenezuela%201659%2C%20Cipolletti%2C%20R%C3%ADo%20Negro!5e0!3m2!1ses!2sar!4v1713965211234!5m2!1ses!2sar" 
+                                  width="100%" 
+                                  height="100%" 
+                                  style={{ border: 0 }} 
+                                  allowFullScreen={false} 
+                                  loading="lazy" 
+                                  referrerPolicy="no-referrer-when-downgrade"
+                                />
+                              </div>
+                            </div>
+                          ) : (
+                            /* DETALLES DE DOMICILIO EN CIPOLLETTI */
+                            <div className="space-y-4 pt-2 animate-fade-in">
+                              {/* Banner de Cobertura Exclusiva */}
+                              <div className="p-4 bg-purple-500/10 border border-purple-500/30 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-left">
+                                <div className="space-y-1">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-base">📍</span>
+                                    <span className="text-xs font-black uppercase tracking-wider text-purple-300 font-display">
+                                      Cobertura a domicilio: Solamente Cipolletti
+                                    </span>
+                                  </div>
+                                  <p className="text-xs text-zinc-300 font-medium">
+                                    ¿Tu vehículo está en otra ciudad (Neuquén, Fernández Oro, Cinco Saltos)? Consultanos antes por WhatsApp.
+                                  </p>
+                                </div>
+                                <a
+                                  href={`https://wa.me/${domicilioConfig.whatsappHelpPhone || '2995760611'}?text=${encodeURIComponent('Hola Leandro, quisiera consultar si podés realizar un servicio a domicilio en mi zona.')}`}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 bg-[#25D366] hover:bg-[#20ba59] text-slate-950 font-black text-xs uppercase tracking-wider rounded-xl shrink-0 transition-transform active:scale-95 shadow-md shadow-[#25D366]/20"
+                                >
+                                  <span>Consultar por WhatsApp</span>
+                                </a>
+                              </div>
+
+                              {/* Formulario de Dirección */}
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 text-left">
+                                <div>
+                                  <label className="text-[11px] font-black uppercase tracking-wider text-zinc-300 block mb-1">
+                                    Calle y Altura en Cipolletti *
+                                  </label>
+                                  <input
+                                    type="text"
+                                    value={domicilioDireccion}
+                                    onChange={(e) => setDomicilioDireccion(e.target.value)}
+                                    placeholder="Ej: Mariano Moreno 450"
+                                    className="w-full bg-zinc-900 border border-purple-500/40 rounded-xl p-3.5 text-sm text-white placeholder-zinc-500 focus:border-purple-400 focus:ring-1 focus:ring-purple-400 outline-none font-semibold"
+                                  />
+                                </div>
+
+                                <div>
+                                  <label className="text-[11px] font-black uppercase tracking-wider text-zinc-300 block mb-1">
+                                    Entre calles / Barrio / Cochera (Opcional)
+                                  </label>
+                                  <input
+                                    type="text"
+                                    value={domicilioEntreCalles}
+                                    onChange={(e) => setDomicilioEntreCalles(e.target.value)}
+                                    placeholder="Ej: Entre San Martín e Yrigoyen, portón negro"
+                                    className="w-full bg-zinc-900 border border-white/20 rounded-xl p-3.5 text-sm text-white placeholder-zinc-500 focus:border-purple-400 focus:ring-1 focus:ring-purple-400 outline-none"
+                                  />
+                                </div>
+                              </div>
+
+                              {/* Requisitos Checkbox obligatorio */}
+                              <div 
+                                onClick={() => setDomicilioRequisitosConfirmed(!domicilioRequisitosConfirmed)}
+                                className={`p-4 md:p-5 rounded-2xl border-2 transition-all cursor-pointer flex items-start gap-3.5 text-left ${
+                                  domicilioRequisitosConfirmed
+                                    ? 'bg-purple-500/15 border-purple-500 shadow-md shadow-purple-500/10'
+                                    : 'bg-zinc-900 border-amber-500/40 hover:border-purple-500/50'
+                                }`}
+                              >
+                                <div className={`w-6 h-6 rounded-lg border-2 flex items-center justify-center shrink-0 mt-0.5 transition-all ${
+                                  domicilioRequisitosConfirmed ? 'bg-purple-500 border-purple-400 text-white' : 'border-amber-400 bg-zinc-950'
+                                }`}>
+                                  {domicilioRequisitosConfirmed && <Check className="w-4 h-4 text-white font-black" />}
+                                </div>
+                                <div>
+                                  <p className="text-xs md:text-sm font-bold text-white">
+                                    Requisitos indispensables para trabajar en tu domicilio:
+                                  </p>
+                                  <p className="text-xs text-zinc-300 mt-1 leading-relaxed">
+                                    Cuento con <strong className="text-white underline decoration-purple-400">canilla con agua disponible</strong>, <strong className="text-white underline decoration-purple-400">toma o enchufe de luz accesible</strong> y espacio adecuado para estacionar y trabajar en el vehículo.
+                                  </p>
+                                </div>
+                              </div>
+
+                              {/* Desglose de Inversión a Domicilio */}
+                              <div className="p-3.5 bg-zinc-900/90 border border-white/10 rounded-xl flex items-center justify-between text-xs">
+                                <span className="text-zinc-400">Servicios: <strong>${baseServicesPrice.toLocaleString('es-AR')}</strong> + Viático Domicilio: <strong className="text-purple-400">+${(domicilioConfig.extraPrice || 5000).toLocaleString('es-AR')}</strong></span>
+                                <span className="font-display font-black text-sm md:text-base text-emerald-400 italic">Total: ${currentPrice.toLocaleString('es-AR')}</span>
+                              </div>
+                            </div>
+                          )}
                         </div>
                       </div>
 
                       {/* Explicit checklists of missing items - extremely easy to understand */}
-                      {!(clientName.trim() && clientPhone.trim() && clientConfirmedLocation) && (
+                      {!isStep4Valid && (
                         <div className="p-4 md:p-5 bg-amber-500/10 border border-amber-500/20 rounded-2xl text-left space-y-2.5">
                           <h4 className="text-amber-400 font-display font-black uppercase italic tracking-wider text-xs flex items-center gap-2">
                             ⚠️ POR FAVOR, COMPLETÁ LOS REQUISITOS EXTRA:
                           </h4>
-                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs">
+                          <div className={`grid grid-cols-1 ${bookingModalidad === 'domicilio' ? 'sm:grid-cols-4' : 'sm:grid-cols-3'} gap-2.5 text-xs`}>
                             <div className={`p-3 rounded-xl border flex items-center gap-2.5 transition-all duration-300 ${clientName.trim() ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : 'bg-zinc-900 border-red-500/20 text-red-400 font-black uppercase tracking-wide'}`}>
                               <span className="text-sm">{clientName.trim() ? '✅' : '❌'}</span>
                               <div>
                                 <div className="text-[8px] uppercase tracking-widest text-zinc-500">REQUISITO 1</div>
-                                <span className="font-bold text-[10.5px]">{clientName.trim() ? 'Nombre ingresado' : 'FALTA TU NOMBRE Y APELLIDO'}</span>
+                                <span className="font-bold text-[10.5px]">{clientName.trim() ? 'Nombre ingresado' : 'FALTA TU NOMBRE'}</span>
                               </div>
                             </div>
                             
@@ -2666,28 +2868,46 @@ export default function App() {
                               <span className="text-sm">{clientPhone.trim() ? '✅' : '❌'}</span>
                               <div>
                                 <div className="text-[8px] uppercase tracking-widest text-zinc-500">REQUISITO 2</div>
-                                <span className="font-bold text-[10.5px]">{clientPhone.trim() ? 'WhatsApp ingresado' : 'FALTA TU WHATSAPP / CELULAR'}</span>
+                                <span className="font-bold text-[10.5px]">{clientPhone.trim() ? 'WhatsApp ingresado' : 'FALTA TU CELULAR'}</span>
                               </div>
                             </div>
 
-                            <div className={`p-3 rounded-xl border flex items-center gap-2.5 transition-all duration-300 ${clientConfirmedLocation ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : 'bg-zinc-900 border-amber-500/35 text-amber-500 animate-pulse font-black uppercase tracking-wide cursor-pointer hover:bg-zinc-800'}`}
-                              onClick={() => {
-                                const box = document.getElementById('location-confirm-box');
-                                if (box) {
-                                  box.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                                  box.classList.add('ring-4', 'ring-emerald-500', 'scale-[1.03]');
-                                  setTimeout(() => {
-                                    box.classList.remove('ring-4', 'ring-emerald-500', 'scale-[1.03]');
-                                  }, 1500);
-                                }
-                              }}
-                            >
-                              <span className="text-sm">{clientConfirmedLocation ? '✅' : '📍'}</span>
-                              <div className="flex-1 text-left">
-                                <div className="text-[8px] uppercase tracking-widest text-zinc-500">REQUISITO 3</div>
-                                <span className="font-bold text-[10.5px]">{clientConfirmedLocation ? 'Dirección confirmada' : 'BUSCÁ Y TOCÁ "CONFIRMAR UBICACIÓN" 🡱'}</span>
+                            {bookingModalidad === 'taller' ? (
+                              <div className={`p-3 rounded-xl border flex items-center gap-2.5 transition-all duration-300 ${clientConfirmedLocation ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : 'bg-zinc-900 border-amber-500/35 text-amber-500 animate-pulse font-black uppercase tracking-wide cursor-pointer hover:bg-zinc-800'}`}
+                                onClick={() => {
+                                  const box = document.getElementById('location-confirm-box');
+                                  if (box) {
+                                    box.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                  }
+                                }}
+                              >
+                                <span className="text-sm">{clientConfirmedLocation ? '✅' : '📍'}</span>
+                                <div className="flex-1 text-left">
+                                  <div className="text-[8px] uppercase tracking-widest text-zinc-500">REQUISITO 3</div>
+                                  <span className="font-bold text-[10.5px]">{clientConfirmedLocation ? 'Ubicación confirmada' : 'CONFIRMAR VENEZUELA 1659'}</span>
+                                </div>
                               </div>
-                            </div>
+                            ) : (
+                              <>
+                                <div className={`p-3 rounded-xl border flex items-center gap-2.5 transition-all duration-300 ${domicilioDireccion.trim() ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : 'bg-zinc-900 border-red-500/20 text-red-400 font-black uppercase tracking-wide'}`}>
+                                  <span className="text-sm">{domicilioDireccion.trim() ? '✅' : '❌'}</span>
+                                  <div>
+                                    <div className="text-[8px] uppercase tracking-widest text-zinc-500">REQUISITO 3</div>
+                                    <span className="font-bold text-[10.5px]">{domicilioDireccion.trim() ? 'Dirección lista' : 'FALTA TU DIRECCIÓN'}</span>
+                                  </div>
+                                </div>
+
+                                <div className={`p-3 rounded-xl border flex items-center gap-2.5 transition-all duration-300 ${domicilioRequisitosConfirmed ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : 'bg-zinc-900 border-amber-500/35 text-amber-500 animate-pulse font-black uppercase tracking-wide cursor-pointer hover:bg-zinc-800'}`}
+                                  onClick={() => setDomicilioRequisitosConfirmed(true)}
+                                >
+                                  <span className="text-sm">{domicilioRequisitosConfirmed ? '✅' : '⚡'}</span>
+                                  <div>
+                                    <div className="text-[8px] uppercase tracking-widest text-zinc-500">REQUISITO 4</div>
+                                    <span className="font-bold text-[10.5px]">{domicilioRequisitosConfirmed ? 'Canilla y luz ✓' : 'CONFIRMAR AGUA Y LUZ'}</span>
+                                  </div>
+                                </div>
+                              </>
+                            )}
                           </div>
                         </div>
                       )}
@@ -2704,7 +2924,7 @@ export default function App() {
                           🡴 Volver a Turno
                         </button>
                         
-                        {clientName.trim() && clientPhone.trim() && clientConfirmedLocation ? (
+                        {isStep4Valid ? (
                           <button
                             onClick={() => setShowConfirmation(true)}
                             className="bg-emerald-500 text-night font-display font-black italic px-7 py-4.5 rounded-xl hover:bg-emerald-400 transition-all text-sm tracking-wider uppercase cursor-pointer shadow-lg shadow-emerald-500/25 flex items-center justify-center gap-2 group shrink-0"
@@ -2800,7 +3020,7 @@ export default function App() {
                 </div>
                 <div>
                   <h3 className="text-xl font-display font-black italic text-white tracking-tight">Acceso Admin</h3>
-                  <p className="text-[10px] text-zinc-400 font-bold uppercase tracking-wider">Taller LyS Lavados</p>
+                  <p className="text-[10px] text-zinc-400 font-bold uppercase tracking-wider">LyS Lavados • Cipolletti</p>
                 </div>
               </div>
 

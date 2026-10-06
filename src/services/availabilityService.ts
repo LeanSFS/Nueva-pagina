@@ -20,6 +20,11 @@ export interface BookingData {
   telefono: string;
   direccion: string;
   blockedSlots?: string[];
+  modalidad?: 'taller' | 'domicilio';
+  recargoDomicilio?: number;
+  precioTotal?: number;
+  indicacionesDomicilio?: string;
+  cumpleRequisitosDomicilio?: boolean;
 }
 
 // Memory cache for slots
@@ -162,7 +167,12 @@ export async function createBooking(data: BookingData): Promise<{ ok: boolean; i
       telefono: data.telefono,
       direccion: data.direccion,
       estado: 'pendiente',
-      blockedSlots: data.blockedSlots
+      blockedSlots: data.blockedSlots,
+      modalidad: data.modalidad || 'taller',
+      recargoDomicilio: data.recargoDomicilio,
+      precioTotal: data.precioTotal,
+      indicacionesDomicilio: data.indicacionesDomicilio,
+      cumpleRequisitosDomicilio: data.cumpleRequisitosDomicilio
     };
 
     // Commit to Firestore (creates booking and blocks slot atomically)

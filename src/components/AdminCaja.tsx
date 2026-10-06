@@ -41,7 +41,7 @@ import AdminRendimientos from './AdminRendimientos.tsx';
 import AdminMetrics from './AdminMetrics.tsx';
 import AdminAssistant from './AdminAssistant.tsx';
 import AdminArcaFacturacion from './AdminArcaFacturacion.tsx';
-import { firestoreService, Movement, Booking, sanitizeImageUrl } from '../services/firestoreService.ts';
+import { firestoreService, Movement, Booking, sanitizeImageUrl, DomicilioConfig } from '../services/firestoreService.ts';
 import { ArcaConfig, ArcaFacturaRecord } from '../types.ts';
 import { auth } from '../services/firebase.ts';
 import { SERVICES } from '../constants.ts';
@@ -129,10 +129,19 @@ export default function AdminCaja({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Filters - Default to 'todo' so the user sees all movements across months instead of a blank screen on the 1st of each month
-  const [selectedRange, setSelectedRange] = useState<'hoy' | 'ayer' | 'semana' | 'mes' | 'todo'>('todo');
-  const [filterFrom, setFilterFrom] = useState('');
-  const [filterTo, setFilterTo] = useState('');
+  // Filters - Apertura por defecto en modo Mes Actual
+  const initialMonthRange = useMemo(() => {
+    const d = new Date();
+    const ymd = (date: Date) => date.toISOString().split('T')[0];
+    return {
+      from: ymd(new Date(d.getFullYear(), d.getMonth(), 1)),
+      to: ymd(new Date(d.getFullYear(), d.getMonth() + 1, 0))
+    };
+  }, []);
+
+  const [selectedRange, setSelectedRange] = useState<'hoy' | 'ayer' | 'semana' | 'mes' | 'todo'>('mes');
+  const [filterFrom, setFilterFrom] = useState(initialMonthRange.from);
+  const [filterTo, setFilterTo] = useState(initialMonthRange.to);
   const [filterTipo, setFilterTipo] = useState('');
   const [filterEstado, setFilterEstado] = useState('');
   const [filterMedio, setFilterMedio] = useState('');
@@ -818,6 +827,13 @@ ${factura.qrUrl ? `🔗 Validar en ARCA/AFIP: ${factura.qrUrl}` : ''}
   const [dbPhotos, setDbPhotos] = useState<any[]>([]);
   const [savingCatalog, setSavingCatalog] = useState(false);
   const [catalogSuccess, setCatalogSuccess] = useState(false);
+  const [domicilioConfig, setDomicilioConfig] = useState<DomicilioConfig>({
+    enabled: true,
+    extraPrice: 5000,
+    bufferMinutes: 45,
+    city: 'Cipolletti',
+    whatsappHelpPhone: '2995760611'
+  });
 
   const [newPhoto, setNewPhoto] = useState({ url: '', title: '', description: '' });
   const [imageInputMethod, setImageInputMethod] = useState<'url' | 'file'>('file');
@@ -913,6 +929,8 @@ ${factura.qrUrl ? `🔗 Validar en ARCA/AFIP: ${factura.qrUrl}` : ''}
       setDbVehicles(vehs);
       const phts = await firestoreService.getGallery();
       setDbPhotos(phts);
+      const domCfg = await firestoreService.getDomicilioConfig();
+      if (domCfg) setDomicilioConfig(domCfg);
     } catch (e) {
       console.error('Error loading config/gallery:', e);
     }
@@ -1042,11 +1060,6 @@ ${factura.qrUrl ? `🔗 Validar en ARCA/AFIP: ${factura.qrUrl}` : ''}
         : `✅ Todos los movimientos locales ya están consolidados y sincronizados en Firestore.`
       );
       setAltaSuccess(true);
-
-      // Reset date filters to 'todo' so the user immediately sees all movements
-      setFilterFrom('');
-      setFilterTo('');
-      setSelectedRange('todo');
       await fetchRows();
     } catch (err: any) {
       console.error("Manual sync failed:", err);
@@ -1069,6 +1082,7 @@ ${factura.qrUrl ? `🔗 Validar en ARCA/AFIP: ${factura.qrUrl}` : ''}
       for (const veh of dbVehicles) {
         await firestoreService.saveVehicle(veh);
       }
+      await firestoreService.saveDomicilioConfig(domicilioConfig);
       setCatalogSuccess(true);
       setTimeout(() => setCatalogSuccess(false), 3000);
     } catch (e: any) {
@@ -1664,6 +1678,103 @@ ${factura.qrUrl ? `🔗 Validar en ARCA/AFIP: ${factura.qrUrl}` : ''}
               </div>
             </div>
 
+            {/* Configuración de Servicio a Domicilio */}
+            <div className="p-5 md:p-8 bg-slate-950 border border-purple-500/30 rounded-3xl space-y-6 relative overflow-hidden">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-white/5 pb-5">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-purple-500/20 text-purple-400 flex items-center justify-center font-bold">
+                    🏠
+                  </div>
+                  <div>
+                    <h3 className="text-sm md:text-base font-display font-black text-white italic tracking-tight flex items-center gap-2">
+                      SERVICIO A DOMICILIO (CIPOLLETTI)
+                      <span className="text-[9px] font-sans font-black uppercase px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                        {domicilioConfig.enabled ? 'Activo' : 'Pausado'}
+                      </span>
+                    </h3>
+                    <p className="text-zinc-400 text-xs">
+                      Permite que los clientes soliciten servicio en su casa o cochera con recargo de traslado
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setDomicilioConfig(prev => ({ ...prev, enabled: !prev.enabled }))}
+                  className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
+                    domicilioConfig.enabled 
+                      ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40 hover:bg-purple-500/30' 
+                      : 'bg-zinc-800 text-zinc-400 border border-white/5 hover:text-white'
+                  }`}
+                >
+                  {domicilioConfig.enabled ? '✓ Domicilio Activado' : '✕ Domicilio Pausado'}
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                {/* Recargo por traslado */}
+                <div className="bg-zinc-900/90 border border-white/10 rounded-2xl p-4 space-y-2">
+                  <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400 block">
+                    Recargo Traslado ($)
+                  </label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-zinc-500 font-bold">$</span>
+                    <input
+                      type="number"
+                      value={domicilioConfig.extraPrice}
+                      onChange={e => setDomicilioConfig(prev => ({ ...prev, extraPrice: Number(e.target.value) || 0 }))}
+                      className="w-full bg-zinc-950 border border-white/10 focus:border-purple-500 rounded-xl py-2 pl-7 pr-3 text-sm text-purple-300 font-bold font-mono outline-none"
+                    />
+                  </div>
+                  <p className="text-[10px] text-zinc-500">Monto fijo que se suma al valor del servicio</p>
+                </div>
+
+                {/* Margen de viaje / armado */}
+                <div className="bg-zinc-900/90 border border-white/10 rounded-2xl p-4 space-y-2">
+                  <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400 block">
+                    Margen Logístico (Minutos)
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="number"
+                      value={domicilioConfig.bufferMinutes}
+                      onChange={e => setDomicilioConfig(prev => ({ ...prev, bufferMinutes: Number(e.target.value) || 0 }))}
+                      className="w-full bg-zinc-950 border border-white/10 focus:border-purple-500 rounded-xl py-2 px-3 text-sm text-white font-bold font-mono outline-none"
+                    />
+                  </div>
+                  <p className="text-[10px] text-zinc-500">Tiempo extra bloqueado para viaje y armado (ej: 45 min)</p>
+                </div>
+
+                {/* Zona de cobertura */}
+                <div className="bg-zinc-900/90 border border-white/10 rounded-2xl p-4 space-y-2">
+                  <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400 block">
+                    Ciudad de Cobertura
+                  </label>
+                  <input
+                    type="text"
+                    value={domicilioConfig.city}
+                    onChange={e => setDomicilioConfig(prev => ({ ...prev, city: e.target.value }))}
+                    className="w-full bg-zinc-950 border border-white/10 focus:border-purple-500 rounded-xl py-2 px-3 text-sm text-white font-bold outline-none"
+                  />
+                  <p className="text-[10px] text-zinc-500">Se muestra en la web para evitar reservas fuera de zona</p>
+                </div>
+
+                {/* Teléfono WhatsApp de consultas */}
+                <div className="bg-zinc-900/90 border border-white/10 rounded-2xl p-4 space-y-2">
+                  <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400 block">
+                    WhatsApp para Consultas
+                  </label>
+                  <input
+                    type="text"
+                    value={domicilioConfig.whatsappHelpPhone}
+                    onChange={e => setDomicilioConfig(prev => ({ ...prev, whatsappHelpPhone: e.target.value }))}
+                    className="w-full bg-zinc-950 border border-white/10 focus:border-purple-500 rounded-xl py-2 px-3 text-sm text-white font-mono outline-none"
+                  />
+                  <p className="text-[10px] text-zinc-500">Número al que escriben clientes de otras localidades</p>
+                </div>
+              </div>
+            </div>
+
             <div className="flex justify-end pt-6 border-t border-white/[0.05]">
               <button 
                 onClick={handleSaveCatalog}
@@ -2014,11 +2125,11 @@ ${factura.qrUrl ? `🔗 Validar en ARCA/AFIP: ${factura.qrUrl}` : ''}
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div className="flex flex-wrap gap-2">
               {[
-                { id: 'todo', label: 'Todo' },
                 { id: 'mes', label: 'Este Mes' },
-                { id: 'semana', label: 'Semana' },
                 { id: 'hoy', label: 'Hoy' },
-                { id: 'ayer', label: 'Ayer' }
+                { id: 'ayer', label: 'Ayer' },
+                { id: 'semana', label: 'Semana' },
+                { id: 'todo', label: 'Todo' }
               ].map(r => {
                 const isActive = selectedRange === r.id;
                 return (

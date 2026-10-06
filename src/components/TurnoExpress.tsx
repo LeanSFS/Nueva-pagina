@@ -18,14 +18,17 @@ import {
   ExternalLink,
   ChevronRight,
   HelpCircle,
-  Clock3
+  Clock3,
+  Check,
+  Navigation as MapIcon
 } from 'lucide-react';
 import { VehicleType, ServiceKey } from '../types.ts';
 import { SERVICES, VEHICLES } from '../constants.ts';
 import { 
   firestoreService, 
   CatalogService, 
-  CatalogVehicle 
+  CatalogVehicle,
+  DomicilioConfig
 } from '../services/firestoreService.ts';
 import { 
   fetchSlots, 
@@ -50,6 +53,26 @@ export default function TurnoExpress({
   // 1. Vehicle & Services state
   const [vehicle, setVehicle] = useState<VehicleType>('auto');
   const [selectedServices, setSelectedServices] = useState<string[]>(['lavado_exterior']);
+
+  // Modality state (Taller vs A Domicilio)
+  const [bookingModalidad, setBookingModalidad] = useState<'taller' | 'domicilio'>('taller');
+  const [domicilioDireccion, setDomicilioDireccion] = useState('');
+  const [domicilioEntreCalles, setDomicilioEntreCalles] = useState('');
+  const [domicilioRequisitosConfirmed, setDomicilioRequisitosConfirmed] = useState(false);
+  const [domicilioConfig, setDomicilioConfig] = useState<DomicilioConfig>({
+    enabled: true,
+    extraPrice: 5000,
+    zonesDescription: 'Solamente Cipolletti',
+    whatsappHelpPhone: '2995760611',
+    whatsappHelpMessage: 'Hola Leandro, quisiera consultar si podés realizar un servicio a domicilio en mi zona.'
+  });
+
+  // Load domicilio config
+  useEffect(() => {
+    firestoreService.getDomicilioConfig().then(cfg => {
+      if (cfg) setDomicilioConfig(cfg);
+    }).catch(err => console.warn('Could not fetch domicilio config in express:', err));
+  }, []);
   
   // 2. Availability state
   const [slotsData, setSlotsData] = useState<TimeSlot[]>([]);
@@ -165,18 +188,25 @@ export default function TurnoExpress({
     }, 0);
   };
 
-  const currentPrice = useMemo(() => {
+  const baseServicesPrice = useMemo(() => {
     return calculatePrice(selectedServices, vehicle);
   }, [selectedServices, vehicle, activeServices]);
 
+  const currentPrice = useMemo(() => {
+    const extra = bookingModalidad === 'domicilio' ? (domicilioConfig.extraPrice || 5000) : 0;
+    return baseServicesPrice + extra;
+  }, [baseServicesPrice, bookingModalidad, domicilioConfig]);
+
   const totalDuration = useMemo(() => {
     if (selectedServices.length === 0) return 60;
-    return selectedServices.reduce((total, sId) => {
+    const baseDur = selectedServices.reduce((total, sId) => {
       const srv = activeServices.find(s => s.id === sId);
       const defaultDuration = SERVICES.find(st => st.id === sId)?.duration || 60;
       return total + (srv?.duration || defaultDuration);
     }, 0);
-  }, [selectedServices, activeServices]);
+    // 45 min buffer logístico cuando es a domicilio
+    return bookingModalidad === 'domicilio' ? baseDur + 45 : baseDur;
+  }, [selectedServices, activeServices, bookingModalidad]);
 
   const formatDurationHours = (mins: number) => {
     if (!mins || mins <= 0) return '0min';
@@ -306,9 +336,21 @@ export default function TurnoExpress({
     setTimeout(() => setCopiedLink(false), 2500);
   };
 
+  const isDomicilioValid = bookingModalidad === 'taller' 
+    ? clientConfirmedLocation 
+    : (domicilioDireccion.trim().length > 0 && domicilioRequisitosConfirmed);
+
+  const canSubmit = !isSubmitting && 
+    selectedServices.length > 0 && 
+    Boolean(selectedDateStr) && 
+    Boolean(selectedTime) && 
+    Boolean(clientName.trim()) && 
+    Boolean(clientPhone.trim()) && 
+    Boolean(isDomicilioValid);
+
   // Submit Turno Express
   const handleConfirmExpressBooking = async () => {
-    if (!selectedDateStr || !selectedTime || !vehicle || selectedServices.length === 0 || !clientName.trim() || !clientPhone.trim() || !clientConfirmedLocation) {
+    if (!selectedDateStr || !selectedTime || !vehicle || selectedServices.length === 0 || !clientName.trim() || !clientPhone.trim() || !isDomicilioValid) {
       return;
     }
 
@@ -317,16 +359,24 @@ export default function TurnoExpress({
     const vehicleName = activeVehicles.find(v => v.id === vehicle)?.name || vehicle;
     const blocked = getBlockedSlotsList(selectedTime, totalDuration);
 
+    const fullAddress = bookingModalidad === 'domicilio'
+      ? `${domicilioDireccion.trim()}${domicilioEntreCalles ? ` (${domicilioEntreCalles.trim()})` : ''}, Cipolletti`
+      : "Venezuela 1659, Cipolletti";
+
     try {
       const result = await createBooking({
         fecha: selectedDateStr,
         hora: selectedTime,
         tipo: vehicleName,
-        servicio: `${serviceName} – $${currentPrice}`,
+        servicio: `${serviceName} – $${currentPrice}${bookingModalidad === 'domicilio' ? ' [A DOMICILIO 🏠]' : ' [EN VENEZUELA 1659 🚗]'}`,
         nombre: clientName.trim(),
         telefono: clientPhone.trim(),
-        direccion: "Venezuela 1659 (Domicilio)",
-        blockedSlots: blocked
+        direccion: fullAddress + (bookingModalidad === 'domicilio' ? ' [CON CANILLA Y LUZ]' : ''),
+        blockedSlots: blocked,
+        modalidad: bookingModalidad,
+        recargoDomicilio: bookingModalidad === 'domicilio' ? (domicilioConfig.extraPrice || 5000) : 0,
+        indicacionesDomicilio: domicilioEntreCalles.trim(),
+        cumpleRequisitosDomicilio: bookingModalidad === 'domicilio' ? domicilioRequisitosConfirmed : undefined
       });
 
       if (result.ok) {
@@ -337,25 +387,31 @@ export default function TurnoExpress({
           nombre: clientName.trim(),
           telefono: clientPhone.trim(),
           tipo: vehicleName,
-          servicio: `${serviceName} ($${currentPrice.toLocaleString('es-AR')}) [TURNO EXPRESS ⚡]`,
+          servicio: `${serviceName} ($${currentPrice.toLocaleString('es-AR')}) [TURNO EXPRESS ⚡ - ${bookingModalidad === 'domicilio' ? 'A DOMICILIO 🏠' : 'EN VENEZUELA 1659 🚗'}]`,
           fecha: selectedDateStr,
           hora: selectedTime,
-          direccion: "Venezuela 1659 (Cipolletti, Domicilio)"
+          direccion: fullAddress + (bookingModalidad === 'domicilio' ? ' [CON CANILLA Y LUZ]' : '')
         }).catch(err => console.error('Silent error triggering Telegram notify:', err));
 
         // Format Date for WhatsApp
         const [y, m, d] = selectedDateStr.split('-');
         const formattedDate = `${d}/${m}/${y}`;
 
+        const modalidadWp = bookingModalidad === 'domicilio'
+          ? `*Modalidad:* 🏠 A Domicilio (Cipolletti)%0A` +
+            `*Dirección:* ${encodeURIComponent(domicilioDireccion.trim())}${domicilioEntreCalles ? ` (${encodeURIComponent(domicilioEntreCalles.trim())})` : ''}%0A` +
+            `*Requisitos:* Cuento con canilla y toma de luz%0A`
+          : `*Modalidad:* 🚗 Lo llevo a Venezuela 1659 (Cipolletti)%0A`;
+
         const text = `*⚡ Nueva Reserva Turno Express - LyS Lavados*%0A%0A` +
-          `*Servicio:* ${serviceName}%0A` +
-          `*Vehículo:* ${vehicleName}%0A` +
+          `*Servicio:* ${encodeURIComponent(serviceName)}%0A` +
+          `*Vehículo:* ${encodeURIComponent(vehicleName)}%0A` +
           `*Fecha:* ${formattedDate}%0A` +
           `*Hora:* ${selectedTime} hs%0A` +
-          `*Total:* $${currentPrice.toLocaleString('es-AR')}%0A%0A` +
-          `*Cliente:* ${clientName.trim()}%0A` +
-          `*Teléfono:* ${clientPhone.trim()}%0A` +
-          `*Ubicación:* Venezuela 1659 (Cipolletti)%0A%0A` +
+          modalidadWp +
+          `*Total:* $${currentPrice.toLocaleString('es-AR')}${bookingModalidad === 'domicilio' ? ` (incluye viático +$${(domicilioConfig.extraPrice || 5000).toLocaleString('es-AR')})` : ''}%0A%0A` +
+          `*Cliente:* ${encodeURIComponent(clientName.trim())}%0A` +
+          `*Teléfono:* ${encodeURIComponent(clientPhone.trim())}%0A%0A` +
           `_¿Podrían confirmarme el turno express?_`;
 
         window.open(`https://wa.me/2995760611?text=${text}`, '_blank');
@@ -439,10 +495,10 @@ export default function TurnoExpress({
               </p>
             </div>
             <div className="bg-zinc-950/80 border border-white/10 rounded-2xl p-3 sm:text-right shrink-0">
-              <span className="text-[10px] uppercase font-bold text-zinc-500 block">Ubicación del Taller</span>
+              <span className="text-[10px] uppercase font-bold text-zinc-500 block">Atención en Cipolletti</span>
               <span className="text-xs font-bold text-zinc-200 flex items-center gap-1 mt-0.5">
                 <MapPin className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                Venezuela 1659, Cipolletti
+                Venezuela 1659 / A Domicilio
               </span>
             </div>
           </div>
@@ -689,7 +745,8 @@ export default function TurnoExpress({
             </h2>
           </div>
 
-          <div className="bg-zinc-900/70 border border-white/10 rounded-3xl p-5 sm:p-6 shadow-2xl space-y-4">
+          <div className="bg-zinc-900/70 border border-white/10 rounded-3xl p-5 sm:p-6 shadow-2xl space-y-5">
+            {/* 1. Datos personales */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="text-xs font-bold text-zinc-400 block mb-1.5">
@@ -724,25 +781,215 @@ export default function TurnoExpress({
               </div>
             </div>
 
-            {/* Checkbox Ubicación */}
-            <div className="pt-2 border-t border-white/10">
-              <label className="flex items-start gap-3 cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={clientConfirmedLocation}
-                  onChange={(e) => setClientConfirmedLocation(e.target.checked)}
-                  className="mt-0.5 w-4 h-4 rounded border-zinc-700 bg-zinc-950 text-emerald-500 focus:ring-emerald-500 accent-emerald-500"
-                />
-                <span className="text-xs text-zinc-400">
-                  Entiendo que el taller está ubicado en <strong className="text-zinc-200">Venezuela 1659, Cipolletti</strong> y me comprometo a llevar el vehículo en el horario agendado.
-                </span>
+            {/* 2. Selector de Modalidad */}
+            <div className="pt-2 border-t border-white/10 space-y-3">
+              <label className="text-xs font-extrabold uppercase tracking-wider text-zinc-200 flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                ¿Dónde realizamos el servicio?
               </label>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {/* OPCION 1: EN TALLER */}
+                <div
+                  onClick={() => setBookingModalidad('taller')}
+                  className={`p-3.5 sm:p-4 rounded-2xl border-2 transition-all cursor-pointer flex items-start gap-3 text-left relative ${
+                    bookingModalidad === 'taller'
+                      ? 'bg-emerald-500/15 border-emerald-500 shadow-[0_0_20px_rgba(16,185,129,0.2)]'
+                      : 'bg-zinc-950 border-white/10 hover:border-white/20'
+                  }`}
+                >
+                  <div className={`p-2 rounded-xl border shrink-0 transition-colors ${
+                    bookingModalidad === 'taller'
+                      ? 'bg-emerald-500 text-slate-950 border-emerald-400 font-bold'
+                      : 'bg-zinc-800 text-zinc-400 border-white/5'
+                  }`}>
+                    <MapIcon className="w-4 h-4" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-display font-black text-xs sm:text-sm text-white">LO TRAÉS A MI CASA</span>
+                      <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-md bg-zinc-800 text-zinc-300 border border-white/5">
+                        Sin costo extra
+                      </span>
+                    </div>
+                    <p className="text-xs text-zinc-300 font-semibold mt-0.5">Venezuela 1659, Cipolletti</p>
+                    <p className="text-[10px] text-zinc-400 mt-0.5">Traés tu auto a mi casa en el horario agendado.</p>
+                  </div>
+                  {bookingModalidad === 'taller' && (
+                    <div className="w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center shrink-0">
+                      <Check className="w-3.5 h-3.5 text-slate-950 font-black" />
+                    </div>
+                  )}
+                </div>
+
+                {/* OPCION 2: A DOMICILIO */}
+                <div
+                  onClick={() => setBookingModalidad('domicilio')}
+                  className={`p-3.5 sm:p-4 rounded-2xl border-2 transition-all cursor-pointer flex items-start gap-3 text-left relative ${
+                    bookingModalidad === 'domicilio'
+                      ? 'bg-purple-500/15 border-purple-500 shadow-[0_0_20px_rgba(168,85,247,0.25)]'
+                      : 'bg-zinc-950 border-white/10 hover:border-purple-500/40'
+                  }`}
+                >
+                  <div className={`p-2 rounded-xl border shrink-0 transition-colors ${
+                    bookingModalidad === 'domicilio'
+                      ? 'bg-purple-500 text-white border-purple-400 font-bold'
+                      : 'bg-zinc-800 text-zinc-400 border-white/5'
+                  }`}>
+                    <Sparkles className="w-4 h-4 text-amber-300" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-display font-black text-xs sm:text-sm text-white">A TU DOMICILIO</span>
+                      <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-md bg-purple-500/30 text-purple-200 border border-purple-500/40">
+                        +${(domicilioConfig.extraPrice || 5000).toLocaleString('es-AR')}
+                      </span>
+                      <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded-md bg-emerald-500/20 text-emerald-400">
+                        Cipolletti
+                      </span>
+                    </div>
+                    <p className="text-xs text-zinc-300 font-semibold mt-0.5">Voy a tu casa o cochera con máquinas y productos.</p>
+                    <p className="text-[10px] text-zinc-400 mt-0.5">Requiere canilla de agua y enchufe de luz.</p>
+                  </div>
+                  {bookingModalidad === 'domicilio' && (
+                    <div className="w-5 h-5 rounded-full bg-purple-500 flex items-center justify-center shrink-0">
+                      <Check className="w-3.5 h-3.5 text-white font-black" />
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* DETALLES DE UBICACIÓN SEGÚN MODALIDAD */}
+              {bookingModalidad === 'taller' ? (
+                <div className="p-3 bg-zinc-950/60 border border-white/10 rounded-xl">
+                  <label className="flex items-start gap-3 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={clientConfirmedLocation}
+                      onChange={(e) => setClientConfirmedLocation(e.target.checked)}
+                      className="mt-0.5 w-4 h-4 rounded border-zinc-700 bg-zinc-950 text-emerald-500 focus:ring-emerald-500 accent-emerald-500"
+                    />
+                    <span className="text-xs text-zinc-400">
+                      Entiendo que la atención es en <strong className="text-zinc-200">Venezuela 1659, Cipolletti</strong> y me comprometo a llevar el auto en el horario agendado.
+                    </span>
+                  </label>
+                </div>
+              ) : (
+                <div className="space-y-3 pt-1">
+                  {/* Banner de Cobertura */}
+                  <div className="p-3.5 bg-purple-500/10 border border-purple-500/30 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-left">
+                    <div className="space-y-0.5">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-sm">📍</span>
+                        <span className="text-xs font-black uppercase tracking-wider text-purple-300 font-display">
+                          Cobertura a domicilio: Solamente Cipolletti
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-zinc-300">
+                        ¿Estás en otra localidad (Neuquén, Fernández Oro, Cinco Saltos)? Consultanos antes por WhatsApp.
+                      </p>
+                    </div>
+                    <a
+                      href={`https://wa.me/${domicilioConfig.whatsappHelpPhone || '2995760611'}?text=${encodeURIComponent('Hola Leandro, quisiera consultar si podés realizar un turno express a domicilio en mi zona.')}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center justify-center gap-1 px-3 py-1.5 bg-[#25D366] hover:bg-[#20ba59] text-slate-950 font-black text-[11px] uppercase tracking-wider rounded-lg shrink-0 transition-transform active:scale-95 shadow-sm"
+                    >
+                      <span>Consultar por WhatsApp</span>
+                    </a>
+                  </div>
+
+                  {/* Formulario de Dirección */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-left">
+                    <div>
+                      <label className="text-[11px] font-black uppercase tracking-wider text-zinc-300 block mb-1">
+                        Calle y Altura en Cipolletti *
+                      </label>
+                      <input
+                        type="text"
+                        value={domicilioDireccion}
+                        onChange={(e) => setDomicilioDireccion(e.target.value)}
+                        placeholder="Ej: Mariano Moreno 450"
+                        className="w-full bg-zinc-950 border border-purple-500/40 rounded-xl p-3 text-xs sm:text-sm text-white placeholder-zinc-600 focus:border-purple-400 focus:ring-1 focus:ring-purple-400 outline-none font-semibold"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-[11px] font-black uppercase tracking-wider text-zinc-300 block mb-1">
+                        Entre calles / Barrio / Cochera (Opcional)
+                      </label>
+                      <input
+                        type="text"
+                        value={domicilioEntreCalles}
+                        onChange={(e) => setDomicilioEntreCalles(e.target.value)}
+                        placeholder="Ej: Entre San Martín e Yrigoyen, portón negro"
+                        className="w-full bg-zinc-950 border border-white/20 rounded-xl p-3 text-xs sm:text-sm text-white placeholder-zinc-600 focus:border-purple-400 focus:ring-1 focus:ring-purple-400 outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Requisitos Checkbox obligatorio */}
+                  <div 
+                    onClick={() => setDomicilioRequisitosConfirmed(!domicilioRequisitosConfirmed)}
+                    className={`p-3.5 rounded-xl border-2 transition-all cursor-pointer flex items-start gap-3 text-left ${
+                      domicilioRequisitosConfirmed
+                        ? 'bg-purple-500/15 border-purple-500'
+                        : 'bg-zinc-950 border-amber-500/40 hover:border-purple-500/50'
+                    }`}
+                  >
+                    <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center shrink-0 mt-0.5 transition-all ${
+                      domicilioRequisitosConfirmed ? 'bg-purple-500 border-purple-400 text-white' : 'border-amber-400 bg-zinc-950'
+                    }`}>
+                      {domicilioRequisitosConfirmed && <Check className="w-3.5 h-3.5 text-white font-black" />}
+                    </div>
+                    <div>
+                      <p className="text-xs font-bold text-white">
+                        Requisitos indispensables para trabajar en tu domicilio:
+                      </p>
+                      <p className="text-[11px] text-zinc-300 mt-0.5 leading-relaxed">
+                        Cuento con <strong className="text-white underline decoration-purple-400">canilla con agua disponible</strong>, <strong className="text-white underline decoration-purple-400">toma o enchufe de luz accesible</strong> y espacio para estacionar y trabajar en el vehículo.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
+
+            {/* Checklist de requisitos faltantes si no es válido */}
+            {!canSubmit && (
+              <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl text-left space-y-1.5 text-xs">
+                <span className="text-amber-400 font-bold uppercase text-[10px] tracking-wider block">
+                  Completá los pasos para confirmar:
+                </span>
+                <div className="flex flex-wrap gap-2 text-[10px]">
+                  <span className={`px-2 py-0.5 rounded-md border font-semibold ${clientName.trim() ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-red-500/10 text-red-400 border-red-500/20'}`}>
+                    {clientName.trim() ? '✓ Nombre listo' : '✗ Falta tu Nombre'}
+                  </span>
+                  <span className={`px-2 py-0.5 rounded-md border font-semibold ${clientPhone.trim() ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-red-500/10 text-red-400 border-red-500/20'}`}>
+                    {clientPhone.trim() ? '✓ WhatsApp listo' : '✗ Falta tu Celular'}
+                  </span>
+                  {bookingModalidad === 'taller' ? (
+                    <span className={`px-2 py-0.5 rounded-md border font-semibold ${clientConfirmedLocation ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-amber-500/10 text-amber-400 border-amber-500/20'}`}>
+                      {clientConfirmedLocation ? '✓ Ubicación confirmada' : '✗ Confirmá Venezuela 1659'}
+                    </span>
+                  ) : (
+                    <>
+                      <span className={`px-2 py-0.5 rounded-md border font-semibold ${domicilioDireccion.trim() ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-red-500/10 text-red-400 border-red-500/20'}`}>
+                        {domicilioDireccion.trim() ? '✓ Dirección lista' : '✗ Falta Calle y Altura'}
+                      </span>
+                      <span className={`px-2 py-0.5 rounded-md border font-semibold ${domicilioRequisitosConfirmed ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-amber-500/10 text-amber-400 border-amber-500/20'}`}>
+                        {domicilioRequisitosConfirmed ? '✓ Agua y luz confirmados' : '✗ Confirmá canilla y enchufe'}
+                      </span>
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* Total Summary Card */}
             <div className="bg-zinc-950/90 border border-emerald-500/30 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
-                <span className="text-[10px] uppercase font-bold text-zinc-500 block">Resumen del Turno</span>
+                <span className="text-[10px] uppercase font-bold text-zinc-500 block">Resumen del Turno Express</span>
                 <p className="text-xs text-zinc-200 font-medium mt-0.5">
                   {activeVehicles.find(v => v.id === vehicle)?.name} • {selectedDateStr ? `${selectedDateStr.split('-')[2]}/${selectedDateStr.split('-')[1]}` : 'Fecha a elegir'} • {selectedTime ? `${selectedTime} hs` : 'Hora a elegir'}
                 </p>
@@ -757,6 +1004,11 @@ export default function TurnoExpress({
                     }).join(' + ')
                   )}
                 </p>
+                {bookingModalidad === 'domicilio' && (
+                  <p className="text-[11px] text-purple-300 font-semibold mt-1">
+                    🏠 Modalidad A Domicilio: +${(domicilioConfig.extraPrice || 5000).toLocaleString('es-AR')} de viático incluido
+                  </p>
+                )}
               </div>
               <div className="sm:text-right">
                 <span className="text-[10px] uppercase font-bold text-emerald-400 block">Total a Pagar</span>
@@ -770,7 +1022,7 @@ export default function TurnoExpress({
             <button
               type="button"
               onClick={handleConfirmExpressBooking}
-              disabled={isSubmitting || selectedServices.length === 0 || !selectedDateStr || !selectedTime || !clientName.trim() || !clientPhone.trim() || !clientConfirmedLocation}
+              disabled={!canSubmit}
               className="w-full bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 disabled:cursor-not-allowed text-slate-950 font-display font-black italic uppercase tracking-wider py-4 px-6 rounded-2xl text-sm sm:text-base flex items-center justify-center gap-3 shadow-xl shadow-emerald-500/20 transition-all cursor-pointer active:scale-[0.99]"
             >
               {isSubmitting ? (
@@ -804,7 +1056,7 @@ export default function TurnoExpress({
               ¡Turno Registrado con Éxito!
             </span>
             <h3 className="text-xl font-display font-black italic uppercase text-white mb-2">
-              ¡Te esperamos en LyS Lavados!
+              {bookingModalidad === 'domicilio' ? '¡Voy a tu Domicilio!' : '¡Te espero en Venezuela 1659!'}
             </h3>
             <p className="text-xs text-zinc-300 mb-5 leading-relaxed">
               Tu turno para el <strong className="text-white">{selectedDateStr} a las {selectedTime} hs</strong> quedó agendado. Abrimos WhatsApp para enviarte la confirmación.
@@ -824,8 +1076,12 @@ export default function TurnoExpress({
                 <strong className="text-emerald-400">${currentPrice.toLocaleString('es-AR')}</strong>
               </div>
               <div className="flex justify-between text-zinc-400">
-                <span>Ubicación:</span>
-                <strong className="text-white">Venezuela 1659</strong>
+                <span>Modalidad:</span>
+                <strong className="text-white text-right">
+                  {bookingModalidad === 'domicilio' 
+                    ? `🏠 A Domicilio (${domicilioDireccion.trim()})` 
+                    : 'Venezuela 1659 (Cipolletti)'}
+                </strong>
               </div>
             </div>
 
