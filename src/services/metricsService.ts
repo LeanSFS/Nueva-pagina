@@ -178,17 +178,7 @@ export const generateHistoricalData = (): SectionTrace[] => {
   return traces.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
 };
 
-// Test initial connection
-async function testConnection() {
-  try {
-    await getDoc(doc(db, 'test', 'connection'));
-  } catch (error) {
-    if (error instanceof Error) {
-      console.warn("Firestore client notice:", error.message);
-    }
-  }
-}
-testConnection();
+
 
 export const metricsService = {
   // Try retrieving traces from cloud Firestore (falls back to local storage)
@@ -201,11 +191,9 @@ export const metricsService = {
         firestoreTraces.push(docSnap.data() as SectionTrace);
       });
       
-      // If Firestore is empty, seed it to have data
+      // If Firestore is empty, return local data without heavy batch writes
       if (firestoreTraces.length === 0) {
-        const seedData = generateHistoricalData();
-        await this.batchWriteTraces(seedData);
-        return seedData;
+        return this.getLocalTraces();
       }
 
       return firestoreTraces.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
@@ -215,23 +203,12 @@ export const metricsService = {
     }
   },
 
-  // Batch insert historical data (helps with initial seeding / tests)
+  // Batch insert historical data (kept purely local to avoid Firestore write bandwidth quotas)
   async batchWriteTraces(traces: SectionTrace[]): Promise<void> {
-    const pathRef = 'traces';
     try {
-      // Chunk batch into groups of 100 to avoid Firestore transaction size limits
-      const chunkSize = 100;
-      for (let i = 0; i < traces.length; i += chunkSize) {
-        const chunk = traces.slice(i, i + chunkSize);
-        const batch = writeBatch(db);
-        chunk.forEach(trace => {
-          const docRef = doc(db, 'traces', trace.id);
-          batch.set(docRef, trace);
-        });
-        await batch.commit();
-      }
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, pathRef);
+      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(traces));
+    } catch (e) {
+      console.warn('Error saving traces to localStorage:', e);
     }
   },
 
@@ -251,7 +228,7 @@ export const metricsService = {
     }
   },
 
-  // Log trace simultaneously to local storage and active Firestore collection
+  // Log trace to local storage (no unthrottled writes to Firestore)
   logAction(type: SectionTrace['type']): void {
     const traceId = `r-${Math.random().toString(36).substring(2, 11)}`;
     const newTrace: SectionTrace = {
@@ -262,35 +239,25 @@ export const metricsService = {
       path: window.location.pathname + window.location.hash
     };
 
-    // 1. Write local state immediately for high performance and fallback safety
+    // Write to local state for high performance and zero write quota consumption
     try {
       const localTraces = this.getLocalTraces();
-      localTraces.push(newTrace);
-      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(localTraces));
+      // Keep bounded to last 500 traces
+      const updated = [...localTraces.slice(-499), newTrace];
+      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(updated));
     } catch (e) {
       console.error('Error writing metric to localStorage:', e);
     }
-
-    // 2. Transmit to secure Cloud Firestore asynchronously in the background
-    const docRef = doc(db, 'traces', traceId);
-    setDoc(docRef, newTrace).catch((err) => {
-      // Log silent warning so page navigation / client click actions are NEVER blocked by network/auth failures
-      console.warn('Silent Firestore write warning (expected if user is unauthenticated or offline):', err);
-    });
   },
 
   // Reset tracking metrics
   async clearCloudMetrics(): Promise<void> {
     try {
-      // For safety, clear local logs
       localStorage.removeItem(LOCAL_STORAGE_KEY);
       const freshData = generateHistoricalData();
       localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(freshData));
-      
-      // Seed Firestore with new baseline
-      await this.batchWriteTraces(freshData);
     } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, 'traces');
+      console.warn('Error clearing metrics:', error);
     }
   }
 };

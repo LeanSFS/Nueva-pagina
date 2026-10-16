@@ -5,6 +5,8 @@ import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
 import { ArcaService } from "./server/arcaService.ts";
 
+import fs from "fs";
+
 dotenv.config();
 
 const app = express();
@@ -22,6 +24,99 @@ app.use((req, res, next) => {
 });
 
 app.use(express.json());
+
+// Persistent Schedule Overrides Store (for unblocked days/slots across all clients)
+const SCHEDULE_OVERRIDES_FILE = path.join(process.cwd(), "data", "schedule_overrides.json");
+
+function getScheduleOverrides(): { unblockedDays: string[]; unblockedSlots: string[] } {
+  try {
+    if (fs.existsSync(SCHEDULE_OVERRIDES_FILE)) {
+      const data = JSON.parse(fs.readFileSync(SCHEDULE_OVERRIDES_FILE, "utf-8"));
+      return {
+        unblockedDays: Array.isArray(data.unblockedDays) ? data.unblockedDays : [],
+        unblockedSlots: Array.isArray(data.unblockedSlots) ? data.unblockedSlots : []
+      };
+    }
+  } catch (err) {
+    console.error("Error reading schedule overrides:", err);
+  }
+  return { unblockedDays: [], unblockedSlots: [] };
+}
+
+function saveScheduleOverrides(overrides: { unblockedDays: string[]; unblockedSlots: string[] }) {
+  try {
+    const dir = path.dirname(SCHEDULE_OVERRIDES_FILE);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    fs.writeFileSync(SCHEDULE_OVERRIDES_FILE, JSON.stringify(overrides, null, 2), "utf-8");
+  } catch (err) {
+    console.error("Error saving schedule overrides:", err);
+  }
+}
+
+app.get("/api/schedule/overrides", (_req, res) => {
+  return res.json(getScheduleOverrides());
+});
+
+app.post("/api/schedule/unblock-day", (req, res) => {
+  const { fecha } = req.body;
+  if (!fecha || typeof fecha !== "string") {
+    return res.status(400).json({ error: "fecha is required" });
+  }
+  const current = getScheduleOverrides();
+  const unblockedDays = new Set(current.unblockedDays);
+  unblockedDays.add(fecha);
+  const unblockedSlots = current.unblockedSlots.filter(s => !s.startsWith(`${fecha}_`));
+  const updated = {
+    unblockedDays: Array.from(unblockedDays),
+    unblockedSlots
+  };
+  saveScheduleOverrides(updated);
+  return res.json({ success: true, overrides: updated });
+});
+
+app.post("/api/schedule/unblock-slot", (req, res) => {
+  const { fecha, hora } = req.body;
+  if (!fecha || !hora) {
+    return res.status(400).json({ error: "fecha and hora are required" });
+  }
+  const slotKey = `${fecha}_${hora}`;
+  const current = getScheduleOverrides();
+  const unblockedSlots = new Set(current.unblockedSlots);
+  unblockedSlots.add(slotKey);
+  const updated = {
+    unblockedDays: current.unblockedDays,
+    unblockedSlots: Array.from(unblockedSlots)
+  };
+  saveScheduleOverrides(updated);
+  return res.json({ success: true, overrides: updated });
+});
+
+app.post("/api/schedule/block-day", (req, res) => {
+  const { fecha } = req.body;
+  if (!fecha) return res.status(400).json({ error: "fecha is required" });
+  const current = getScheduleOverrides();
+  const updated = {
+    unblockedDays: current.unblockedDays.filter(d => d !== fecha),
+    unblockedSlots: current.unblockedSlots.filter(s => !s.startsWith(`${fecha}_`))
+  };
+  saveScheduleOverrides(updated);
+  return res.json({ success: true, overrides: updated });
+});
+
+app.post("/api/schedule/block-slot", (req, res) => {
+  const { fecha, hora } = req.body;
+  if (!fecha || !hora) return res.status(400).json({ error: "fecha and hora are required" });
+  const slotKey = `${fecha}_${hora}`;
+  const current = getScheduleOverrides();
+  const updated = {
+    unblockedDays: current.unblockedDays,
+    unblockedSlots: current.unblockedSlots.filter(s => s !== slotKey)
+  };
+  saveScheduleOverrides(updated);
+  return res.json({ success: true, overrides: updated });
+});
 
 // Initialize Gemini client lazily
 let genAiClient: GoogleGenAI | null = null;

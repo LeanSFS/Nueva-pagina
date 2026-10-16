@@ -82,6 +82,7 @@ export default function AdminAgenda({
   const [showManualBookingModal, setShowManualBookingModal] = useState(false);
   const [manualSlotPreselect, setManualSlotPreselect] = useState<string | null>(null);
   const [showBlockModal, setShowBlockModal] = useState(false);
+  const [blockModalTab, setBlockModalTab] = useState<'bloquear' | 'gestionar'>('bloquear');
 
   // Manual booking form state
   const [mbName, setMbName] = useState('');
@@ -262,6 +263,29 @@ export default function AdminAgenda({
   const activeDayBookings = useMemo(() => {
     return dayBookings.filter(b => b.estado !== 'cancelado');
   }, [dayBookings]);
+
+  const blockedBookingsForDay = useMemo(() => {
+    return activeDayBookings.filter(b => b.tipo === 'BLOQUEO' || b.nombre?.includes('BLOQUEADO') || b.servicio?.includes('BLOQUEO'));
+  }, [activeDayBookings]);
+
+  const hasDayBlocks = blockedBookingsForDay.length > 0;
+
+  const allBlockedDates = useMemo(() => {
+    const map = new Map<string, { date: string; count: number; hours: string[]; bookings: Booking[] }>();
+    allBookings.forEach(b => {
+      if (b.tipo === 'BLOQUEO' || b.nombre?.includes('BLOQUEADO') || b.servicio?.includes('BLOQUEO')) {
+        const existing = map.get(b.fecha) || { date: b.fecha, count: 0, hours: [], bookings: [] };
+        const slots = b.blockedSlots && b.blockedSlots.length > 0 ? b.blockedSlots : [b.hora];
+        slots.forEach(h => {
+          if (!existing.hours.includes(h)) existing.hours.push(h);
+        });
+        existing.count = existing.hours.length;
+        existing.bookings.push(b);
+        map.set(b.fecha, existing);
+      }
+    });
+    return Array.from(map.values()).sort((a, b) => b.date.localeCompare(a.date));
+  }, [allBookings]);
 
   // Daily Statistics
   const dayStats = useMemo(() => {
@@ -455,6 +479,36 @@ export default function AdminAgenda({
       showToast(book.nombre.includes('BLOQUEADO') ? 'Horario desbloqueado' : 'Turno eliminado');
     } catch (e) {
       setActionError('Error de Firestore al eliminar el turno.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleUnblockDay = async (fecha: string) => {
+    setLoading(true);
+    setActionError(null);
+    try {
+      await firestoreService.unblockDay(fecha);
+      clearCache();
+      await loadBookings();
+      showToast(`¡Día ${fecha} desbloqueado exitosamente! Horarios liberados para reservas.`);
+    } catch (e: any) {
+      setActionError('Error al desbloquear el día: ' + (e?.message || 'Error de conexión'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleUnblockSlot = async (fecha: string, hora: string) => {
+    setLoading(true);
+    setActionError(null);
+    try {
+      await firestoreService.unblockSlot(fecha, hora);
+      clearCache();
+      await loadBookings();
+      showToast(`Horario ${hora}hs desbloqueado exitosamente.`);
+    } catch (e: any) {
+      setActionError('Error al desbloquear el horario: ' + (e?.message || 'Error de conexión'));
     } finally {
       setLoading(false);
     }
@@ -656,12 +710,31 @@ export default function AdminAgenda({
             </button>
 
             <button 
-              onClick={() => setShowBlockModal(true)}
+              onClick={() => {
+                setBlockModalTab('gestionar');
+                setShowBlockModal(true);
+              }}
+              className={`flex items-center gap-1.5 px-3.5 py-2.5 border rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
+                allBlockedDates.length > 0 
+                  ? 'bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border-amber-500/40 shadow-sm shadow-amber-500/10'
+                  : 'bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border-white/10'
+              }`}
+              title="Ver y eliminar días u horarios bloqueados"
+            >
+              <Unlock className="w-3.5 h-3.5 text-amber-400" />
+              <span>Gestor Bloqueos ({allBlockedDates.length})</span>
+            </button>
+
+            <button 
+              onClick={() => {
+                setBlockModalTab('bloquear');
+                setShowBlockModal(true);
+              }}
               className="flex items-center gap-1.5 px-3.5 py-2.5 bg-zinc-800 hover:bg-zinc-700 border border-white/10 text-zinc-300 hover:text-white rounded-xl text-xs font-bold uppercase tracking-wider transition-all cursor-pointer"
               title="Bloquear un horario o el día completo"
             >
               <Lock className="w-3.5 h-3.5 text-amber-400" />
-              <span>Bloquear Horas / Día</span>
+              <span>Bloquear Fecha</span>
             </button>
 
             <button 
@@ -891,6 +964,95 @@ export default function AdminAgenda({
       {/* ------------------------------------------------------------- */}
       {viewMode === 'timeline' && (
         <div className="space-y-4">
+
+          {/* Mini Strip Semanal con Navegación Rápida y Contador de Turnos de Clientes */}
+          <div className="bg-slate-950/80 border border-white/5 rounded-2xl p-2.5">
+            <div className="flex items-center justify-between px-2 pb-2 text-[10px] font-black uppercase tracking-wider text-zinc-400">
+              <span className="flex items-center gap-1.5">
+                <CalendarDays className="w-3.5 h-3.5 text-emerald-400" />
+                Semana Actual (Hacé clic en cualquier día para cambiar)
+              </span>
+              <span className="text-zinc-400">
+                {allBookings.filter(b => !b.nombre.includes('BLOQUEADO')).length} turnos agendados en total
+              </span>
+            </div>
+            <div className="grid grid-cols-7 gap-1.5">
+              {weekDays.map((day) => {
+                const dayActive = allBookings.filter(b => b.fecha === day.dateStr && b.estado !== 'cancelado');
+                const realTurns = dayActive.filter(b => !b.nombre.includes('BLOQUEADO'));
+                const isBlocked = dayActive.some(b => b.nombre.includes('BLOQUEADO') || b.tipo === 'BLOQUEO');
+                const isSelected = day.dateStr === filterDate;
+                return (
+                  <button
+                    key={day.dateStr}
+                    onClick={() => setFilterDate(day.dateStr)}
+                    className={`flex flex-col items-center justify-center py-2 px-1 rounded-xl text-center transition-all cursor-pointer border ${
+                      isSelected
+                        ? 'bg-emerald-500 text-slate-950 border-emerald-400 font-black shadow-lg shadow-emerald-500/20'
+                        : 'bg-zinc-900/60 hover:bg-zinc-800 text-zinc-300 border-white/5'
+                    }`}
+                  >
+                    <span className={`text-[10px] font-black uppercase tracking-wider ${isSelected ? 'text-slate-950' : 'text-zinc-400'}`}>
+                      {day.shortName}
+                    </span>
+                    <span className="text-sm font-black my-0.5">
+                      {day.dayNumber}
+                    </span>
+                    {realTurns.length > 0 ? (
+                      <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-full ${
+                        isSelected 
+                          ? 'bg-slate-950 text-emerald-400' 
+                          : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                      }`}>
+                        {realTurns.length} {realTurns.length === 1 ? 'turno' : 'turnos'}
+                      </span>
+                    ) : isBlocked ? (
+                      <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-full ${
+                        isSelected ? 'bg-slate-950 text-amber-300' : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                      }`}>
+                        🚫 Bloq
+                      </span>
+                    ) : day.isSunday ? (
+                      <span className="text-[9px] text-zinc-400">Cerrado</span>
+                    ) : (
+                      <span className="text-[9px] text-zinc-400 opacity-60">Libre</span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Banner de Día Bloqueado con Desbloqueo Inmediato */}
+          {hasDayBlocks && (
+            <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-lg shadow-amber-500/5">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0">
+                  <Lock className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="text-sm font-black text-amber-300 flex items-center gap-2">
+                    <span>⚠️ Este día tiene horarios bloqueados</span>
+                    <span className="text-[10px] font-bold bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded-full border border-amber-500/30">
+                      {blockedBookingsForDay.length} bloqueo(s)
+                    </span>
+                  </div>
+                  <div className="text-xs text-zinc-300 mt-0.5">
+                    Fecha: <strong>{filterDate}</strong>. Los clientes no pueden reservar en estos horarios desde la web.
+                  </div>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 w-full sm:w-auto">
+                <button
+                  onClick={() => handleUnblockDay(filterDate)}
+                  className="flex-1 sm:flex-initial flex items-center justify-center gap-2 px-4 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs uppercase tracking-wider rounded-xl transition-all cursor-pointer shadow-md shadow-amber-500/20"
+                >
+                  <Unlock className="w-4 h-4" />
+                  <span>Desbloquear Día Completo</span>
+                </button>
+              </div>
+            </div>
+          )}
           
           {isSundaySelected ? (
             <div className="bg-zinc-900 border border-white/10 rounded-3xl p-12 text-center max-w-xl mx-auto shadow-xl">
@@ -1158,7 +1320,22 @@ export default function AdminAgenda({
                           )}
 
                           {/* Delete / Unlock button */}
-                          {deleteConfirmId === book.id ? (
+                          {isBlocked ? (
+                            <button 
+                              onClick={() => {
+                                if (book.nombre.includes('DÍA COMPLETO') || (book.blockedSlots && book.blockedSlots.length >= 8)) {
+                                  handleUnblockDay(book.fecha);
+                                } else {
+                                  handleUnblockSlot(book.fecha, book.hora);
+                                }
+                              }}
+                              className="flex items-center gap-1.5 px-3 py-2 bg-amber-500/20 hover:bg-amber-500 text-amber-300 hover:text-slate-950 border border-amber-500/40 rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer shadow-sm shadow-amber-500/10"
+                              title="Desbloquear este horario o día"
+                            >
+                              <Unlock className="w-3.5 h-3.5" />
+                              <span>{book.nombre.includes('DÍA COMPLETO') ? 'Desbloquear Día' : 'Desbloquear'}</span>
+                            </button>
+                          ) : deleteConfirmId === book.id ? (
                             <div className="flex items-center gap-1 bg-red-950/60 p-1 rounded-xl border border-red-500/40">
                               <button 
                                 onClick={() => handleDeleteBooking(book)}
@@ -1177,9 +1354,9 @@ export default function AdminAgenda({
                             <button 
                               onClick={() => setDeleteConfirmId(book.id)}
                               className="p-2.5 bg-zinc-800 hover:bg-red-500/20 text-zinc-400 hover:text-red-400 border border-white/5 rounded-xl transition-all cursor-pointer"
-                              title={isBlocked ? "Desbloquear Horario" : "Eliminar Turno"}
+                              title="Eliminar Turno"
                             >
-                              {isBlocked ? <Unlock className="w-4 h-4" /> : <Trash2 className="w-4 h-4" />}
+                              <Trash2 className="w-4 h-4" />
                             </button>
                           )}
                         </div>
@@ -1233,6 +1410,15 @@ export default function AdminAgenda({
                           <span>Bloqueado por rango extendido de horario</span>
                         </div>
                       </div>
+
+                      <button
+                        onClick={() => handleUnblockSlot(filterDate, timeSlot)}
+                        className="flex items-center gap-1.5 px-2.5 py-1.5 bg-amber-500/10 hover:bg-amber-500 text-amber-400 hover:text-slate-950 border border-amber-500/30 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer"
+                        title="Desbloquear esta hora individual"
+                      >
+                        <Unlock className="w-3 h-3" />
+                        <span>Desbloquear Hora</span>
+                      </button>
                     </div>
                   );
                 }
@@ -1744,7 +1930,7 @@ export default function AdminAgenda({
       </AnimatePresence>
 
       {/* ------------------------------------------------------------- */}
-      {/* MODAL: BLOQUEAR HORARIOS / DÍA COMPLETO                       */}
+      {/* MODAL: GESTOR DE BLOQUEOS & DISPONIBILIDAD                    */}
       {/* ------------------------------------------------------------- */}
       <AnimatePresence>
         {showBlockModal && (
@@ -1753,18 +1939,19 @@ export default function AdminAgenda({
               initial={{ opacity: 0, scale: 0.95, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="bg-zinc-900 border border-white/10 rounded-3xl p-6 md:p-8 max-w-md w-full shadow-2xl space-y-6"
+              className="bg-zinc-900 border border-white/10 rounded-3xl p-6 md:p-8 max-w-xl w-full shadow-2xl space-y-6 max-h-[90vh] flex flex-col"
             >
-              <div className="flex items-center justify-between border-b border-white/10 pb-4">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-10 h-10 rounded-xl bg-amber-500/10 text-amber-400 flex items-center justify-center">
+              {/* Modal Header */}
+              <div className="flex items-center justify-between border-b border-white/10 pb-4 shrink-0">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-amber-500/10 text-amber-400 flex items-center justify-center shrink-0">
                     <Lock className="w-5 h-5" />
                   </div>
                   <div>
                     <h3 className="text-lg font-display font-black italic text-white">
-                      BLOQUEAR DISPONIBILIDAD
+                      GESTOR DE BLOQUEOS
                     </h3>
-                    <p className="text-[11px] text-zinc-400">Fecha: {filterDate}</p>
+                    <p className="text-[11px] text-zinc-400">Control de disponibilidad y liberación de horarios</p>
                   </div>
                 </div>
 
@@ -1776,45 +1963,184 @@ export default function AdminAgenda({
                 </button>
               </div>
 
-              <div className="space-y-4">
-                <p className="text-xs text-zinc-300 leading-relaxed">
-                  Al bloquear horarios, la web ocultará inmediatamente esos cupos para que ningún cliente pueda reservarlos.
-                </p>
+              {/* Tabs */}
+              <div className="flex items-center gap-2 p-1 bg-slate-950 rounded-2xl border border-white/5 shrink-0">
+                <button
+                  onClick={() => setBlockModalTab('gestionar')}
+                  className={`flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
+                    blockModalTab === 'gestionar'
+                      ? 'bg-amber-500 text-slate-950 shadow-md font-black'
+                      : 'text-zinc-400 hover:text-white'
+                  }`}
+                >
+                  <Unlock className="w-3.5 h-3.5" />
+                  <span>Días Bloqueados ({allBlockedDates.length})</span>
+                </button>
+                <button
+                  onClick={() => setBlockModalTab('bloquear')}
+                  className={`flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
+                    blockModalTab === 'bloquear'
+                      ? 'bg-emerald-500 text-slate-950 shadow-md font-black'
+                      : 'text-zinc-400 hover:text-white'
+                  }`}
+                >
+                  <Lock className="w-3.5 h-3.5" />
+                  <span>Bloquear Horarios</span>
+                </button>
+              </div>
 
-                <div className="space-y-3">
-                  <button 
-                    onClick={handleBlockFullDay}
-                    className="w-full p-4 bg-zinc-800 hover:bg-zinc-700 border border-white/5 rounded-2xl flex items-center justify-between text-left transition-all group cursor-pointer"
-                  >
-                    <div>
-                      <div className="text-sm font-black text-white group-hover:text-amber-400 transition-colors">
-                        🚫 Bloquear Todo el Día ({filterDate})
-                      </div>
-                      <div className="text-[11px] text-zinc-400 mt-0.5">
-                        Ideal para feriados, días no laborables o mantenimiento
-                      </div>
+              {/* Tab 1: Gestionar y Eliminar Bloqueos */}
+              {blockModalTab === 'gestionar' && (
+                <div className="space-y-4 overflow-y-auto pr-1 flex-1">
+                  {allBlockedDates.length === 0 ? (
+                    <div className="text-center py-10 px-4 bg-slate-950/60 rounded-2xl border border-white/5 space-y-2">
+                      <CheckCircle2 className="w-10 h-10 text-emerald-400 mx-auto opacity-80" />
+                      <div className="text-sm font-bold text-white">No hay días ni horarios bloqueados</div>
+                      <p className="text-xs text-zinc-400 max-w-sm mx-auto">
+                        Todos los horarios habituales de atención están libres y disponibles para reserva online de clientes.
+                      </p>
                     </div>
-                    <ArrowRight className="w-4 h-4 text-zinc-500 group-hover:text-amber-400" />
-                  </button>
+                  ) : (
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between px-1">
+                        <span className="text-xs text-zinc-400">
+                          Hay <strong>{allBlockedDates.length}</strong> fecha(s) con cupos bloqueados:
+                        </span>
+                        {allBlockedDates.length > 1 && (
+                          <button
+                            onClick={async () => {
+                              for (const item of allBlockedDates) {
+                                await handleUnblockDay(item.date);
+                              }
+                            }}
+                            className="text-[11px] font-black text-amber-400 hover:text-amber-300 underline uppercase tracking-wider cursor-pointer"
+                          >
+                            Desbloquear Todos los Días
+                          </button>
+                        )}
+                      </div>
 
-                  <div className="p-4 bg-slate-950 rounded-2xl border border-white/5 space-y-3">
-                    <div className="text-xs font-black uppercase tracking-wider text-zinc-400">
-                      O bloquear horario individual en Timeline:
+                      {allBlockedDates.map((item) => {
+                        const parts = item.date.split('-').map(Number);
+                        const dt = new Date(parts[0], parts[1] - 1, parts[2]);
+                        const dateFormatted = dt.toLocaleDateString('es-AR', {
+                          weekday: 'long',
+                          day: 'numeric',
+                          month: 'long'
+                        });
+
+                        return (
+                          <div 
+                            key={item.date}
+                            className="p-4 bg-slate-950 rounded-2xl border border-amber-500/20 space-y-3 shadow-lg"
+                          >
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-white/5 pb-2.5">
+                              <div>
+                                <div className="text-sm font-black text-white capitalize flex items-center gap-2">
+                                  <span>{dateFormatted}</span>
+                                  <span className="text-[10px] font-bold text-zinc-400">({item.date})</span>
+                                </div>
+                                <div className="text-[11px] text-amber-400 font-bold mt-0.5">
+                                  {item.hours.length} horario(s) bloqueado(s)
+                                </div>
+                              </div>
+
+                              <button
+                                onClick={() => handleUnblockDay(item.date)}
+                                className="flex items-center justify-center gap-1.5 px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer shadow-md shadow-amber-500/10 shrink-0"
+                              >
+                                <Unlock className="w-3.5 h-3.5" />
+                                <span>Desbloquear Día Completo</span>
+                              </button>
+                            </div>
+
+                            {/* Individual hour chips */}
+                            <div className="space-y-1.5">
+                              <div className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">
+                                Horarios bloqueados (clic en ✕ para liberar uno solo):
+                              </div>
+                              <div className="flex flex-wrap gap-1.5">
+                                {item.hours.sort().map((h) => (
+                                  <button
+                                    key={h}
+                                    onClick={() => handleUnblockSlot(item.date, h)}
+                                    className="flex items-center gap-1 px-2.5 py-1 bg-zinc-800 hover:bg-red-500/20 hover:border-red-500/40 text-zinc-300 hover:text-red-300 rounded-lg text-xs font-bold border border-white/5 transition-all cursor-pointer group"
+                                    title={`Liberar ${h}hs`}
+                                  >
+                                    <span>{h}hs</span>
+                                    <X className="w-3 h-3 text-zinc-500 group-hover:text-red-400" />
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
-                    <p className="text-[11px] text-zinc-500">
-                      En la vista Timeline Diario podés hacer clic en el botón <strong>"Bloquear"</strong> al lado de cada horario específico.
-                    </p>
+                  )}
+                </div>
+              )}
+
+              {/* Tab 2: Bloquear Nuevos Horarios */}
+              {blockModalTab === 'bloquear' && (
+                <div className="space-y-4 overflow-y-auto pr-1 flex-1">
+                  <p className="text-xs text-zinc-300 leading-relaxed">
+                    Al bloquear un horario o día completo, la web ocultará inmediatamente esos cupos para que ningún cliente pueda reservarlos.
+                  </p>
+
+                  <div className="space-y-3">
+                    <div className="p-4 bg-slate-950 rounded-2xl border border-white/5 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-black uppercase tracking-wider text-zinc-400">
+                          Fecha a Bloquear:
+                        </span>
+                        <input 
+                          type="date"
+                          value={filterDate}
+                          onChange={(e) => setFilterDate(e.target.value)}
+                          className="bg-zinc-900 border border-white/10 rounded-xl px-3 py-1.5 text-xs text-white font-medium outline-none focus:border-amber-500 cursor-pointer"
+                        />
+                      </div>
+
+                      <button 
+                        onClick={handleBlockFullDay}
+                        className="w-full p-4 bg-zinc-800 hover:bg-zinc-700 border border-white/5 rounded-2xl flex items-center justify-between text-left transition-all group cursor-pointer"
+                      >
+                        <div>
+                          <div className="text-sm font-black text-white group-hover:text-amber-400 transition-colors">
+                            🚫 Bloquear Todo el Día ({filterDate})
+                          </div>
+                          <div className="text-[11px] text-zinc-400 mt-0.5">
+                            Ideal para feriados, días no laborables o mantenimiento
+                          </div>
+                        </div>
+                        <ArrowRight className="w-4 h-4 text-zinc-500 group-hover:text-amber-400" />
+                      </button>
+                    </div>
+
+                    <div className="p-4 bg-slate-950 rounded-2xl border border-white/5 space-y-2">
+                      <div className="text-xs font-black uppercase tracking-wider text-zinc-400">
+                        O bloquear horas individuales:
+                      </div>
+                      <p className="text-[11px] text-zinc-400 leading-relaxed">
+                        En la vista <strong>Timeline Diario</strong> podés hacer clic directamente en el botón <strong>"Bloquear"</strong> al lado de cualquier horario específico.
+                      </p>
+                    </div>
                   </div>
                 </div>
+              )}
 
-                <div className="pt-2 flex justify-end">
-                  <button 
-                    onClick={() => setShowBlockModal(false)}
-                    className="px-5 py-2 text-xs font-bold text-zinc-400 hover:text-white"
-                  >
-                    Cerrar
-                  </button>
-                </div>
+              {/* Footer */}
+              <div className="pt-2 border-t border-white/10 flex items-center justify-between shrink-0">
+                <span className="text-[11px] text-zinc-500">
+                  {allBlockedDates.length > 0 ? `${allBlockedDates.length} fecha(s) bloqueada(s)` : 'Sin bloqueos'}
+                </span>
+                <button 
+                  onClick={() => setShowBlockModal(false)}
+                  className="px-5 py-2 text-xs font-bold text-zinc-400 hover:text-white cursor-pointer"
+                >
+                  Cerrar
+                </button>
               </div>
             </motion.div>
           </div>

@@ -77,6 +77,28 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs = 10000): Promise<T
   });
 }
 
+// --- Exponential Backoff Wrapper for Firestore Writes ---
+async function executeWithBackoff<T>(fn: () => Promise<T>, maxRetries = 3, initialDelayMs = 1200): Promise<T> {
+  let delay = initialDelayMs;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (err: any) {
+      const isRateLimit = err?.code === 'resource-exhausted' || 
+                          err?.message?.includes('resource-exhausted') || 
+                          err?.message?.includes('maximum bandwidth');
+      if (isRateLimit && attempt < maxRetries) {
+        console.warn(`Firestore write rate limit reached. Backing off for ${delay}ms (attempt ${attempt}/${maxRetries})...`);
+        await new Promise(res => setTimeout(res, delay));
+        delay *= 2; // exponential backoff
+      } else {
+        throw err;
+      }
+    }
+  }
+  return fn();
+}
+
 // --- Local Storage Cache Helpers ---
 function getLocalCache<T>(key: string, defaultValue: T): T {
   try {
@@ -91,6 +113,29 @@ function setLocalCache<T>(key: string, value: T): void {
   try {
     localStorage.setItem(key, JSON.stringify(value));
   } catch (e) {}
+}
+
+// Synchronize schedule overrides (unblocked days and slots) with server API & localStorage
+async function syncScheduleOverrides(): Promise<{ unblockedDays: Set<string>; unblockedSlots: Set<string> }> {
+  const localDays = new Set(getLocalCache<string[]>('lys_unblocked_days', []));
+  const localSlots = new Set(getLocalCache<string[]>('lys_unblocked_slots', []));
+  try {
+    const res = await fetch('/api/schedule/overrides', { signal: AbortSignal.timeout(2000) });
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data.unblockedDays)) {
+        data.unblockedDays.forEach((d: string) => localDays.add(d));
+        setLocalCache('lys_unblocked_days', Array.from(localDays));
+      }
+      if (Array.isArray(data.unblockedSlots)) {
+        data.unblockedSlots.forEach((s: string) => localSlots.add(s));
+        setLocalCache('lys_unblocked_slots', Array.from(localSlots));
+      }
+    }
+  } catch (e) {
+    // Offline or server not responding, fallback to local storage
+  }
+  return { unblockedDays: localDays, unblockedSlots: localSlots };
 }
 
 function cleanFirestoreData<T>(obj: T): T {
@@ -320,14 +365,6 @@ export const firestoreService = {
       if (snap.size > 0) {
         const allCloudRows = Array.from(loadedMap.values());
         setLocalCache('lys_cache_bookings', allCloudRows);
-
-        // Sync to shared settings registry so unauthenticated/local sessions can view client details
-        if (auth.currentUser && auth.currentUser.email?.toLowerCase() === 'leandro.saralegui@gmail.com') {
-          try {
-            const clean = cleanFirestoreData({ bookings: allCloudRows, lastUpdated: new Date().toISOString() });
-            setDoc(doc(db, 'settings', 'bookings_registry'), clean, { merge: true }).catch(() => {});
-          } catch (e) {}
-        }
       }
     } catch (e) {
       console.warn("Firestore getBookings notice (cloud collection query unauthenticated or timeout):", e);
@@ -379,11 +416,17 @@ export const firestoreService = {
           }
         });
 
+        const { unblockedDays, unblockedSlots } = await syncScheduleOverrides();
+
         slotsByDate.forEach((slots, fecha) => {
+          // If the day was completely unblocked by admin, skip its old blocks
+          if (unblockedDays.has(fecha)) return;
+
           slots.sort((a, b) => (a.hora || '').localeCompare(b.hora || ''));
 
-          // Check which slots are not already covered by an existing booking on this date
+          // Check which slots are not already covered by an existing booking on this date and not manually unblocked
           const uncovered = slots.filter(ts => {
+            if (unblockedSlots.has(ts.id) || unblockedSlots.has(`${fecha}_${ts.hora}`)) return false;
             let covered = false;
             loadedMap.forEach(b => {
               if (b.fecha === fecha) {
@@ -487,24 +530,26 @@ export const firestoreService = {
     setLocalCache('lys_cache_taken_slots', localTaken);
 
     try {
-      const bach = writeBatch(db);
-      const bookingRef = doc(db, 'bookings', booking.id);
-      bach.set(bookingRef, booking);
+      await executeWithBackoff(async () => {
+        const bach = writeBatch(db);
+        const bookingRef = doc(db, 'bookings', booking.id);
+        bach.set(bookingRef, booking);
 
-      for (const h of hoursToBlock) {
-        const sId = `${booking.fecha}_${h}`;
-        const slotRef = doc(db, 'taken_slots', sId);
-        bach.set(slotRef, {
-          id: sId,
-          fecha: booking.fecha,
-          hora: h,
-          isBlocked: isBlocked
-        });
-      }
+        for (const h of hoursToBlock) {
+          const sId = `${booking.fecha}_${h}`;
+          const slotRef = doc(db, 'taken_slots', sId);
+          bach.set(slotRef, {
+            id: sId,
+            fecha: booking.fecha,
+            hora: h,
+            isBlocked: isBlocked
+          });
+        }
 
-      await withTimeout(bach.commit(), 10000);
+        await withTimeout(bach.commit(), 10000);
+      });
     } catch (e) {
-      handleFirestoreError(e, OperationType.WRITE, `bookings_and_slots/${booking.id}`);
+      console.warn(`Cloud booking write deferred/failed for ${booking.id}, preserved locally:`, e);
     }
   },
 
@@ -518,6 +563,19 @@ export const firestoreService = {
       ? bk.blockedSlots
       : calculatedSlots;
 
+    // If it's a manual block or synthetic slot, also unblock the slots in overrides
+    const isBlock = bk?.tipo === 'BLOQUEO' || bk?.nombre?.includes('BLOQUEADO') || bookingId.startsWith('block_') || bookingId.startsWith('slot_');
+    if (isBlock) {
+      if (hoursToBlock.length >= 8 || bk?.nombre?.includes('DÍA COMPLETO') || bk?.servicio?.includes('DÍA COMPLETO')) {
+        await this.unblockDay(fecha);
+        return;
+      } else {
+        for (const h of hoursToBlock) {
+          await this.unblockSlot(fecha, h);
+        }
+      }
+    }
+
     // Update local cache
     const filteredBookings = localBookings.filter(b => b.id !== bookingId);
     setLocalCache('lys_cache_bookings', filteredBookings);
@@ -528,19 +586,113 @@ export const firestoreService = {
     setLocalCache('lys_cache_taken_slots', filteredTaken);
 
     try {
-      const bach = writeBatch(db);
-      const bookingRef = doc(db, 'bookings', bookingId);
-      bach.delete(bookingRef);
+      await executeWithBackoff(async () => {
+        const bach = writeBatch(db);
+        const bookingRef = doc(db, 'bookings', bookingId);
+        bach.delete(bookingRef);
 
-      for (const h of hoursToBlock) {
-        const sId = `${fecha}_${h}`;
-        const slotRef = doc(db, 'taken_slots', sId);
-        bach.delete(slotRef);
-      }
+        for (const h of hoursToBlock) {
+          const sId = `${fecha}_${h}`;
+          const slotRef = doc(db, 'taken_slots', sId);
+          bach.delete(slotRef);
+        }
 
-      await withTimeout(bach.commit(), 10000);
+        await withTimeout(bach.commit(), 10000);
+      });
     } catch (e) {
-      handleFirestoreError(e, OperationType.DELETE, `bookings_and_slots/${bookingId}`);
+      console.warn(`Cloud booking deletion deferred/failed for ${bookingId}, preserved locally:`, e);
+    }
+  },
+
+  async unblockDay(fecha: string): Promise<void> {
+    // 1. Mark day in unblocked days set locally
+    const unblockedDays = new Set(getLocalCache<string[]>('lys_unblocked_days', []));
+    unblockedDays.add(fecha);
+    setLocalCache('lys_unblocked_days', Array.from(unblockedDays));
+
+    // 2. Notify backend persistent storage across all clients
+    fetch('/api/schedule/unblock-day', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fecha })
+    }).catch(() => null);
+
+    // 3. Remove all block bookings for this day from local cache
+    const localBookings = getLocalCache<Booking[]>('lys_cache_bookings', []);
+    const filteredBookings = localBookings.filter(b => !(b.fecha === fecha && (b.tipo === 'BLOQUEO' || b.nombre?.includes('BLOQUEADO') || b.id.startsWith('slot_') || b.id.startsWith('block_'))));
+    setLocalCache('lys_cache_bookings', filteredBookings);
+
+    // 4. Remove all blocked slots for this date from local taken slots
+    const localTaken = getLocalCache<TakenSlot[]>('lys_cache_taken_slots', []);
+    const filteredTaken = localTaken.filter(ts => !(ts.fecha === fecha && ts.isBlocked));
+    setLocalCache('lys_cache_taken_slots', filteredTaken);
+
+    // 5. Delete all blocked slots for this date from Firestore in cloud if permissions allow
+    try {
+      const q = query(collection(db, 'taken_slots'), where('fecha', '==', fecha));
+      const snap = await withTimeout(getDocs(q), 5000);
+      const batch = writeBatch(db);
+      let count = 0;
+      snap.forEach(d => {
+        const data = d.data() as TakenSlot;
+        if (data.isBlocked) {
+          batch.delete(doc(db, 'taken_slots', d.id));
+          count++;
+        }
+      });
+
+      if (count > 0) {
+        await executeWithBackoff(async () => {
+          await withTimeout(batch.commit(), 10000);
+        });
+      }
+    } catch (e) {
+      console.warn(`Cloud unblock for day ${fecha} deferred, cleared locally:`, e);
+    }
+  },
+
+  async unblockSlot(fecha: string, hora: string): Promise<void> {
+    const sId = `${fecha}_${hora}`;
+    
+    // 1. Mark in unblocked slots set locally
+    const unblockedSlots = new Set(getLocalCache<string[]>('lys_unblocked_slots', []));
+    unblockedSlots.add(sId);
+    setLocalCache('lys_unblocked_slots', Array.from(unblockedSlots));
+
+    // 2. Notify backend persistent storage across all clients
+    fetch('/api/schedule/unblock-slot', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fecha, hora })
+    }).catch(() => null);
+
+    // 3. Update local caches
+    const localTaken = getLocalCache<TakenSlot[]>('lys_cache_taken_slots', []);
+    setLocalCache('lys_cache_taken_slots', localTaken.filter(ts => ts.id !== sId));
+
+    const localBookings = getLocalCache<Booking[]>('lys_cache_bookings', []);
+    const updatedBookings = localBookings.filter(b => {
+      if (b.fecha === fecha && (b.tipo === 'BLOQUEO' || b.nombre?.includes('BLOQUEADO') || b.id.startsWith('slot_') || b.id.startsWith('block_'))) {
+        const slots = b.blockedSlots || [b.hora];
+        if (slots.length <= 1 && slots.includes(hora)) return false;
+        if (slots.includes(hora)) {
+          b.blockedSlots = slots.filter(h => h !== hora);
+          return true;
+        }
+      }
+      return true;
+    });
+    setLocalCache('lys_cache_bookings', updatedBookings);
+
+    // 4. Delete from Firestore if permitted
+    try {
+      const batch = writeBatch(db);
+      batch.delete(doc(db, 'taken_slots', sId));
+      await executeWithBackoff(async () => {
+        await withTimeout(batch.commit(), 6000);
+      });
+    } catch (e) {
+      console.warn(`Cloud unblock for slot ${sId} deferred, cleared locally:`, e);
     }
   },
 
@@ -573,29 +725,31 @@ export const firestoreService = {
     setLocalCache('lys_cache_taken_slots', updatedTaken);
 
     try {
-      const bookingRef = doc(db, 'bookings', bookingId);
-      const bach = writeBatch(db);
-      
-      bach.update(bookingRef, { estado: newStatus });
+      await executeWithBackoff(async () => {
+        const bookingRef = doc(db, 'bookings', bookingId);
+        const bach = writeBatch(db);
+        
+        bach.update(bookingRef, { estado: newStatus });
 
-      for (const h of hoursToBlock) {
-        const sId = `${booking.fecha}_${h}`;
-        const slotRef = doc(db, 'taken_slots', sId);
-        if (newStatus === 'cancelado') {
-          bach.delete(slotRef);
-        } else {
-          bach.set(slotRef, {
-            id: sId,
-            fecha: booking.fecha,
-            hora: h,
-            isBlocked: booking.nombre.includes('BLOQUEADO')
-          });
+        for (const h of hoursToBlock) {
+          const sId = `${booking.fecha}_${h}`;
+          const slotRef = doc(db, 'taken_slots', sId);
+          if (newStatus === 'cancelado') {
+            bach.delete(slotRef);
+          } else {
+            bach.set(slotRef, {
+              id: sId,
+              fecha: booking.fecha,
+              hora: h,
+              isBlocked: booking.nombre.includes('BLOQUEADO')
+            });
+          }
         }
-      }
 
-      await withTimeout(bach.commit(), 10000);
+        await withTimeout(bach.commit(), 10000);
+      });
     } catch (e) {
-      handleFirestoreError(e, OperationType.UPDATE, `bookings_and_slots/${bookingId}`);
+      console.warn(`Cloud booking status update deferred/failed for ${bookingId}, preserved locally:`, e);
     }
   },
 
@@ -618,19 +772,21 @@ export const firestoreService = {
         console.warn('Fallback to system timezone for todayStr:', e);
       }
 
-      // Query taken_slots from today onwards
       const q = query(
         collection(db, colPath), 
         where('fecha', '>=', todayStr)
       );
-      
-      const snap = await withTimeout(getDocs(q), 3000);
+      const snap = await withTimeout(getDocs(q), 5000);
       const resMap = new Map<string, TakenSlot>();
+      
+      const { unblockedDays, unblockedSlots } = await syncScheduleOverrides();
 
       snap.forEach(docSnap => {
         const data = docSnap.data() as TakenSlot;
         if (data && data.id) {
-          resMap.set(data.id, data);
+          if (!unblockedDays.has(data.fecha) && !unblockedSlots.has(data.id) && !unblockedSlots.has(`${data.fecha}_${data.hora}`)) {
+            resMap.set(data.id, data);
+          }
         }
       });
 
@@ -789,13 +945,15 @@ export const firestoreService = {
 
     try {
       const cleanMov = cleanFirestoreData(movement);
-      await withTimeout(setDoc(doc(db, colPath, movement.id), cleanMov), 4000);
+      await executeWithBackoff(async () => {
+        await withTimeout(setDoc(doc(db, colPath, movement.id), cleanMov), 4000);
+      });
       
       // Successfully saved to Firestore! Remove from unsynced queue
       const updatedUnsynced = getLocalCache<Movement[]>('lys_unsynced_movements', []).filter(m => m.id !== movement.id);
       setLocalCache('lys_unsynced_movements', updatedUnsynced);
     } catch (e) {
-      handleFirestoreError(e, OperationType.WRITE, `${colPath}/${movement.id}`);
+      console.warn(`Cloud save for movement ${movement.id} deferred, preserved locally:`, e);
     }
 
     // Sync to shared settings/movements_registry
@@ -805,7 +963,9 @@ export const firestoreService = {
       const currentList: Movement[] = regSnap?.exists() && Array.isArray(regSnap.data()?.movements) ? regSnap.data().movements : [];
       const updatedList = [movement, ...currentList.filter(m => m.id !== movement.id)];
       const cleanReg = cleanFirestoreData({ movements: updatedList, lastUpdated: new Date().toISOString() });
-      await withTimeout(setDoc(regRef, cleanReg), 4000).catch(() => null);
+      await executeWithBackoff(async () => {
+        await withTimeout(setDoc(regRef, cleanReg), 4000);
+      }).catch(() => null);
     } catch (e) {}
   },
 
@@ -840,31 +1000,29 @@ export const firestoreService = {
       if (!m || !m.id) continue;
       try {
         const cleanMov = cleanFirestoreData(m);
-        await withTimeout(setDoc(doc(db, colPath, m.id), cleanMov), 6000);
+        await executeWithBackoff(async () => {
+          await withTimeout(setDoc(doc(db, colPath, m.id), cleanMov), 6000);
+        });
         count++;
         // Remove from unsynced queue
         const current = getLocalCache<Movement[]>('lys_unsynced_movements', []);
         setLocalCache('lys_unsynced_movements', current.filter(x => x.id !== m.id));
+        // Polite delay between individual document writes
+        await new Promise(r => setTimeout(r, 200));
       } catch (err) {
-        console.warn(`Could not sync movement ${m.id} to Firestore collection, trying fallback:`, err);
-        try {
-          await this.saveMovement(m);
-          count++;
-          const current = getLocalCache<Movement[]>('lys_unsynced_movements', []);
-          setLocalCache('lys_unsynced_movements', current.filter(x => x.id !== m.id));
-        } catch (e2) {
-          console.warn(`Fallback sync for ${m.id} also failed:`, e2);
-        }
+        console.warn(`Could not sync movement ${m.id} to Firestore collection, deferring:`, err);
       }
     }
 
-    // Always push current consolidated list to shared movements_registry
+    // Push current consolidated list to shared movements_registry
     try {
       const allLocal = getLocalCache<Movement[]>('lys_cache_movements', []);
       if (allLocal.length > 0) {
         const regRef = doc(db, 'settings', 'movements_registry');
         const cleanReg = cleanFirestoreData({ movements: allLocal, lastUpdated: new Date().toISOString() });
-        await withTimeout(setDoc(regRef, cleanReg), 6000).catch(() => null);
+        await executeWithBackoff(async () => {
+          await withTimeout(setDoc(regRef, cleanReg), 6000);
+        }).catch(() => null);
       }
     } catch (e) {}
 
@@ -893,19 +1051,6 @@ export const firestoreService = {
             duration: s.duration || 60
           };
         });
-        
-        // Only write defaults if signed in as admin
-        if (isUserAdmin()) {
-          try {
-            const batch = writeBatch(db);
-            initialServices.forEach(srv => {
-              batch.set(doc(db, colPath, srv.id), srv);
-            });
-            await withTimeout(batch.commit(), 3000);
-          } catch (writeErr) {
-            console.warn("Bootstrap services write skipped/failed:", writeErr);
-          }
-        }
         
         setLocalCache('lys_cache_services', initialServices);
         return initialServices;
@@ -994,19 +1139,6 @@ export const firestoreService = {
           };
         });
 
-        // Only write defaults if signed in as admin
-        if (isUserAdmin()) {
-          try {
-            const batch = writeBatch(db);
-            initialVehicles.forEach(veh => {
-              batch.set(doc(db, colPath, veh.id), veh);
-            });
-            await withTimeout(batch.commit(), 3000);
-          } catch (writeErr) {
-            console.warn("Bootstrap vehicles write skipped/failed:", writeErr);
-          }
-        }
-        
         setLocalCache('lys_cache_vehicles', initialVehicles);
         return initialVehicles;
       }
@@ -1077,19 +1209,6 @@ export const firestoreService = {
           }
         ];
 
-        // Only write defaults if signed in as admin
-        if (isUserAdmin()) {
-          try {
-            const batch = writeBatch(db);
-            defaultPhotos.forEach(p => {
-              batch.set(doc(db, colPath, p.id), p);
-            });
-            await withTimeout(batch.commit(), 3000);
-          } catch (writeErr) {
-            console.warn("Bootstrap gallery write skipped/failed:", writeErr);
-          }
-        }
-        
         setLocalCache('lys_cache_gallery', defaultPhotos);
         return defaultPhotos;
       }

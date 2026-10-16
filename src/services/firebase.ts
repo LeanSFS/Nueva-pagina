@@ -1,10 +1,21 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
+import { initializeFirestore } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 
 const app = initializeApp(firebaseConfig);
-// Initialize with firestoreDatabaseId if configured, or fall back to standard default database instance
+
+// Configure Firestore with long-polling to prevent WebSocket connection timeouts (10s)
+// in iframe preview, Cloud Run proxy, and mobile environments
+const firestoreOptions = {
+  experimentalForceLongPolling: true
+};
+
 // @ts-ignore
-export const db = firebaseConfig.firestoreDatabaseId ? getFirestore(app, firebaseConfig.firestoreDatabaseId) : getFirestore(app);
+const databaseId = firebaseConfig.firestoreDatabaseId;
+export const db = databaseId 
+  ? initializeFirestore(app, firestoreOptions, databaseId) 
+  : initializeFirestore(app, firestoreOptions);
+
 export const auth = getAuth(app);
+
