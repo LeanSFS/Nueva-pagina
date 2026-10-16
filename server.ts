@@ -118,7 +118,164 @@ app.post("/api/schedule/block-slot", (req, res) => {
   return res.json({ success: true, overrides: updated });
 });
 
-// Initialize Gemini client lazily
+// Persistent Server Bookings & Taken Slots Store (Bulletproof against Firebase Quota Exceeded)
+const BOOKINGS_FILE = path.join(process.cwd(), "data", "bookings.json");
+const TAKEN_SLOTS_FILE = path.join(process.cwd(), "data", "taken_slots.json");
+
+interface ServerBooking {
+  id: string;
+  fecha: string;
+  hora: string;
+  tipo: string;
+  servicio: string;
+  nombre: string;
+  telefono: string;
+  direccion: string;
+  estado: string;
+  blockedSlots?: string[];
+  modalidad?: string;
+  recargoDomicilio?: number;
+  precioTotal?: number;
+  indicacionesDomicilio?: string;
+  cumpleRequisitosDomicilio?: boolean;
+  createdAt?: string;
+}
+
+interface ServerTakenSlot {
+  id: string;
+  fecha: string;
+  hora: string;
+  isBlocked: boolean;
+}
+
+function getServerBookings(): ServerBooking[] {
+  try {
+    if (fs.existsSync(BOOKINGS_FILE)) {
+      const data = JSON.parse(fs.readFileSync(BOOKINGS_FILE, "utf-8"));
+      return Array.isArray(data) ? data : [];
+    }
+  } catch (err) {
+    console.error("Error reading bookings file:", err);
+  }
+  return [];
+}
+
+function saveServerBookings(bookings: ServerBooking[]) {
+  try {
+    const dir = path.dirname(BOOKINGS_FILE);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(BOOKINGS_FILE, JSON.stringify(bookings, null, 2), "utf-8");
+  } catch (err) {
+    console.error("Error saving bookings file:", err);
+  }
+}
+
+function getServerTakenSlots(): ServerTakenSlot[] {
+  try {
+    if (fs.existsSync(TAKEN_SLOTS_FILE)) {
+      const data = JSON.parse(fs.readFileSync(TAKEN_SLOTS_FILE, "utf-8"));
+      return Array.isArray(data) ? data : [];
+    }
+  } catch (err) {
+    console.error("Error reading taken_slots file:", err);
+  }
+  return [];
+}
+
+function saveServerTakenSlots(slots: ServerTakenSlot[]) {
+  try {
+    const dir = path.dirname(TAKEN_SLOTS_FILE);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(TAKEN_SLOTS_FILE, JSON.stringify(slots, null, 2), "utf-8");
+  } catch (err) {
+    console.error("Error saving taken_slots file:", err);
+  }
+}
+
+app.get("/api/bookings", (_req, res) => {
+  return res.json(getServerBookings());
+});
+
+app.post("/api/bookings", (req, res) => {
+  const booking: ServerBooking = req.body;
+  if (!booking || !booking.id || !booking.fecha || !booking.hora) {
+    return res.status(400).json({ error: "Invalid booking data: id, fecha, hora required" });
+  }
+  const isBlocked = Boolean(req.body.isBlocked);
+  const bookings = getServerBookings();
+  const existingIdx = bookings.findIndex(b => b.id === booking.id);
+  if (existingIdx >= 0) {
+    bookings[existingIdx] = { ...bookings[existingIdx], ...booking };
+  } else {
+    bookings.push({ ...booking, createdAt: booking.createdAt || new Date().toISOString() });
+  }
+  saveServerBookings(bookings);
+
+  // Synchronize taken_slots
+  const hoursToBlock = booking.blockedSlots && booking.blockedSlots.length > 0
+    ? booking.blockedSlots
+    : [booking.hora];
+  
+  const takenSlots = getServerTakenSlots();
+  for (const h of hoursToBlock) {
+    const sId = `${booking.fecha}_${h}`;
+    const slotIdx = takenSlots.findIndex(s => s.id === sId);
+    const newSlot: ServerTakenSlot = {
+      id: sId,
+      fecha: booking.fecha,
+      hora: h,
+      isBlocked: isBlocked || booking.nombre?.includes('BLOQUEADO') || booking.tipo === 'BLOQUEO'
+    };
+    if (slotIdx >= 0) {
+      takenSlots[slotIdx] = newSlot;
+    } else {
+      takenSlots.push(newSlot);
+    }
+  }
+  saveServerTakenSlots(takenSlots);
+
+  return res.json({ success: true, booking });
+});
+
+app.delete("/api/bookings/:id", (req, res) => {
+  const { id } = req.params;
+  const bookings = getServerBookings();
+  const target = bookings.find(b => b.id === id);
+  const updatedBookings = bookings.filter(b => b.id !== id);
+  saveServerBookings(updatedBookings);
+
+  if (target) {
+    const hoursToBlock = target.blockedSlots && target.blockedSlots.length > 0 ? target.blockedSlots : [target.hora];
+    const hoursSet = new Set(hoursToBlock.map(h => `${target.fecha}_${h}`));
+    const takenSlots = getServerTakenSlots();
+    const updatedSlots = takenSlots.filter(s => !hoursSet.has(s.id));
+    saveServerTakenSlots(updatedSlots);
+  }
+
+  return res.json({ success: true });
+});
+
+app.get("/api/taken-slots", (_req, res) => {
+  return res.json(getServerTakenSlots());
+});
+
+app.post("/api/taken-slots", (req, res) => {
+  const { slots } = req.body;
+  if (!Array.isArray(slots)) {
+    return res.status(400).json({ error: "slots array is required" });
+  }
+  const current = getServerTakenSlots();
+  const map = new Map(current.map(s => [s.id, s]));
+  for (const s of slots) {
+    if (s && s.id && s.fecha && s.hora) {
+      map.set(s.id, s);
+    }
+  }
+  const updated = Array.from(map.values());
+  saveServerTakenSlots(updated);
+  return res.json({ success: true, count: updated.length });
+});
+
 let genAiClient: GoogleGenAI | null = null;
 function getGeminiClient(): GoogleGenAI {
   if (!genAiClient) {

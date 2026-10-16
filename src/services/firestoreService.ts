@@ -347,6 +347,27 @@ export const firestoreService = {
     const colPath = 'bookings';
     const loadedMap = new Map<string, Booking>();
 
+    // 0. Query server-side persistent bookings (shared across all clients & admin, fail-safe against Firestore quota)
+    try {
+      const serverRes = await fetch('/api/bookings', { signal: AbortSignal.timeout(2500) });
+      if (serverRes.ok) {
+        const serverBookings: Booking[] = await serverRes.json();
+        if (Array.isArray(serverBookings)) {
+          for (const b of serverBookings) {
+            if (b && b.id) {
+              if (!b.blockedSlots || b.blockedSlots.length === 0) {
+                const dur = calculateDurationFromServiceName(b.servicio, b.modalidad);
+                b.blockedSlots = calculateBlockedSlotsForStart(b.hora, dur);
+              }
+              loadedMap.set(b.id, b);
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Could not fetch server bookings, proceeding to Firestore/local:', e);
+    }
+
     // 1. Fetch remote from Firestore 'bookings' collection (succeeds when authenticated with Google)
     try {
       const q = collection(db, colPath);
@@ -529,6 +550,13 @@ export const firestoreService = {
     }
     setLocalCache('lys_cache_taken_slots', localTaken);
 
+    // Synchronize to server-side persistent database (shared across all devices)
+    fetch('/api/bookings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...booking, isBlocked })
+    }).catch(err => console.warn('Could not sync booking to server /api/bookings:', err));
+
     try {
       await executeWithBackoff(async () => {
         const bach = writeBatch(db);
@@ -562,6 +590,9 @@ export const firestoreService = {
     const hoursToBlock = bk && bk.blockedSlots && bk.blockedSlots.length > 0
       ? bk.blockedSlots
       : calculatedSlots;
+
+    // Delete from server-side database
+    fetch(`/api/bookings/${bookingId}`, { method: 'DELETE' }).catch(() => null);
 
     // If it's a manual block or synthetic slot, also unblock the slots in overrides
     const isBlock = bk?.tipo === 'BLOQUEO' || bk?.nombre?.includes('BLOQUEADO') || bookingId.startsWith('block_') || bookingId.startsWith('slot_');

@@ -1,0 +1,39 @@
+[
+  {
+    "id": "book_sat_1000",
+    "fecha": "2026-10-17",
+    "hora": "10:00",
+    "tipo": "Auto",
+    "servicio": "Lavado Artesanal Premium – $38.000",
+    "nombre": "Cliente Web (Sábado)",
+    "telefono": "2994012345",
+    "direccion": "Venezuela 1659, Cipolletti",
+    "estado": "confirmado",
+    "blockedSlots": [
+      "10:00",
+      "11:00",
+      "12:00"
+    ],
+    "modalidad": "taller",
+    "precioTotal": 38000,
+    "createdAt": "2026-10-16T10:00:00.000Z"
+  },
+  {
+    "id": "book_mon_1000",
+    "fecha": "2026-10-19",
+    "hora": "10:00",
+    "tipo": "Camioneta / SUV",
+    "servicio": "Lavado Artesanal Premium",
+    "nombre": "Leandro Saralegui",
+    "telefono": "2991234567",
+    "direccion": "Venezuela 1659, Cipolletti",
+    "estado": "pendiente",
+    "blockedSlots": [
+      "10:00",
+      "11:00"
+    ],
+    "modalidad": "taller",
+    "precioTotal": 42000,
+    "createdAt": "2026-10-16T14:35:00.000Z"
+  }
+]

@@ -235,6 +235,21 @@ export default function AdminAgenda({
     setFilterDate(`${y}-${m}-${day}`);
   };
 
+  const setDateToNextMonday = () => {
+    const d = getArgentinaDate();
+    const dayOfWeek = d.getDay(); // 0 is Sunday, 5 is Friday
+    const daysUntilMonday = dayOfWeek === 1 ? 7 : ((8 - dayOfWeek) % 7 || 7);
+    d.setDate(d.getDate() + daysUntilMonday);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    setFilterDate(`${y}-${m}-${day}`);
+  };
+
+  const shiftWeek = (weeks: number) => {
+    shiftDay(weeks * 7);
+  };
+
   const getPossibleTimesForDate = (dateStr: string) => {
     if (!dateStr) return [];
     const parts = dateStr.split('-');
@@ -285,6 +300,19 @@ export default function AdminAgenda({
       }
     });
     return Array.from(map.values()).sort((a, b) => b.date.localeCompare(a.date));
+  }, [allBookings]);
+
+  // Upcoming real client bookings (today and future dates)
+  const upcomingRealBookings = useMemo(() => {
+    const today = getArgentinaDate();
+    const y = today.getFullYear();
+    const m = String(today.getMonth() + 1).padStart(2, '0');
+    const day = String(today.getDate()).padStart(2, '0');
+    const todayStr = `${y}-${m}-${day}`;
+
+    return allBookings
+      .filter(b => b.fecha >= todayStr && b.estado !== 'cancelado' && !b.nombre.includes('BLOQUEADO') && b.tipo !== 'BLOQUEO')
+      .sort((a, b) => a.fecha.localeCompare(b.fecha) || a.hora.localeCompare(b.hora));
   }, [allBookings]);
 
   // Daily Statistics
@@ -871,6 +899,13 @@ export default function AdminAgenda({
                   Mañana
                 </button>
                 <button 
+                  onClick={setDateToNextMonday}
+                  className="px-3 py-1.5 text-[10px] font-black uppercase tracking-widest text-amber-400 hover:bg-amber-500/10 rounded-xl transition-colors cursor-pointer"
+                  title="Ir al próximo Lunes (19 de Octubre)"
+                >
+                  Próx. Lunes
+                </button>
+                <button 
                   onClick={() => shiftDay(1)}
                   className="p-2 hover:bg-white/10 rounded-xl text-zinc-300 transition-colors cursor-pointer"
                   title="Día Siguiente"
@@ -965,16 +1000,82 @@ export default function AdminAgenda({
       {viewMode === 'timeline' && (
         <div className="space-y-4">
 
+          {/* Barra Rápida de Próximos Turnos Agendados de Clientes */}
+          {upcomingRealBookings.length > 0 && (
+            <div className="bg-slate-950/90 border border-emerald-500/30 rounded-2xl p-3 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 shadow-xl">
+              <div className="flex items-center gap-2 shrink-0">
+                <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
+                <span className="text-xs font-black uppercase tracking-wider text-emerald-400">
+                  Próximos Turnos Agendados ({upcomingRealBookings.length}):
+                </span>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                {upcomingRealBookings.slice(0, 6).map((b) => {
+                  const parts = b.fecha.split('-').map(Number);
+                  const dt = new Date(parts[0], parts[1] - 1, parts[2]);
+                  const dayLabel = dt.toLocaleDateString('es-AR', { weekday: 'short', day: 'numeric', month: 'short' });
+                  const isSelected = b.fecha === filterDate;
+                  return (
+                    <button
+                      key={b.id}
+                      onClick={() => setFilterDate(b.fecha)}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
+                        isSelected
+                          ? 'bg-emerald-500 text-slate-950 border-emerald-400 font-black shadow-md'
+                          : 'bg-zinc-900/90 hover:bg-zinc-800 text-zinc-200 border-white/10 hover:border-emerald-500/40'
+                      }`}
+                      title={`Ver turno de ${b.nombre} el ${b.fecha} a las ${b.hora}hs`}
+                    >
+                      <span className="capitalize">{dayLabel}</span>
+                      <span className={`font-black ${isSelected ? 'text-slate-950' : 'text-emerald-400'}`}>{b.hora}hs</span>
+                      <span className="text-[11px] opacity-80 max-w-[120px] truncate">({b.nombre})</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {/* Mini Strip Semanal con Navegación Rápida y Contador de Turnos de Clientes */}
-          <div className="bg-slate-950/80 border border-white/5 rounded-2xl p-2.5">
-            <div className="flex items-center justify-between px-2 pb-2 text-[10px] font-black uppercase tracking-wider text-zinc-400">
-              <span className="flex items-center gap-1.5">
-                <CalendarDays className="w-3.5 h-3.5 text-emerald-400" />
-                Semana Actual (Hacé clic en cualquier día para cambiar)
-              </span>
-              <span className="text-zinc-400">
-                {allBookings.filter(b => !b.nombre.includes('BLOQUEADO')).length} turnos agendados en total
-              </span>
+          <div className="bg-slate-950/80 border border-white/5 rounded-2xl p-2.5 space-y-2">
+            <div className="flex items-center justify-between px-1 text-[10px] font-black uppercase tracking-wider text-zinc-400">
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() => shiftWeek(-1)}
+                  className="flex items-center gap-1 px-2 py-1 bg-zinc-900 hover:bg-zinc-800 rounded-lg text-zinc-300 hover:text-white border border-white/5 transition-all cursor-pointer"
+                  title="Semana Anterior"
+                >
+                  <ChevronLeft className="w-3 h-3" />
+                  <span>Sem. Ant.</span>
+                </button>
+                <span className="text-zinc-200 font-bold hidden sm:inline px-1">
+                  Semana {weekDays[0]?.dayNumber} {weekDays[0]?.monthShort} - {weekDays[6]?.dayNumber} {weekDays[6]?.monthShort}
+                </span>
+                <button
+                  onClick={() => shiftWeek(1)}
+                  className="flex items-center gap-1 px-2 py-1 bg-zinc-900 hover:bg-zinc-800 rounded-lg text-zinc-300 hover:text-white border border-white/5 transition-all cursor-pointer"
+                  title="Semana Siguiente"
+                >
+                  <span>Sem. Sig.</span>
+                  <ChevronRight className="w-3 h-3" />
+                </button>
+              </div>
+
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={setDateToToday}
+                  className="px-2 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-[10px] text-zinc-300 transition-colors cursor-pointer"
+                >
+                  Esta Semana
+                </button>
+                <button
+                  onClick={setDateToNextMonday}
+                  className="px-2 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/30 text-[10px] font-bold transition-colors cursor-pointer"
+                >
+                  Próx. Semana
+                </button>
+              </div>
             </div>
             <div className="grid grid-cols-7 gap-1.5">
               {weekDays.map((day) => {
