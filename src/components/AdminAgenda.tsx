@@ -40,17 +40,24 @@ import {
 } from '../services/firestoreService.ts';
 import { fetchSlots, clearCache, getArgentinaDate } from '../services/availabilityService.ts';
 import { SERVICES, VEHICLES } from '../constants.ts';
+import { auth } from '../services/firebase.ts';
 
 interface AdminAgendaProps {
   customerVisits?: Record<string, number>;
   dbServices?: CatalogService[];
   dbVehicles?: CatalogVehicle[];
+  currentUser?: any;
+  onLoginGoogle?: () => void;
+  onRefreshParent?: () => void;
 }
 
 export default function AdminAgenda({ 
   customerVisits = {},
   dbServices = [],
-  dbVehicles = []
+  dbVehicles = [],
+  currentUser = null,
+  onLoginGoogle,
+  onRefreshParent
 }: AdminAgendaProps) {
   const [allBookings, setAllBookings] = useState<Booking[]>([]);
   const [loading, setLoading] = useState(true);
@@ -110,7 +117,7 @@ export default function AdminAgenda({
     setTimeout(() => setCopiedExpressLink(false), 2500);
   };
 
-  const loadBookings = async () => {
+  const loadBookings = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -118,28 +125,44 @@ export default function AdminAgenda({
       // Ensure all bookings have blockedSlots populated
       const normalized = data.map(b => {
         if (!b.blockedSlots || b.blockedSlots.length === 0) {
-          const dur = calculateDurationFromServiceName(b.servicio);
+          const dur = calculateDurationFromServiceName(b.servicio || '', b.modalidad);
           return {
             ...b,
-            blockedSlots: calculateBlockedSlotsForStart(b.hora, dur)
+            blockedSlots: calculateBlockedSlotsForStart(b.hora || '09:00', dur)
           };
         }
         return b;
       });
-      // Sort bookings chronologically by hour
-      const sorted = normalized.sort((a, b) => a.hora.localeCompare(b.hora));
+      // Sort bookings chronologically by date and hour safely
+      const sorted = normalized.sort((a, b) => {
+        const dComp = (a.fecha || '').localeCompare(b.fecha || '');
+        if (dComp !== 0) return dComp;
+        return (a.hora || '').localeCompare(b.hora || '');
+      });
       setAllBookings(sorted);
+      if (onRefreshParent) onRefreshParent();
     } catch (err) {
       console.error('Error loading agenda from Firestore:', err);
-      setError('No tienes permisos suficientes de Firestore o hay un error de conexión.');
+      setError('Hubo un problema al cargar los turnos de la nube. Mostrando los turnos guardados localmente.');
     } finally {
       setLoading(false);
     }
-  };
+  }, [onRefreshParent]);
 
   useEffect(() => {
     loadBookings();
-  }, []);
+
+    // Listen for auth state changes (e.g. Google login completes or initializes from indexedDB)
+    const unsubscribe = auth.onAuthStateChanged((user) => {
+      if (user) {
+        loadBookings();
+      }
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [loadBookings]);
 
   // Compute week range (Monday to Sunday) based on filterDate
   const weekDays = useMemo(() => {
@@ -652,13 +675,66 @@ export default function AdminAgenda({
 
             <button 
               onClick={loadBookings}
-              className="p-2.5 bg-zinc-800 rounded-xl hover:bg-zinc-700 text-zinc-300 hover:text-white transition-colors cursor-pointer"
-              title="Actualizar Agenda"
+              className="flex items-center gap-1.5 px-3.5 py-2.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white rounded-xl text-xs font-bold uppercase tracking-wider transition-all cursor-pointer"
+              title="Recargar y sincronizar turnos con la base de datos"
             >
-              <Loader2 className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+              <RotateCcw className={`w-3.5 h-3.5 text-emerald-400 ${loading ? 'animate-spin' : ''}`} />
+              <span>Sincronizar</span>
             </button>
+
+            {!currentUser && onLoginGoogle ? (
+              <button 
+                onClick={onLoginGoogle}
+                className="flex items-center gap-1.5 px-3.5 py-2.5 bg-gradient-to-r from-red-600 to-amber-600 hover:from-red-500 hover:to-amber-500 text-white rounded-xl text-xs font-black uppercase tracking-wider shadow-lg shadow-red-500/20 transition-all cursor-pointer"
+                title="Conectar Google Admin para sincronizar todos los datos de clientes en la nube"
+              >
+                <Lock className="w-3.5 h-3.5" />
+                <span>Conectar Google Admin</span>
+              </button>
+            ) : currentUser ? (
+              <div className="flex items-center gap-1.5 px-3 py-2 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-xl text-xs font-black uppercase tracking-wider">
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                <span>Nube Conectada</span>
+              </div>
+            ) : null}
           </div>
         </div>
+
+        {/* Informative notice if not connected to Google Admin */}
+        {!currentUser && (
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-3.5 bg-amber-500/10 border border-amber-500/20 rounded-2xl text-xs">
+            <div className="flex items-center gap-2 text-amber-300">
+              <AlertCircle className="w-4 h-4 shrink-0 text-amber-400" />
+              <span>
+                <strong>Agenda Sincronizada:</strong> Mostrando los turnos reservados en la web y bloqueos de horarios del taller. Conectá Google Admin (leandro.saralegui@gmail.com) para sincronizar nombres y teléfonos completos desde Firestore en la nube.
+              </span>
+            </div>
+            {onLoginGoogle && (
+              <button
+                onClick={onLoginGoogle}
+                className="shrink-0 px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded-xl text-[10px] uppercase tracking-wider transition-all cursor-pointer shadow-sm"
+              >
+                Conectar Google
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Firestore error banner */}
+        {error && (
+          <div className="flex items-center justify-between gap-3 p-3.5 bg-zinc-800/80 border border-white/10 rounded-2xl text-xs text-zinc-300">
+            <div className="flex items-center gap-2 text-zinc-300">
+              <AlertCircle className="w-4 h-4 text-emerald-400 shrink-0" />
+              <span>{error}</span>
+            </div>
+            <button
+              onClick={loadBookings}
+              className="px-3 py-1.5 bg-white/10 hover:bg-white/20 text-white font-bold rounded-xl text-[11px] transition-all cursor-pointer"
+            >
+              Reintentar
+            </button>
+          </div>
+        )}
 
         {/* View Mode Navigation Pills */}
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">

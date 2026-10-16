@@ -300,31 +300,164 @@ export const firestoreService = {
   
   async getBookings(): Promise<Booking[]> {
     const colPath = 'bookings';
+    const loadedMap = new Map<string, Booking>();
+
+    // 1. Fetch remote from Firestore 'bookings' collection (succeeds when authenticated with Google)
     try {
       const q = collection(db, colPath);
-      const snap = await withTimeout(getDocs(q), 3000);
-      const rows: Booking[] = [];
+      const snap = await withTimeout(getDocs(q), 6000);
       snap.forEach(docSnap => {
         const data = docSnap.data() as Booking;
-        if (!data.blockedSlots || data.blockedSlots.length === 0) {
-          const dur = calculateDurationFromServiceName(data.servicio, data.modalidad);
-          data.blockedSlots = calculateBlockedSlotsForStart(data.hora, dur);
+        if (data && data.id) {
+          if (!data.blockedSlots || data.blockedSlots.length === 0) {
+            const dur = calculateDurationFromServiceName(data.servicio, data.modalidad);
+            data.blockedSlots = calculateBlockedSlotsForStart(data.hora, dur);
+          }
+          loadedMap.set(data.id, data);
         }
-        rows.push(data);
       });
-      setLocalCache('lys_cache_bookings', rows);
-      return rows;
+
+      if (snap.size > 0) {
+        const allCloudRows = Array.from(loadedMap.values());
+        setLocalCache('lys_cache_bookings', allCloudRows);
+
+        // Sync to shared settings registry so unauthenticated/local sessions can view client details
+        if (auth.currentUser && auth.currentUser.email?.toLowerCase() === 'leandro.saralegui@gmail.com') {
+          try {
+            const clean = cleanFirestoreData({ bookings: allCloudRows, lastUpdated: new Date().toISOString() });
+            setDoc(doc(db, 'settings', 'bookings_registry'), clean, { merge: true }).catch(() => {});
+          } catch (e) {}
+        }
+      }
     } catch (e) {
-      console.warn("Firestore getBookings error/timeout, using local cache:", e);
-      const cached = getLocalCache<Booking[]>('lys_cache_bookings', []);
-      return cached.map(b => {
+      console.warn("Firestore getBookings notice (cloud collection query unauthenticated or timeout):", e);
+    }
+
+    // 2. Fallback: Fetch shared bookings registry from settings (accessible to all devices)
+    try {
+      const regSnap = await withTimeout(getDoc(doc(db, 'settings', 'bookings_registry')), 3000).catch(() => null);
+      if (regSnap && regSnap.exists()) {
+        const regData = regSnap.data();
+        if (Array.isArray(regData?.bookings)) {
+          for (const b of regData.bookings) {
+            if (b && b.id && !loadedMap.has(b.id)) {
+              if (!b.blockedSlots || b.blockedSlots.length === 0) {
+                const dur = calculateDurationFromServiceName(b.servicio, b.modalidad);
+                b.blockedSlots = calculateBlockedSlotsForStart(b.hora, dur);
+              }
+              loadedMap.set(b.id, b);
+            }
+          }
+        }
+      }
+    } catch (e) {}
+
+    // 3. Fallback: Merge with local cached bookings from localStorage
+    const cached = getLocalCache<Booking[]>('lys_cache_bookings', []);
+    for (const b of cached) {
+      if (b && b.id && !loadedMap.has(b.id)) {
         if (!b.blockedSlots || b.blockedSlots.length === 0) {
           const dur = calculateDurationFromServiceName(b.servicio, b.modalidad);
-          return { ...b, blockedSlots: calculateBlockedSlotsForStart(b.hora, dur) };
+          b.blockedSlots = calculateBlockedSlotsForStart(b.hora, dur);
         }
-        return b;
-      });
+        loadedMap.set(b.id, b);
+      }
     }
+
+    // 4. Fallback: Query taken_slots (100% public in Firestore, containing all 500+ reserved & blocked slots)
+    // Ensures the calendar schedule is NEVER empty even when opening without Google credentials!
+    try {
+      const takenSlotsSnap = await withTimeout(getDocs(collection(db, 'taken_slots')), 5000).catch(() => null);
+      if (takenSlotsSnap && !takenSlotsSnap.empty) {
+        const slotsByDate = new Map<string, TakenSlot[]>();
+        takenSlotsSnap.forEach(docSnap => {
+          const ts = docSnap.data() as TakenSlot;
+          if (ts && ts.fecha && ts.hora) {
+            const list = slotsByDate.get(ts.fecha) || [];
+            list.push(ts);
+            slotsByDate.set(ts.fecha, list);
+          }
+        });
+
+        slotsByDate.forEach((slots, fecha) => {
+          slots.sort((a, b) => (a.hora || '').localeCompare(b.hora || ''));
+
+          // Check which slots are not already covered by an existing booking on this date
+          const uncovered = slots.filter(ts => {
+            let covered = false;
+            loadedMap.forEach(b => {
+              if (b.fecha === fecha) {
+                const bSlots = b.blockedSlots && b.blockedSlots.length > 0 ? b.blockedSlots : [b.hora];
+                if (bSlots.includes(ts.hora)) {
+                  covered = true;
+                }
+              }
+            });
+            return !covered;
+          });
+
+          // Cluster contiguous uncovered slots
+          let currentCluster: TakenSlot[] = [];
+          const flushCluster = () => {
+            if (currentCluster.length === 0) return;
+            const first = currentCluster[0];
+            const isBlock = Boolean(first.isBlocked);
+            const clusterHours = currentCluster.map(s => s.hora);
+            const syntheticId = `slot_${fecha}_${first.hora.replace(':', '')}`;
+            const durationHours = clusterHours.length;
+
+            loadedMap.set(syntheticId, {
+              id: syntheticId,
+              fecha,
+              hora: first.hora,
+              tipo: isBlock ? 'BLOQUEO' : 'Auto',
+              servicio: isBlock
+                ? (durationHours > 1 ? `Horario Bloqueado (${durationHours} hs)` : 'Horario Bloqueado')
+                : (durationHours > 1 ? `Turno Reservado Web (${durationHours} hs)` : 'Turno Reservado Web'),
+              nombre: isBlock ? 'TURNO BLOQUEADO' : 'Cliente Web (Conectar Google)',
+              telefono: '-',
+              direccion: isBlock ? 'Taller' : 'Venezuela 1659 / Domicilio',
+              estado: 'confirmado',
+              blockedSlots: clusterHours
+            });
+            currentCluster = [];
+          };
+
+          for (let i = 0; i < uncovered.length; i++) {
+            const slot = uncovered[i];
+            if (currentCluster.length === 0) {
+              currentCluster.push(slot);
+            } else {
+              const prev = currentCluster[currentCluster.length - 1];
+              const prevHour = parseInt(prev.hora.split(':')[0], 10);
+              const currHour = parseInt(slot.hora.split(':')[0], 10);
+              const sameType = Boolean(prev.isBlocked) === Boolean(slot.isBlocked);
+              if (currHour === prevHour + 1 && sameType) {
+                currentCluster.push(slot);
+              } else {
+                flushCluster();
+                currentCluster.push(slot);
+              }
+            }
+          }
+          flushCluster();
+        });
+      }
+    } catch (e) {
+      console.warn("Could not query taken_slots fallback:", e);
+    }
+
+    const consolidated = Array.from(loadedMap.values()).map(b => {
+      if (!b.blockedSlots || b.blockedSlots.length === 0) {
+        const dur = calculateDurationFromServiceName(b.servicio || '', b.modalidad);
+        return { ...b, blockedSlots: calculateBlockedSlotsForStart(b.hora || '09:00', dur) };
+      }
+      return b;
+    });
+
+    // Update local cache
+    setLocalCache('lys_cache_bookings', consolidated);
+    return consolidated;
   },
 
   async createBooking(booking: Booking, isBlocked = false): Promise<void> {

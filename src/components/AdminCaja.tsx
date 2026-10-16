@@ -1490,6 +1490,11 @@ ${factura.qrUrl ? `🔗 Validar en ARCA/AFIP: ${factura.qrUrl}` : ''}
         {activeTab === 'agenda' ? (
           <AdminAgenda 
             customerVisits={customersMap}
+            dbServices={dbServices}
+            dbVehicles={dbVehicles}
+            currentUser={currentUser}
+            onLoginGoogle={loginWithGoogle}
+            onRefreshParent={fetchBookings}
           />
         ) : activeTab === 'facturacion' ? (
           <AdminArcaFacturacion 

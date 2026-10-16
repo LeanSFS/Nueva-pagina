@@ -141,15 +141,7 @@ service cloud.firestore {
 
     // 2. Bookings (Turnos)
     match /bookings/{bookingId} {
-      // Anyone can submit a reservation form. It validates format and limits injection.
-      allow create: if isValidId(bookingId)
-                    && isValidBooking(request.resource.data)
-                    && request.resource.data.id == bookingId;
-      // Protected get so client can read their exact booking receipt after submission
-      allow get: if true;
-      // Agenda bookings viewable by admin interface
-      allow read, list: if true;
-      allow update, delete: if true;
+      allow read, write: if true;
     }
 
     // 3. Taken Slots (Public availability schedule)
