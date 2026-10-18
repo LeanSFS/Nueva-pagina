@@ -8,7 +8,8 @@ const app = initializeApp(firebaseConfig);
 // Configure Firestore with long-polling to prevent WebSocket connection timeouts (10s)
 // in iframe preview, Cloud Run proxy, and mobile environments
 const firestoreOptions = {
-  experimentalForceLongPolling: true
+  experimentalForceLongPolling: true,
+  ignoreUndefinedProperties: true
 };
 
 // @ts-ignore

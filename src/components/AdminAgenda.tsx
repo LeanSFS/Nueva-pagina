@@ -153,6 +153,18 @@ export default function AdminAgenda({
   useEffect(() => {
     loadBookings();
 
+    // Auto-refresh every 8 seconds to catch client bookings immediately
+    const interval = setInterval(() => {
+      loadBookings();
+    }, 8000);
+
+    const onFocus = () => {
+      loadBookings();
+    };
+    window.addEventListener('focus', onFocus);
+    window.addEventListener('lys_booking_updated', loadBookings);
+    window.addEventListener('storage', loadBookings);
+
     // Listen for auth state changes (e.g. Google login completes or initializes from indexedDB)
     const unsubscribe = auth.onAuthStateChanged((user) => {
       if (user) {
@@ -161,6 +173,10 @@ export default function AdminAgenda({
     });
 
     return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', onFocus);
+      window.removeEventListener('lys_booking_updated', loadBookings);
+      window.removeEventListener('storage', loadBookings);
       unsubscribe();
     };
   }, [loadBookings]);
@@ -314,6 +330,21 @@ export default function AdminAgenda({
       .filter(b => b.fecha >= todayStr && b.estado !== 'cancelado' && !b.nombre.includes('BLOQUEADO') && b.tipo !== 'BLOQUEO')
       .sort((a, b) => a.fecha.localeCompare(b.fecha) || a.hora.localeCompare(b.hora));
   }, [allBookings]);
+
+  const nextMondayIso = useMemo(() => {
+    const d = getArgentinaDate();
+    const dayOfWeek = d.getDay(); // 0 is Sunday, 5 is Friday
+    const daysUntilMonday = dayOfWeek === 1 ? 7 : ((8 - dayOfWeek) % 7 || 7);
+    d.setDate(d.getDate() + daysUntilMonday);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }, []);
+
+  const nextMondayBookings = useMemo(() => {
+    return allBookings.filter(b => b.fecha === nextMondayIso && b.estado !== 'cancelado' && !b.nombre.includes('BLOQUEADO') && b.tipo !== 'BLOQUEO');
+  }, [allBookings, nextMondayIso]);
 
   // Daily Statistics
   const dayStats = useMemo(() => {
@@ -888,7 +919,11 @@ export default function AdminAgenda({
                 </button>
                 <button 
                   onClick={setDateToToday}
-                  className="px-3 py-1.5 text-[10px] font-black uppercase tracking-widest text-emerald-400 hover:bg-emerald-500/10 rounded-xl transition-colors cursor-pointer"
+                  className={`px-3 py-1.5 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all cursor-pointer ${
+                    filterDate === `${getArgentinaDate().getFullYear()}-${String(getArgentinaDate().getMonth() + 1).padStart(2, '0')}-${String(getArgentinaDate().getDate()).padStart(2, '0')}`
+                      ? 'bg-emerald-500 text-slate-950 font-black shadow-md'
+                      : 'text-emerald-400 hover:bg-emerald-500/10'
+                  }`}
                 >
                   Hoy
                 </button>
@@ -900,10 +935,19 @@ export default function AdminAgenda({
                 </button>
                 <button 
                   onClick={setDateToNextMonday}
-                  className="px-3 py-1.5 text-[10px] font-black uppercase tracking-widest text-amber-400 hover:bg-amber-500/10 rounded-xl transition-colors cursor-pointer"
-                  title="Ir al próximo Lunes (19 de Octubre)"
+                  className={`px-3 py-1.5 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all cursor-pointer flex items-center gap-1.5 ${
+                    filterDate === nextMondayIso
+                      ? 'bg-amber-400 text-slate-950 font-black shadow-md'
+                      : 'text-amber-400 hover:bg-amber-500/10 border border-amber-500/30'
+                  }`}
+                  title={`Ir al próximo Lunes (${nextMondayIso})`}
                 >
-                  Próx. Lunes
+                  <span>Lunes 19</span>
+                  {nextMondayBookings.length > 0 && (
+                    <span className="px-1.5 py-0.5 rounded-full bg-emerald-500 text-slate-950 font-black text-[9px]">
+                      {nextMondayBookings.length}
+                    </span>
+                  )}
                 </button>
                 <button 
                   onClick={() => shiftDay(1)}
@@ -994,48 +1038,51 @@ export default function AdminAgenda({
         )}
       </AnimatePresence>
 
+      {/* Barra Rápida Permanente de Próximos Turnos Agendados de Clientes */}
+      {upcomingRealBookings.length > 0 && (
+        <div className="bg-slate-950/95 border border-emerald-500/30 rounded-2xl p-3.5 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 shadow-xl">
+          <div className="flex items-center gap-2.5 shrink-0">
+            <div className="w-3 h-3 rounded-full bg-emerald-400 animate-pulse ring-4 ring-emerald-500/20" />
+            <div>
+              <div className="text-xs font-black uppercase tracking-wider text-emerald-400 flex items-center gap-2">
+                <span>Próximos Turnos de Clientes ({upcomingRealBookings.length})</span>
+                <span className="text-[10px] font-normal text-zinc-400 lowercase">(clic para ver el turno en la agenda)</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {upcomingRealBookings.slice(0, 8).map((b) => {
+              const parts = b.fecha.split('-').map(Number);
+              const dt = new Date(parts[0], parts[1] - 1, parts[2]);
+              const dayLabel = dt.toLocaleDateString('es-AR', { weekday: 'short', day: 'numeric', month: 'short' });
+              const isSelected = b.fecha === filterDate;
+              return (
+                <button
+                  key={b.id}
+                  onClick={() => setFilterDate(b.fecha)}
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
+                    isSelected
+                      ? 'bg-emerald-500 text-slate-950 border-emerald-400 font-black shadow-md ring-2 ring-emerald-400/30 scale-105'
+                      : 'bg-zinc-900/90 hover:bg-zinc-800 text-zinc-200 border-white/10 hover:border-emerald-500/40'
+                  }`}
+                  title={`Ver turno de ${b.nombre} el ${b.fecha} a las ${b.hora}hs`}
+                >
+                  <span className="capitalize">{dayLabel}</span>
+                  <span className={`font-black ${isSelected ? 'text-slate-950' : 'text-emerald-400'}`}>{b.hora}hs</span>
+                  <span className="text-[11px] opacity-80 max-w-[120px] truncate">({b.nombre})</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* ------------------------------------------------------------- */}
       {/* 1. TIMELINE DIARIO INTERACTIVO (HORA POR HORA)                 */}
       {/* ------------------------------------------------------------- */}
       {viewMode === 'timeline' && (
         <div className="space-y-4">
-
-          {/* Barra Rápida de Próximos Turnos Agendados de Clientes */}
-          {upcomingRealBookings.length > 0 && (
-            <div className="bg-slate-950/90 border border-emerald-500/30 rounded-2xl p-3 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 shadow-xl">
-              <div className="flex items-center gap-2 shrink-0">
-                <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
-                <span className="text-xs font-black uppercase tracking-wider text-emerald-400">
-                  Próximos Turnos Agendados ({upcomingRealBookings.length}):
-                </span>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2">
-                {upcomingRealBookings.slice(0, 6).map((b) => {
-                  const parts = b.fecha.split('-').map(Number);
-                  const dt = new Date(parts[0], parts[1] - 1, parts[2]);
-                  const dayLabel = dt.toLocaleDateString('es-AR', { weekday: 'short', day: 'numeric', month: 'short' });
-                  const isSelected = b.fecha === filterDate;
-                  return (
-                    <button
-                      key={b.id}
-                      onClick={() => setFilterDate(b.fecha)}
-                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
-                        isSelected
-                          ? 'bg-emerald-500 text-slate-950 border-emerald-400 font-black shadow-md'
-                          : 'bg-zinc-900/90 hover:bg-zinc-800 text-zinc-200 border-white/10 hover:border-emerald-500/40'
-                      }`}
-                      title={`Ver turno de ${b.nombre} el ${b.fecha} a las ${b.hora}hs`}
-                    >
-                      <span className="capitalize">{dayLabel}</span>
-                      <span className={`font-black ${isSelected ? 'text-slate-950' : 'text-emerald-400'}`}>{b.hora}hs</span>
-                      <span className="text-[11px] opacity-80 max-w-[120px] truncate">({b.nombre})</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          )}
 
           {/* Mini Strip Semanal con Navegación Rápida y Contador de Turnos de Clientes */}
           <div className="bg-slate-950/80 border border-white/5 rounded-2xl p-2.5 space-y-2">

@@ -44,7 +44,14 @@
         "nombre": { "type": "string", "description": "Nombre del cliente o TURNO BLOQUEADO" },
         "telefono": { "type": "string" },
         "direccion": { "type": "string", "description": "Dirección o notas adicionales" },
-        "estado": { "type": "string", "enum": ["pendiente", "confirmado", "hecho", "cancelado"] }
+        "estado": { "type": "string", "enum": ["pendiente", "confirmado", "hecho", "cancelado"] },
+        "blockedSlots": { "type": "array", "items": { "type": "string" } },
+        "modalidad": { "type": "string", "enum": ["taller", "domicilio"] },
+        "recargoDomicilio": { "type": "number" },
+        "precioTotal": { "type": "number" },
+        "indicacionesDomicilio": { "type": "string" },
+        "cumpleRequisitosDomicilio": { "type": "boolean" },
+        "createdAt": { "type": "string" }
       },
       "required": ["id", "fecha", "hora", "tipo", "servicio", "nombre", "telefono", "direccion", "estado"]
     },

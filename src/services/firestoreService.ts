@@ -77,8 +77,17 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs = 10000): Promise<T
   });
 }
 
-// --- Exponential Backoff Wrapper for Firestore Writes ---
-async function executeWithBackoff<T>(fn: () => Promise<T>, maxRetries = 3, initialDelayMs = 1200): Promise<T> {
+// --- Exponential Backoff Wrapper for Firestore Writes with Quota Detection ---
+let firestoreQuotaExhaustedUntil = 0;
+
+export function isCloudQuotaExhausted(): boolean {
+  return Date.now() < firestoreQuotaExhaustedUntil;
+}
+
+async function executeWithBackoff<T>(fn: () => Promise<T>, maxRetries = 2, initialDelayMs = 500): Promise<T> {
+  if (isCloudQuotaExhausted()) {
+    throw new Error('resource-exhausted: Firestore write quota currently limited');
+  }
   let delay = initialDelayMs;
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
@@ -86,11 +95,17 @@ async function executeWithBackoff<T>(fn: () => Promise<T>, maxRetries = 3, initi
     } catch (err: any) {
       const isRateLimit = err?.code === 'resource-exhausted' || 
                           err?.message?.includes('resource-exhausted') || 
-                          err?.message?.includes('maximum bandwidth');
-      if (isRateLimit && attempt < maxRetries) {
-        console.warn(`Firestore write rate limit reached. Backing off for ${delay}ms (attempt ${attempt}/${maxRetries})...`);
+                          err?.message?.includes('maximum bandwidth') ||
+                          err?.message?.includes('RESOURCE_EXHAUSTED');
+      if (isRateLimit) {
+        // Daily write limit reached on Firebase, avoid blocking user with repeated long retries
+        firestoreQuotaExhaustedUntil = Date.now() + 120000; // 2 minute cooldown
+        console.warn(`Firestore daily write quota reached. System falling back to server local persistence.`);
+        throw err;
+      }
+      if (attempt < maxRetries) {
         await new Promise(res => setTimeout(res, delay));
-        delay *= 2; // exponential backoff
+        delay *= 2;
       } else {
         throw err;
       }
@@ -115,12 +130,20 @@ function setLocalCache<T>(key: string, value: T): void {
   } catch (e) {}
 }
 
+export function getApiUrl(endpoint: string): string {
+  if (endpoint.startsWith('http://') || endpoint.startsWith('https://')) return endpoint;
+  if (typeof window !== 'undefined' && window.location && window.location.origin) {
+    return `${window.location.origin}${endpoint.startsWith('/') ? '' : '/'}${endpoint}`;
+  }
+  return `http://localhost:3000${endpoint.startsWith('/') ? '' : '/'}${endpoint}`;
+}
+
 // Synchronize schedule overrides (unblocked days and slots) with server API & localStorage
 async function syncScheduleOverrides(): Promise<{ unblockedDays: Set<string>; unblockedSlots: Set<string> }> {
   const localDays = new Set(getLocalCache<string[]>('lys_unblocked_days', []));
   const localSlots = new Set(getLocalCache<string[]>('lys_unblocked_slots', []));
   try {
-    const res = await fetch('/api/schedule/overrides', { signal: AbortSignal.timeout(2000) });
+    const res = await fetch(getApiUrl('/api/schedule/overrides'), { signal: AbortSignal.timeout(2000) });
     if (res.ok) {
       const data = await res.json();
       if (Array.isArray(data.unblockedDays)) {
@@ -349,7 +372,7 @@ export const firestoreService = {
 
     // 0. Query server-side persistent bookings (shared across all clients & admin, fail-safe against Firestore quota)
     try {
-      const serverRes = await fetch('/api/bookings', { signal: AbortSignal.timeout(2500) });
+      const serverRes = await fetch(getApiUrl('/api/bookings'), { signal: AbortSignal.timeout(2500) });
       if (serverRes.ok) {
         const serverBookings: Booking[] = await serverRes.json();
         if (Array.isArray(serverBookings)) {
@@ -460,7 +483,7 @@ export const firestoreService = {
             return !covered;
           });
 
-          // Cluster contiguous uncovered slots
+          // Cluster contiguous uncovered slots (ONLY for admin-blocked hours, NEVER invent fake client bookings)
           let currentCluster: TakenSlot[] = [];
           const flushCluster = () => {
             if (currentCluster.length === 0) return;
@@ -470,20 +493,21 @@ export const firestoreService = {
             const syntheticId = `slot_${fecha}_${first.hora.replace(':', '')}`;
             const durationHours = clusterHours.length;
 
-            loadedMap.set(syntheticId, {
-              id: syntheticId,
-              fecha,
-              hora: first.hora,
-              tipo: isBlock ? 'BLOQUEO' : 'Auto',
-              servicio: isBlock
-                ? (durationHours > 1 ? `Horario Bloqueado (${durationHours} hs)` : 'Horario Bloqueado')
-                : (durationHours > 1 ? `Turno Reservado Web (${durationHours} hs)` : 'Turno Reservado Web'),
-              nombre: isBlock ? 'TURNO BLOQUEADO' : 'Cliente Web (Conectar Google)',
-              telefono: '-',
-              direccion: isBlock ? 'Taller' : 'Venezuela 1659 / Domicilio',
-              estado: 'confirmado',
-              blockedSlots: clusterHours
-            });
+            // Only register real admin blocks, NEVER invent fake clients
+            if (isBlock) {
+              loadedMap.set(syntheticId, {
+                id: syntheticId,
+                fecha,
+                hora: first.hora,
+                tipo: 'BLOQUEO',
+                servicio: durationHours > 1 ? `Horario Bloqueado (${durationHours} hs)` : 'Horario Bloqueado',
+                nombre: 'TURNO BLOQUEADO',
+                telefono: '-',
+                direccion: 'Taller',
+                estado: 'confirmado',
+                blockedSlots: clusterHours
+              });
+            }
             currentCluster = [];
           };
 
@@ -550,18 +574,51 @@ export const firestoreService = {
     }
     setLocalCache('lys_cache_taken_slots', localTaken);
 
-    // Synchronize to server-side persistent database (shared across all devices)
-    fetch('/api/bookings', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...booking, isBlocked })
-    }).catch(err => console.warn('Could not sync booking to server /api/bookings:', err));
+    // Prepare complete formatted text descriptions so all details are preserved in Firestore
+    let fullServicio = booking.servicio || '';
+    if (booking.modalidad === 'domicilio' && !fullServicio.includes('[A DOMICILIO')) {
+      fullServicio += ` [A DOMICILIO 🏠]`;
+    }
+    if (booking.recargoDomicilio && booking.recargoDomicilio > 0 && !fullServicio.includes('Recargo')) {
+      fullServicio += ` (Recargo: $${booking.recargoDomicilio.toLocaleString('es-AR')})`;
+    }
 
+    let fullDireccion = booking.direccion || 'Taller (Venezuela 1659, Cipolletti)';
+    if (booking.indicacionesDomicilio && !fullDireccion.includes(booking.indicacionesDomicilio)) {
+      fullDireccion += ` (Entre: ${booking.indicacionesDomicilio})`;
+    }
+
+    // Clean, strictly validated Firestore document adhering to live Firestore security rules
+    const firestoreBooking = {
+      id: booking.id,
+      fecha: booking.fecha,
+      hora: booking.hora,
+      tipo: booking.tipo || 'Auto',
+      servicio: fullServicio.slice(0, 490),
+      nombre: booking.nombre || 'Cliente',
+      telefono: booking.telefono || '-',
+      direccion: fullDireccion.slice(0, 490),
+      estado: booking.estado || 'pendiente',
+      blockedSlots: hoursToBlock
+    };
+
+    // Synchronize to server-side persistent database (shared across all devices)
+    try {
+      await fetch(getApiUrl('/api/bookings'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...booking, servicio: fullServicio, direccion: fullDireccion, isBlocked })
+      });
+    } catch (err) {
+      console.warn('Could not sync booking to server /api/bookings:', err);
+    }
+
+    // Cloud Firestore synchronization (atomic batch with fallback)
     try {
       await executeWithBackoff(async () => {
         const bach = writeBatch(db);
         const bookingRef = doc(db, 'bookings', booking.id);
-        bach.set(bookingRef, booking);
+        bach.set(bookingRef, firestoreBooking);
 
         for (const h of hoursToBlock) {
           const sId = `${booking.fecha}_${h}`;
@@ -574,10 +631,30 @@ export const firestoreService = {
           });
         }
 
-        await withTimeout(bach.commit(), 10000);
+        await withTimeout(bach.commit(), 5000);
       });
-    } catch (e) {
-      console.warn(`Cloud booking write deferred/failed for ${booking.id}, preserved locally:`, e);
+      console.log(`Booking ${booking.id} and ${hoursToBlock.length} taken slots registered successfully in Cloud Firestore!`);
+    } catch (e: any) {
+      console.warn(`Batch write warning for ${booking.id}, ensuring taken slots are saved:`, e);
+      // Secondary fallback: guarantee that taken_slots are stored individually so slot is 100% blocked
+      for (const h of hoursToBlock) {
+        try {
+          const sId = `${booking.fecha}_${h}`;
+          await setDoc(doc(db, 'taken_slots', sId), {
+            id: sId,
+            fecha: booking.fecha,
+            hora: h,
+            isBlocked: isBlocked
+          });
+        } catch (slotErr) {
+          console.warn(`Could not set individual slot ${h}:`, slotErr);
+        }
+      }
+    }
+
+    // Notify local views (Agenda, etc.) immediately
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('lys_booking_updated', { detail: booking }));
     }
   },
 
@@ -592,7 +669,7 @@ export const firestoreService = {
       : calculatedSlots;
 
     // Delete from server-side database
-    fetch(`/api/bookings/${bookingId}`, { method: 'DELETE' }).catch(() => null);
+    fetch(getApiUrl(`/api/bookings/${bookingId}`), { method: 'DELETE' }).catch(() => null);
 
     // If it's a manual block or synthetic slot, also unblock the slots in overrides
     const isBlock = bk?.tipo === 'BLOQUEO' || bk?.nombre?.includes('BLOQUEADO') || bookingId.startsWith('block_') || bookingId.startsWith('slot_');
@@ -642,7 +719,7 @@ export const firestoreService = {
     setLocalCache('lys_unblocked_days', Array.from(unblockedDays));
 
     // 2. Notify backend persistent storage across all clients
-    fetch('/api/schedule/unblock-day', {
+    fetch(getApiUrl('/api/schedule/unblock-day'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ fecha })
@@ -691,7 +768,7 @@ export const firestoreService = {
     setLocalCache('lys_unblocked_slots', Array.from(unblockedSlots));
 
     // 2. Notify backend persistent storage across all clients
-    fetch('/api/schedule/unblock-slot', {
+    fetch(getApiUrl('/api/schedule/unblock-slot'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ fecha, hora })
@@ -803,23 +880,44 @@ export const firestoreService = {
         console.warn('Fallback to system timezone for todayStr:', e);
       }
 
-      const q = query(
-        collection(db, colPath), 
-        where('fecha', '>=', todayStr)
-      );
-      const snap = await withTimeout(getDocs(q), 5000);
       const resMap = new Map<string, TakenSlot>();
-      
       const { unblockedDays, unblockedSlots } = await syncScheduleOverrides();
 
-      snap.forEach(docSnap => {
-        const data = docSnap.data() as TakenSlot;
-        if (data && data.id) {
-          if (!unblockedDays.has(data.fecha) && !unblockedSlots.has(data.id) && !unblockedSlots.has(`${data.fecha}_${data.hora}`)) {
-            resMap.set(data.id, data);
+      // 0. Query server-side persistent taken slots first (always fast and quota-independent)
+      try {
+        const sRes = await fetch(getApiUrl('/api/taken_slots'), { signal: AbortSignal.timeout(2000) });
+        if (sRes.ok) {
+          const sSlots: TakenSlot[] = await sRes.json();
+          if (Array.isArray(sSlots)) {
+            sSlots.forEach(s => {
+              if (s && s.id && s.fecha >= todayStr) {
+                if (!unblockedDays.has(s.fecha) && !unblockedSlots.has(s.id) && !unblockedSlots.has(`${s.fecha}_${s.hora}`)) {
+                  resMap.set(s.id, s);
+                }
+              }
+            });
           }
         }
-      });
+      } catch (err) {}
+
+      // 1. Query Firestore taken_slots if available
+      try {
+        const q = query(
+          collection(db, colPath), 
+          where('fecha', '>=', todayStr)
+        );
+        const snap = await withTimeout(getDocs(q), 3000);
+        snap.forEach(docSnap => {
+          const data = docSnap.data() as TakenSlot;
+          if (data && data.id) {
+            if (!unblockedDays.has(data.fecha) && !unblockedSlots.has(data.id) && !unblockedSlots.has(`${data.fecha}_${data.hora}`)) {
+              resMap.set(data.id, data);
+            }
+          }
+        });
+      } catch (cloudErr) {
+        console.warn('Could not query Firestore cloud taken_slots, using server & local data:', cloudErr);
+      }
 
       // ALSO cross-reference active bookings to dynamically block all slots required by their duration
       try {

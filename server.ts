@@ -196,6 +196,10 @@ app.get("/api/bookings", (_req, res) => {
   return res.json(getServerBookings());
 });
 
+app.get("/api/taken_slots", (_req, res) => {
+  return res.json(getServerTakenSlots());
+});
+
 app.post("/api/bookings", (req, res) => {
   const booking: ServerBooking = req.body;
   if (!booking || !booking.id || !booking.fecha || !booking.hora) {

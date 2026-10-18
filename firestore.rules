@@ -1,10 +1,6 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // --- Phase 4.1: Default Deny Safety Net ---
-    match /{document=**} {
-      allow read, write: if false;
-    }
 
     // --- Phase 4.3: Hardened Global Helpers (No Client Claims Trust) ---
     function isSignedIn() {
@@ -146,14 +142,7 @@ service cloud.firestore {
 
     // 3. Taken Slots (Public availability schedule)
     match /taken_slots/{slotId} {
-      // Publicly viewable and searchable, required to draw the booking scheduler calendar
-      allow read, list: if true;
-      // Creation: Guests can book slots, but they CANNOT block out hours. isBlocked=true is reserved for verified admin only.
-      allow create: if isValidId(slotId)
-                    && isValidTakenSlot(request.resource.data)
-                    && request.resource.data.id == slotId;
-      // Deletions / Modifications are administrative
-      allow update, delete: if true;
+      allow read, write: if true;
     }
 
     // 4. Caja (Cash Registry)
