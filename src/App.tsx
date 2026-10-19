@@ -36,7 +36,7 @@ import {
   EyeOff,
   Check
 } from 'lucide-react';
-import { SERVICES, VEHICLES, BASE_PRICES, TYPE_EXTRA } from './constants.ts';
+import { SERVICES, VEHICLES, BASE_PRICES, TYPE_EXTRA, ABONO_MENSUAL } from './constants.ts';
 import { VehicleType, ServiceKey } from './types.ts';
 import { fetchSlots, createBooking, TimeSlot } from './services/availabilityService.ts';
 import { metricsService } from './services/metricsService.ts';
@@ -75,6 +75,11 @@ const FAQ_ITEMS = [
     id: 5,
     question: "📅 ¿Cómo cancelo o modifico mi reserva?",
     answer: "Si te surge un imprevisto, te pedimos que nos avises con al menos 24 horas de anticipación a través de WhatsApp. Así nos das la oportunidad de liberar ese horario para otro cliente que lo necesite y reprogramar tu turno con calma para otro momento oportuno."
+  },
+  {
+    id: 6,
+    question: "💎 ¿Cómo funciona el Abono Mensual a Domicilio?",
+    answer: "El Abono Mensual está pensado para que nunca tengas que preocuparte por el estado de tu auto. Incluye 2 visitas al mes directo en tu casa o trabajo en Cipolletti: la primera visita es un Lavado Full a fondo (carrocería, llantas, pasaruedas, interior detallado con aspirado exhaustivo, protección UV y cera hidrofóbica Koch Chemie Protector Wax) y a los 15 días realizamos el lavado de mantenimiento exterior (carrocería, vidrios y cubiertas acondicionadas con Koch Chemie Plast Star PSS). Los viáticos a domicilio están 100% bonificados y tenés tus días y horarios fijos reservados mes a mes. Para cuidar la calidad, los cupos son estrictamente limitados a 10 vehículos."
   }
 ];
 
@@ -122,12 +127,14 @@ const Navigation = ({
   setView, 
   view,
   onGoExpress,
-  onOpenAdmin
+  onOpenAdmin,
+  onNavigateToSection
 }: { 
   setView: (v: 'home' | 'booking' | 'admin' | 'express') => void, 
   view: string,
   onGoExpress: () => void,
-  onOpenAdmin: () => void
+  onOpenAdmin: () => void,
+  onNavigateToSection: (sectionId: string) => void
 }) => (
   <nav className="absolute top-0 left-0 right-0 z-50 px-3.5 sm:px-6 md:px-12 py-3 sm:py-5 md:py-8 flex justify-between items-start pointer-events-none transition-all duration-300">
     <div 
@@ -162,16 +169,20 @@ const Navigation = ({
         <button 
           onClick={() => {
             metricsService.logAction('click_servicios');
-            if (view !== 'home') {
-              setView('home');
-              setTimeout(() => document.getElementById('services')?.scrollIntoView({ behavior: 'smooth' }), 100);
-            } else {
-              document.getElementById('services')?.scrollIntoView({ behavior: 'smooth' });
-            }
+            onNavigateToSection('services');
           }}
           className="hover:text-emerald-400 transition-colors cursor-pointer whitespace-nowrap"
         >
           Servicios
+        </button>
+        <button 
+          onClick={() => {
+            onNavigateToSection('mantenimiento');
+          }}
+          className="hover:text-emerald-400 text-emerald-400/90 transition-colors cursor-pointer whitespace-nowrap flex items-center gap-1"
+        >
+          <span>Abono</span>
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
         </button>
         <button 
           onClick={() => {
@@ -245,6 +256,59 @@ export default function App() {
     setView('admin');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, []);
+
+  const [pendingScrollId, setPendingScrollId] = useState<string | null>(null);
+
+  const smoothScrollToSection = useCallback((sectionId: string) => {
+    const el = document.getElementById(sectionId);
+    if (!el) return false;
+
+    // Target the main heading inside the section (or the element itself)
+    const titleEl = (el.querySelector('h2') || el.querySelector('h3') || el) as HTMLElement;
+    const rect = titleEl.getBoundingClientRect();
+    const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+
+    // Offset to place the title with ~75px margin below top navbar for perfect visual framing
+    const targetY = rect.top + scrollTop - 75;
+
+    window.scrollTo({
+      top: Math.max(0, targetY),
+      behavior: 'smooth'
+    });
+    return true;
+  }, []);
+
+  const navigateToSection = useCallback((sectionId: string) => {
+    if (view !== 'home') {
+      setPendingScrollId(sectionId);
+      if (typeof window !== 'undefined' && window.location.pathname !== '/') {
+        window.history.pushState(null, '', '/');
+      }
+      setView('home');
+    } else {
+      smoothScrollToSection(sectionId);
+    }
+  }, [view, smoothScrollToSection]);
+
+  // Fast & responsive auto-scroll watcher when transitioning to home view
+  useEffect(() => {
+    if (view === 'home' && pendingScrollId) {
+      let attempts = 0;
+      const interval = setInterval(() => {
+        attempts++;
+        const success = smoothScrollToSection(pendingScrollId);
+        if (success) {
+          setPendingScrollId(null);
+          clearInterval(interval);
+        } else if (attempts >= 40) {
+          clearInterval(interval);
+          setPendingScrollId(null);
+        }
+      }, 25);
+
+      return () => clearInterval(interval);
+    }
+  }, [view, pendingScrollId, smoothScrollToSection]);
 
   useEffect(() => {
     const handleUrlChange = () => {
@@ -388,9 +452,20 @@ export default function App() {
     }
   };
   const [vehicle, setVehicle] = useState<VehicleType | null>(null);
+  const [bookingMode, setBookingMode] = useState<'individual' | 'abono'>('individual');
   const [selectedServices, setSelectedServices] = useState<string[]>([]);
   const [currentBookingStep, setCurrentBookingStep] = useState<number>(1);
   const [tutorialAccepted, setTutorialAccepted] = useState(false);
+
+  const getAbonoWhatsAppUrl = (vehicleType: VehicleType) => {
+    const cfg = ABONO_MENSUAL[vehicleType] || ABONO_MENSUAL.auto;
+    const text = `*💎 Plan Mensual a Domicilio - LyS Lavados*%0A%0A` +
+      `*Vehículo:* ${encodeURIComponent(cfg.name)} ($${cfg.price.toLocaleString('es-AR')}/mes)%0A` +
+      `*Servicio:* 1 Lavado Full a fondo + 1 Exterior de mantenimiento a los 15 días (2 visitas al mes en Cipolletti)%0A` +
+      `*Viático a domicilio:* 100% Bonificado%0A%0A` +
+      `_Hola Leandro, quiero consultar disponibilidad de cupo para coordinar los días fijos de mi ${encodeURIComponent(cfg.name)} en Cipolletti. Mi dirección o barrio es: ..._`;
+    return `https://wa.me/2995760611?text=${text}`;
+  };
   const selectedService = selectedServices[0] || null;
   const setSelectedService = (srv: string | null) => {
     setSelectedServices(srv ? [srv] : []);
@@ -1084,6 +1159,7 @@ export default function App() {
           view={view} 
           onGoExpress={navigateToExpress}
           onOpenAdmin={handleOpenAdmin}
+          onNavigateToSection={navigateToSection}
         />
       )}
       
@@ -1122,6 +1198,7 @@ export default function App() {
             <React.Suspense fallback={<div className="min-h-screen flex items-center justify-center bg-zinc-950 text-emerald-500 font-bold"><Loader2 className="w-8 h-8 animate-spin" /></div>}>
               <TurnoExpress
                 onBackToHome={navigateToHome}
+                onGoToAbono={() => navigateToSection('mantenimiento')}
                 dbServices={dbServices}
                 dbVehicles={dbVehicles}
               />
@@ -1130,10 +1207,10 @@ export default function App() {
         ) : view === 'home' ? (
           <motion.div
             key="home"
-            initial={{ opacity: 0, x: -20 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: 20 }}
-            transition={{ duration: 0.5 }}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2, ease: "easeOut" }}
           >
             {/* Hero Section */}
             <section className="relative px-5 sm:px-6 md:px-12 pt-28 sm:pt-36 md:pt-48 pb-12 overflow-hidden min-h-[85vh] md:min-h-[90vh] flex items-center">
@@ -1163,9 +1240,21 @@ export default function App() {
                     Estética <br /> <span className="text-emerald-500 italic">Vehicular</span> <br /> de Autor.
                   </h1>
                   
-                  <p className="text-zinc-400 text-sm sm:text-base md:text-xl leading-relaxed max-w-xl mb-8 md:mb-10 text-balance font-medium">
+                  <p className="text-zinc-400 text-sm sm:text-base md:text-xl leading-relaxed max-w-xl mb-6 md:mb-8 text-balance font-medium">
                     Lavado y estética vehicular con dedicación en cada detalle. Cuidado artesanal para tu auto: podés traerlo a mi casa en Venezuela 1659 o voy a tu domicilio en Cipolletti.
                   </p>
+
+                  {/* Abono Mensual Hero Callout */}
+                  <div className="mb-8">
+                    <button
+                      onClick={() => navigateToSection('mantenimiento')}
+                      className="inline-flex items-center gap-2.5 px-4 py-2 rounded-full bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 text-[10px] sm:text-xs font-black uppercase tracking-wider transition-all cursor-pointer shadow-[0_0_25px_rgba(16,185,129,0.12)] group hover:scale-[1.02] active:scale-98"
+                    >
+                      <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+                      <span>Nuevo: Abono Mensual a Domicilio (2 visitas al mes)</span>
+                      <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
+                    </button>
+                  </div>
                   
                   <div className="flex flex-col sm:flex-row items-center gap-4 mb-12">
                     <button 
@@ -1340,9 +1429,210 @@ export default function App() {
                 </div>
               </div>
 
+              {/* Club de Mantenimiento a Domicilio Section */}
+              <section id="mantenimiento" className="pt-6 md:pt-10 pb-16 scroll-mt-20">
+                <SectionHeader kicker="Membresía Mensual" title="Club Mantenimiento <span class='text-emerald-500'>a Domicilio</span>" number="03" />
+
+                {/* Main Presentation Banner */}
+                <div className="relative p-6 sm:p-10 md:p-14 rounded-3xl md:rounded-[3rem] bg-gradient-to-b from-zinc-900 to-zinc-950 border border-emerald-500/30 shadow-[0_0_80px_rgba(16,185,129,0.08)] overflow-hidden mb-12">
+                  <div className="absolute top-0 right-0 w-96 h-96 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
+                  
+                  <div className="relative z-10 max-w-3xl">
+                    <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-[10px] md:text-xs font-black uppercase tracking-widest mb-6">
+                      <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+                      <span>Cipolletti • Cupos Limitados (10 vehículos)</span>
+                    </div>
+
+                    <h3 className="text-3xl sm:text-4xl md:text-5xl font-display font-black italic text-white tracking-tighter uppercase leading-[0.95] mb-6">
+                      Tu auto siempre impecable. <br className="hidden sm:block" />
+                      <span className="text-emerald-400">Sin perder un solo fin de semana.</span>
+                    </h3>
+
+                    <p className="text-zinc-300 font-medium text-base md:text-lg leading-relaxed mb-8">
+                      En Cipolletti y el Alto Valle, entre el polvo y el viento, ningún auto dura limpio un mes entero. Con el <strong className="text-white">Abono Mensual Quincenal</strong> vamos directo a tu casa o trabajo 2 veces al mes con todo nuestro equipamiento y productos premium Koch Chemie.
+                    </p>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 border-t border-white/10 pt-6">
+                      <div className="flex items-start gap-3">
+                        <div className="w-8 h-8 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0 text-xs font-black">
+                          1
+                        </div>
+                        <div>
+                          <div className="text-white text-xs font-black uppercase tracking-wider">Semana 1: Lavado Full</div>
+                          <div className="text-zinc-400 text-[11px] leading-snug mt-0.5">Interior detallado a fondo + exterior + cera hidrofóbica</div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-start gap-3">
+                        <div className="w-8 h-8 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0 text-xs font-black">
+                          2
+                        </div>
+                        <div>
+                          <div className="text-white text-xs font-black uppercase tracking-wider">Semana 3: Exterior Rápido</div>
+                          <div className="text-zinc-400 text-[11px] leading-snug mt-0.5">Mantenimiento quincenal de carrocería, vidrios y cubiertas</div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-start gap-3">
+                        <div className="w-8 h-8 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0 text-xs font-black">
+                          3
+                        </div>
+                        <div>
+                          <div className="text-white text-xs font-black uppercase tracking-wider">Viáticos Bonificados</div>
+                          <div className="text-zinc-400 text-[11px] leading-snug mt-0.5">Precio cerrado mensual sin costo extra de traslado</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 3 Pricing Cards Grid */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  {(['auto', 'suv', 'pickup'] as const).map((type) => {
+                    const plan = ABONO_MENSUAL[type];
+
+                    return (
+                      <div
+                        key={type}
+                        className="relative rounded-3xl p-7 md:p-8 flex flex-col justify-between transition-all duration-300 bg-zinc-900/70 border border-white/10 hover:border-emerald-500/40 hover:bg-zinc-900 group shadow-xl"
+                      >
+                        <div>
+                          <div className="flex items-center justify-between mb-4">
+                            <span className="text-3xl">{plan.icon}</span>
+                            <span className="text-[10px] font-black uppercase tracking-widest text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-1 rounded-full">
+                              2 visitas / mes
+                            </span>
+                          </div>
+
+                          <h4 className="text-xl md:text-2xl font-display font-black italic text-white uppercase tracking-tight mb-1">
+                            {plan.name}
+                          </h4>
+                          <p className="text-zinc-400 text-xs mb-6 font-medium">
+                            {plan.examples}
+                          </p>
+
+                          <div className="mb-6 pb-6 border-b border-white/10">
+                            <div className="flex items-baseline gap-2">
+                              <span className="text-3xl md:text-4xl font-display font-black text-white italic tracking-tighter">
+                                ${plan.price.toLocaleString('es-AR')}
+                              </span>
+                              <span className="text-zinc-400 text-xs font-bold uppercase tracking-wider">/ mes</span>
+                            </div>
+                            <div className="text-[10px] text-emerald-400 font-bold uppercase tracking-widest mt-1">
+                              Equivale a ${(plan.price / 2).toLocaleString('es-AR')} por visita a domicilio
+                            </div>
+                          </div>
+
+                          <ul className="space-y-3 mb-8">
+                            {plan.features.map((feat, idx) => (
+                              <li key={idx} className="flex items-start gap-2.5 text-xs text-zinc-300 font-medium leading-relaxed">
+                                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                                <span>{feat}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+
+                        <a
+                          href={getAbonoWhatsAppUrl(type)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="w-full py-4 rounded-2xl font-display font-black italic text-sm tracking-wider uppercase text-center flex items-center justify-center gap-2 transition-all cursor-pointer bg-emerald-500 hover:bg-emerald-400 text-night shadow-lg shadow-emerald-500/20 active:scale-98"
+                        >
+                          <span>Coordinar por WhatsApp</span>
+                          <ArrowRight className="w-4 h-4" />
+                        </a>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Comparison Card: Abono vs Lavados Sueltos */}
+                <div className="mt-12 p-6 sm:p-8 rounded-3xl bg-zinc-900/60 border border-white/10 relative overflow-hidden">
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 pb-6 border-b border-white/10">
+                    <div>
+                      <span className="text-[10px] font-black uppercase tracking-widest text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-3 py-1 rounded-full inline-block mb-2">
+                        Comparativa de Valor
+                      </span>
+                      <h4 className="text-xl sm:text-2xl font-display font-black italic text-white uppercase tracking-tight">
+                        ¿Por qué conviene el Abono Quincenal vs. lavados sueltos?
+                      </h4>
+                    </div>
+                    <div className="text-xs text-zinc-400 max-w-sm">
+                      Mantenés tu vehículo siempre limpio y con protección continua contra la tierra y el sol del Alto Valle.
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
+                    {/* Opción A: Contratando suelto */}
+                    <div className="p-5 rounded-2xl bg-zinc-950/60 border border-white/5 space-y-3">
+                      <div className="flex items-center justify-between text-zinc-400 font-bold text-xs uppercase tracking-wider">
+                        <span>Sin Abono (Turnos Sueltos)</span>
+                        <span className="text-red-400 font-black">Hasta ~$85.000 / mes</span>
+                      </div>
+                      <ul className="space-y-2 text-xs text-zinc-400">
+                        <li className="flex items-start gap-2">
+                          <span className="text-red-400/80 font-bold shrink-0">✕</span>
+                          <span>Pagás viáticos a domicilio en cada visita ($5.000 x 2 = $10.000 extra)</span>
+                        </li>
+                        <li className="flex items-start gap-2">
+                          <span className="text-red-400/80 font-bold shrink-0">✕</span>
+                          <span>Tenés que acordarte de agendar y dependés de los turnos libres</span>
+                        </li>
+                        <li className="flex items-start gap-2">
+                          <span className="text-red-400/80 font-bold shrink-0">✕</span>
+                          <span>El auto pasa semanas sucio acumulando tierra y sarro en pintura</span>
+                        </li>
+                      </ul>
+                    </div>
+
+                    {/* Opción B: Con Abono */}
+                    <div className="p-5 rounded-2xl bg-emerald-950/20 border border-emerald-500/30 space-y-3 relative overflow-hidden">
+                      <div className="flex items-center justify-between text-white font-bold text-xs uppercase tracking-wider">
+                        <span className="text-emerald-400 font-black">Con Abono Mensual LyS</span>
+                        <span className="text-emerald-400 font-black">Desde $50.000 / mes</span>
+                      </div>
+                      <ul className="space-y-2 text-xs text-zinc-200">
+                        <li className="flex items-start gap-2">
+                          <Check className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                          <span><strong className="text-white">Viáticos 100% bonificados:</strong> sin costos ocultos de traslado</span>
+                        </li>
+                        <li className="flex items-start gap-2">
+                          <Check className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                          <span><strong className="text-white">Días fijos garantizados:</strong> tu cupo reservado cada 15 días</span>
+                        </li>
+                        <li className="flex items-start gap-2">
+                          <Check className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                          <span><strong className="text-white">Protección activa Koch Chemie:</strong> sellado hidrofóbico permanente</span>
+                        </li>
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Requirement footer */}
+                <div className="mt-10 p-5 rounded-2xl bg-zinc-950/70 border border-white/5 flex flex-col sm:flex-row items-center justify-between gap-4 text-center sm:text-left">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center text-zinc-400 shrink-0 text-lg">
+                      💧
+                    </div>
+                    <div>
+                      <div className="text-white text-xs font-bold uppercase tracking-wider">Requisitos para el servicio a domicilio</div>
+                      <div className="text-zinc-400 text-[11px]">Solo necesitamos acceso a una canilla con agua y un enchufe común. Nosotros llevamos mangueras, alargue y todo el equipamiento.</div>
+                    </div>
+                  </div>
+                  <button
+                    onClick={handleStartBooking}
+                    className="text-xs font-black uppercase tracking-wider text-emerald-400 hover:text-emerald-300 whitespace-nowrap py-2 px-4 rounded-xl border border-emerald-500/20 hover:border-emerald-500/40 transition-colors cursor-pointer"
+                  >
+                    ¿Preferís un turno individual? Ir al cotizador ➔
+                  </button>
+                </div>
+              </section>
+
               {/* Products We Use Section */}
-              <div className="mt-24 pb-12">
-                <SectionHeader kicker="Detailing" title="Productos que <span class='text-emerald-500'>usamos</span>" number="03" />
+              <div className="mt-16 pb-12">
+                <SectionHeader kicker="Detailing" title="Productos que <span class='text-emerald-500'>usamos</span>" number="04" />
                 <div className="space-y-10 mt-12">
                   
                   {/* Brand 1: Koch Chemie */}
@@ -1828,10 +2118,10 @@ export default function App() {
         ) : (
           <motion.div
             key="booking"
-            initial={{ opacity: 0, x: 20 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: -20 }}
-            transition={{ duration: 0.5 }}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2, ease: "easeOut" }}
           >
             {/* Booking Flow */}
             <section id="booking-flow" className="px-5 md:px-12 py-10 md:py-20">
@@ -1946,6 +2236,34 @@ export default function App() {
                             <p className="text-zinc-500 text-[10px] md:text-sm font-bold uppercase tracking-widest mt-2 ml-0.5">Elegí la categoría que mejor describa tu auto</p>
                          </div>
                       </div>
+
+                      {/* Abono Mensual Discovery Banner in Step 1 */}
+                      <div className="p-4 md:p-5 rounded-2xl bg-gradient-to-r from-emerald-950/40 via-zinc-900 to-zinc-900 border border-emerald-500/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-xl">
+                        <div className="flex items-center gap-3.5">
+                          <div className="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0">
+                            <Sparkles className="w-5 h-5" />
+                          </div>
+                          <div>
+                            <div className="text-white text-xs md:text-sm font-black uppercase tracking-tight flex items-center gap-2 flex-wrap">
+                              <span>¿Preferís mantenimiento periódico?</span>
+                              <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 text-[9px] font-black tracking-widest uppercase">Abono 2 Visitas/Mes</span>
+                            </div>
+                            <p className="text-zinc-400 text-[11px] md:text-xs mt-0.5 leading-snug">
+                              1 Full + 1 Exterior quincenal en tu domicilio en Cipolletti desde $50.000/mes con viáticos 100% bonificados.
+                            </p>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            navigateToSection('mantenimiento');
+                          }}
+                          className="whitespace-nowrap px-4 py-2 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-300 text-xs font-black uppercase tracking-wider transition-all cursor-pointer self-stretch sm:self-auto text-center"
+                        >
+                          Ver Planes de Abono ➔
+                        </button>
+                      </div>
+
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5 md:gap-6">
                         {activeVehicles.map((v, idx) => {
                           const isSelected = vehicle === v.id;

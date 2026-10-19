@@ -41,12 +41,14 @@ import { metricsService } from '../services/metricsService.ts';
 
 interface TurnoExpressProps {
   onBackToHome: () => void;
+  onGoToAbono?: () => void;
   dbServices?: CatalogService[];
   dbVehicles?: CatalogVehicle[];
 }
 
 export default function TurnoExpress({ 
   onBackToHome, 
+  onGoToAbono,
   dbServices = [], 
   dbVehicles = [] 
 }: TurnoExpressProps) {
@@ -501,6 +503,47 @@ export default function TurnoExpress({
                 Venezuela 1659 / A Domicilio
               </span>
             </div>
+          </div>
+        </div>
+
+        {/* Banner Descubrí Abono Mensual */}
+        <div className="mb-6 p-4 rounded-2xl bg-gradient-to-r from-emerald-950/40 via-zinc-900 to-zinc-900 border border-emerald-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-lg">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0">
+              <Sparkles className="w-4 h-4" />
+            </div>
+            <div>
+              <div className="text-xs sm:text-sm font-black uppercase tracking-wider text-white flex items-center gap-2 flex-wrap">
+                <span>Abono Mensual a Domicilio</span>
+                <span className="text-[9px] font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full">2 visitas / mes</span>
+              </div>
+              <p className="text-[11px] text-zinc-400 mt-0.5">
+                Semana 1: Full + Semana 3: Exterior a domicilio en Cipolletti. Viáticos bonificados.
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => {
+                if (onGoToAbono) {
+                  onGoToAbono();
+                } else {
+                  onBackToHome();
+                }
+              }}
+              className="text-xs text-zinc-400 hover:text-white px-3 py-1.5 rounded-xl border border-white/10 hover:border-white/20 transition-all cursor-pointer"
+            >
+              Ver Planes
+            </button>
+            <a
+              href="https://wa.me/2995760611?text=*💎 Consulta Abono Mensual a Domicilio*%0A%0A_Hola Leandro, vi la opción de Abono Mensual en la web (1 Full + 1 Exterior cada 15 días) y quisiera consultar disponibilidad de cupos para coordinar los días fijos._"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-3.5 py-1.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-300 text-xs font-black uppercase tracking-wider transition-all cursor-pointer text-center"
+            >
+              WhatsApp ➔
+            </a>
           </div>
         </div>
 

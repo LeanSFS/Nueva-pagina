@@ -144,3 +144,58 @@ export const TYPE_EXTRA: Record<string, number> = {
   suv: 5000,
   pickup: 15000
 };
+
+export interface AbonoPlan {
+  name: string;
+  price: number;
+  icon: string;
+  badge?: string;
+  examples: string;
+  features: string[];
+}
+
+export const ABONO_MENSUAL: Record<'auto' | 'suv' | 'pickup', AbonoPlan> = {
+  auto: {
+    name: 'Auto / Sedán',
+    price: 50000,
+    icon: '🚗',
+    examples: 'Cronos, Gol, 208, Corolla, Etios, Focus',
+    features: [
+      '2 Visitas mensuales en tu domicilio en Cipolletti',
+      'Semana 1: Lavado Full (Carrocería + Interior detallado)',
+      'Semana 3: Mantenimiento Exterior quincenal + Cubiertas',
+      'Viáticos de traslado 100% bonificados',
+      'Cera hidrofóbica Koch Chemie Protector Wax',
+      'Días fijos reservados mes a mes'
+    ]
+  },
+  suv: {
+    name: 'SUV / Utilitario',
+    price: 60000,
+    icon: '🚙',
+    examples: 'Taos, Tracker, Duster, EcoSport, Kangoo, T-Cross',
+    features: [
+      '2 Visitas mensuales en tu domicilio en Cipolletti',
+      'Semana 1: Lavado Full (Carrocería + Interior detallado)',
+      'Semana 3: Mantenimiento Exterior quincenal + Cubiertas',
+      'Viáticos de traslado 100% bonificados',
+      'Cera hidrofóbica Koch Chemie Protector Wax',
+      'Días fijos reservados mes a mes'
+    ]
+  },
+  pickup: {
+    name: 'Pick-up / Camioneta',
+    price: 70000,
+    icon: '🛻',
+    examples: 'Hilux, Amarok, Ranger, RAM, Toro, Frontier',
+    features: [
+      '2 Visitas mensuales en tu domicilio en Cipolletti',
+      'Semana 1: Lavado Full + Desengrase chasis/caja + Interior',
+      'Semana 3: Mantenimiento Exterior quincenal + Sellado + Cubiertas',
+      'Viáticos de traslado 100% bonificados',
+      'Cera hidrofóbica Koch Chemie Protector Wax',
+      'Días fijos reservados mes a mes'
+    ]
+  }
+};
+
