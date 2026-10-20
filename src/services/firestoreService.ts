@@ -365,10 +365,51 @@ export function calculateBlockedSlotsForStart(startHour: string, durationMinutes
 
 export const firestoreService = {
   // ------------------ 1. BOOKINGS (TURNOS) ------------------
+
+  getDeletedBookingIds(): Set<string> {
+    const local = getLocalCache<string[]>('lys_deleted_booking_ids', []);
+    return new Set(Array.isArray(local) ? local : []);
+  },
+
+  async syncDeletedBookingIds(): Promise<Set<string>> {
+    const localSet = this.getDeletedBookingIds();
+    try {
+      const res = await fetch(getApiUrl('/api/bookings/deleted'), { signal: AbortSignal.timeout(2500) });
+      if (res.ok) {
+        const serverDeleted: string[] = await res.json();
+        if (Array.isArray(serverDeleted)) {
+          for (const id of serverDeleted) {
+            if (id) localSet.add(id);
+          }
+          setLocalCache('lys_deleted_booking_ids', Array.from(localSet));
+        }
+      }
+    } catch (e) {
+      // Offline fallback: keep local set
+    }
+    return localSet;
+  },
+
+  markBookingDeleted(id: string): void {
+    if (!id) return;
+    const localSet = this.getDeletedBookingIds();
+    localSet.add(id);
+    setLocalCache('lys_deleted_booking_ids', Array.from(localSet));
+  },
+
+  unmarkBookingDeleted(id: string): void {
+    if (!id) return;
+    const localSet = this.getDeletedBookingIds();
+    if (localSet.has(id)) {
+      localSet.delete(id);
+      setLocalCache('lys_deleted_booking_ids', Array.from(localSet));
+    }
+  },
   
   async getBookings(): Promise<Booking[]> {
     const colPath = 'bookings';
     const loadedMap = new Map<string, Booking>();
+    const deletedIds = await this.syncDeletedBookingIds();
 
     // 0. Query server-side persistent bookings (shared across all clients & admin, fail-safe against Firestore quota)
     try {
@@ -377,7 +418,7 @@ export const firestoreService = {
         const serverBookings: Booking[] = await serverRes.json();
         if (Array.isArray(serverBookings)) {
           for (const b of serverBookings) {
-            if (b && b.id) {
+            if (b && b.id && !deletedIds.has(b.id)) {
               if (!b.blockedSlots || b.blockedSlots.length === 0) {
                 const dur = calculateDurationFromServiceName(b.servicio, b.modalidad);
                 b.blockedSlots = calculateBlockedSlotsForStart(b.hora, dur);
@@ -397,7 +438,7 @@ export const firestoreService = {
       const snap = await withTimeout(getDocs(q), 6000);
       snap.forEach(docSnap => {
         const data = docSnap.data() as Booking;
-        if (data && data.id) {
+        if (data && data.id && !deletedIds.has(data.id)) {
           if (!data.blockedSlots || data.blockedSlots.length === 0) {
             const dur = calculateDurationFromServiceName(data.servicio, data.modalidad);
             data.blockedSlots = calculateBlockedSlotsForStart(data.hora, dur);
@@ -407,7 +448,7 @@ export const firestoreService = {
       });
 
       if (snap.size > 0) {
-        const allCloudRows = Array.from(loadedMap.values());
+        const allCloudRows = Array.from(loadedMap.values()).filter(b => !deletedIds.has(b.id));
         setLocalCache('lys_cache_bookings', allCloudRows);
       }
     } catch (e) {
@@ -421,7 +462,7 @@ export const firestoreService = {
         const regData = regSnap.data();
         if (Array.isArray(regData?.bookings)) {
           for (const b of regData.bookings) {
-            if (b && b.id && !loadedMap.has(b.id)) {
+            if (b && b.id && !deletedIds.has(b.id) && !loadedMap.has(b.id)) {
               if (!b.blockedSlots || b.blockedSlots.length === 0) {
                 const dur = calculateDurationFromServiceName(b.servicio, b.modalidad);
                 b.blockedSlots = calculateBlockedSlotsForStart(b.hora, dur);
@@ -436,7 +477,7 @@ export const firestoreService = {
     // 3. Fallback: Merge with local cached bookings from localStorage
     const cached = getLocalCache<Booking[]>('lys_cache_bookings', []);
     for (const b of cached) {
-      if (b && b.id && !loadedMap.has(b.id)) {
+      if (b && b.id && !deletedIds.has(b.id) && !loadedMap.has(b.id)) {
         if (!b.blockedSlots || b.blockedSlots.length === 0) {
           const dur = calculateDurationFromServiceName(b.servicio, b.modalidad);
           b.blockedSlots = calculateBlockedSlotsForStart(b.hora, dur);
@@ -535,13 +576,15 @@ export const firestoreService = {
       console.warn("Could not query taken_slots fallback:", e);
     }
 
-    const consolidated = Array.from(loadedMap.values()).map(b => {
-      if (!b.blockedSlots || b.blockedSlots.length === 0) {
-        const dur = calculateDurationFromServiceName(b.servicio || '', b.modalidad);
-        return { ...b, blockedSlots: calculateBlockedSlotsForStart(b.hora || '09:00', dur) };
-      }
-      return b;
-    });
+    const consolidated = Array.from(loadedMap.values())
+      .filter(b => b && b.id && !deletedIds.has(b.id))
+      .map(b => {
+        if (!b.blockedSlots || b.blockedSlots.length === 0) {
+          const dur = calculateDurationFromServiceName(b.servicio || '', b.modalidad);
+          return { ...b, blockedSlots: calculateBlockedSlotsForStart(b.hora || '09:00', dur) };
+        }
+        return b;
+      });
 
     // Update local cache
     setLocalCache('lys_cache_bookings', consolidated);
@@ -549,6 +592,9 @@ export const firestoreService = {
   },
 
   async createBooking(booking: Booking, isBlocked = false): Promise<void> {
+    if (booking && booking.id) {
+      this.unmarkBookingDeleted(booking.id);
+    }
     const duration = calculateDurationFromServiceName(booking.servicio, booking.modalidad);
     const calculatedSlots = calculateBlockedSlotsForStart(booking.hora, duration);
     const hoursToBlock = (booking.blockedSlots && booking.blockedSlots.length > 0)
@@ -659,6 +705,11 @@ export const firestoreService = {
   },
 
   async deleteBooking(bookingId: string, fecha: string, hora: string): Promise<void> {
+    if (!bookingId) return;
+
+    // 1. Immediately register in deleted bookings list
+    this.markBookingDeleted(bookingId);
+
     const localBookings = getLocalCache<Booking[]>('lys_cache_bookings', []);
     const bk = localBookings.find(b => b.id === bookingId);
     
@@ -668,23 +719,7 @@ export const firestoreService = {
       ? bk.blockedSlots
       : calculatedSlots;
 
-    // Delete from server-side database
-    fetch(getApiUrl(`/api/bookings/${bookingId}`), { method: 'DELETE' }).catch(() => null);
-
-    // If it's a manual block or synthetic slot, also unblock the slots in overrides
-    const isBlock = bk?.tipo === 'BLOQUEO' || bk?.nombre?.includes('BLOQUEADO') || bookingId.startsWith('block_') || bookingId.startsWith('slot_');
-    if (isBlock) {
-      if (hoursToBlock.length >= 8 || bk?.nombre?.includes('DÍA COMPLETO') || bk?.servicio?.includes('DÍA COMPLETO')) {
-        await this.unblockDay(fecha);
-        return;
-      } else {
-        for (const h of hoursToBlock) {
-          await this.unblockSlot(fecha, h);
-        }
-      }
-    }
-
-    // Update local cache
+    // 2. Remove from local client cache immediately
     const filteredBookings = localBookings.filter(b => b.id !== bookingId);
     setLocalCache('lys_cache_bookings', filteredBookings);
 
@@ -693,22 +728,62 @@ export const firestoreService = {
     const filteredTaken = localTaken.filter(ts => !hoursToBlockSet.has(ts.id));
     setLocalCache('lys_cache_taken_slots', filteredTaken);
 
+    // 3. Await server-side persistent deletion (guarantees next fetch / reload has it deleted)
     try {
-      await executeWithBackoff(async () => {
-        const bach = writeBatch(db);
-        const bookingRef = doc(db, 'bookings', bookingId);
-        bach.delete(bookingRef);
+      await withTimeout(
+        fetch(getApiUrl(`/api/bookings/${encodeURIComponent(bookingId)}`), {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fecha, hora, blockedSlots: hoursToBlock })
+        }),
+        3500
+      );
+    } catch (serverErr) {
+      console.warn('Notice from server delete (continuing):', serverErr);
+    }
 
-        for (const h of hoursToBlock) {
-          const sId = `${fecha}_${h}`;
-          const slotRef = doc(db, 'taken_slots', sId);
-          bach.delete(slotRef);
+    // 4. Liberate all associated slots both locally and on server
+    const isBlock = bk?.tipo === 'BLOQUEO' || bk?.nombre?.includes('BLOQUEADO') || bookingId.startsWith('block_') || bookingId.startsWith('slot_');
+    if (isBlock && (hoursToBlock.length >= 8 || bk?.nombre?.includes('DÍA COMPLETO') || bk?.servicio?.includes('DÍA COMPLETO'))) {
+      await this.unblockDay(fecha).catch(() => null);
+    } else {
+      for (const h of hoursToBlock) {
+        await this.unblockSlot(fecha, h).catch(() => null);
+      }
+    }
+
+    // 5. Cloud Firestore cleanups: delete slots and booking independently so permission errors don't roll back slot cleanup
+    for (const h of hoursToBlock) {
+      const sId = `${fecha}_${h}`;
+      try {
+        await deleteDoc(doc(db, 'taken_slots', sId));
+      } catch (err) {
+        // Silently catch in case of network timeout
+      }
+    }
+
+    try {
+      await deleteDoc(doc(db, 'bookings', bookingId));
+    } catch (err) {
+      // Catch permission error if not admin authenticated in cloud
+    }
+
+    // 6. If settings/bookings_registry exists, clean it up
+    try {
+      const regRef = doc(db, 'settings', 'bookings_registry');
+      const regSnap = await withTimeout(getDoc(regRef), 2000).catch(() => null);
+      if (regSnap && regSnap.exists()) {
+        const regData = regSnap.data();
+        if (Array.isArray(regData?.bookings)) {
+          const updatedReg = regData.bookings.filter((b: any) => b?.id !== bookingId);
+          await setDoc(regRef, { bookings: updatedReg }, { merge: true }).catch(() => null);
         }
+      }
+    } catch (e) {}
 
-        await withTimeout(bach.commit(), 10000);
-      });
-    } catch (e) {
-      console.warn(`Cloud booking deletion deferred/failed for ${bookingId}, preserved locally:`, e);
+    // 7. Dispatch booking update to notify all active views immediately
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('lys_booking_updated', { detail: { id: bookingId, deleted: true } }));
     }
   },
 

@@ -530,14 +530,18 @@ export default function AdminAgenda({
   const handleDeleteBooking = async (book: Booking) => {
     setLoading(true);
     setActionError(null);
+    setDeleteConfirmId(null);
+    // Optimistic UI update: remove immediately so user sees it disappear without lag
+    setAllBookings(prev => prev.filter(b => b.id !== book.id));
     try {
       await firestoreService.deleteBooking(book.id, book.fecha, book.hora);
       clearCache();
       await loadBookings();
-      setDeleteConfirmId(null);
       showToast(book.nombre.includes('BLOQUEADO') ? 'Horario desbloqueado' : 'Turno eliminado');
-    } catch (e) {
-      setActionError('Error de Firestore al eliminar el turno.');
+    } catch (e: any) {
+      console.error('Error deleting booking:', e);
+      setActionError('Error al eliminar el turno: ' + (e?.message || 'Error de conexión'));
+      await loadBookings();
     } finally {
       setLoading(false);
     }
@@ -546,6 +550,7 @@ export default function AdminAgenda({
   const handleUnblockDay = async (fecha: string) => {
     setLoading(true);
     setActionError(null);
+    setAllBookings(prev => prev.filter(b => !(b.fecha === fecha && (b.tipo === 'BLOQUEO' || b.nombre?.includes('BLOQUEADO') || b.id.startsWith('slot_') || b.id.startsWith('block_')))));
     try {
       await firestoreService.unblockDay(fecha);
       clearCache();
@@ -561,6 +566,7 @@ export default function AdminAgenda({
   const handleUnblockSlot = async (fecha: string, hora: string) => {
     setLoading(true);
     setActionError(null);
+    setAllBookings(prev => prev.filter(b => !(b.fecha === fecha && (b.hora === hora || (b.blockedSlots && b.blockedSlots.includes(hora))))));
     try {
       await firestoreService.unblockSlot(fecha, hora);
       clearCache();
@@ -1826,6 +1832,31 @@ export default function AdminAgenda({
                         >
                           <MapPin className="w-4 h-4" />
                         </a>
+                      )}
+
+                      {deleteConfirmId === book.id ? (
+                        <div className="flex items-center gap-1 bg-red-950/60 p-1 rounded-xl border border-red-500/40">
+                          <button 
+                            onClick={() => handleDeleteBooking(book)}
+                            className="px-2.5 py-1.5 bg-red-600 hover:bg-red-500 text-white rounded-lg text-[10px] font-black uppercase tracking-wider transition-colors cursor-pointer"
+                          >
+                            ELIMINAR
+                          </button>
+                          <button 
+                            onClick={() => setDeleteConfirmId(null)}
+                            className="px-2 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg text-[10px] font-black uppercase tracking-wider transition-colors cursor-pointer"
+                          >
+                            NO
+                          </button>
+                        </div>
+                      ) : (
+                        <button 
+                          onClick={() => setDeleteConfirmId(book.id)}
+                          className="p-2 bg-zinc-800 hover:bg-red-500/20 text-zinc-400 hover:text-red-400 border border-white/5 rounded-xl transition-all cursor-pointer"
+                          title="Eliminar Turno"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
                       )}
                     </div>
                   </div>

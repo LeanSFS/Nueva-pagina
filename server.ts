@@ -25,8 +25,9 @@ app.use((req, res, next) => {
 
 app.use(express.json());
 
-// Persistent Schedule Overrides Store (for unblocked days/slots across all clients)
-const SCHEDULE_OVERRIDES_FILE = path.join(process.cwd(), "data", "schedule_overrides.json");
+// Persistent Storage Directory (Bulletproof against Firebase Quota Exceeded)
+const DATA_DIR = path.join(process.cwd(), "data");
+const SCHEDULE_OVERRIDES_FILE = path.join(DATA_DIR, "schedule_overrides.json");
 
 function getScheduleOverrides(): { unblockedDays: string[]; unblockedSlots: string[] } {
   try {
@@ -119,8 +120,8 @@ app.post("/api/schedule/block-slot", (req, res) => {
 });
 
 // Persistent Server Bookings & Taken Slots Store (Bulletproof against Firebase Quota Exceeded)
-const BOOKINGS_FILE = path.join(process.cwd(), "data", "bookings.json");
-const TAKEN_SLOTS_FILE = path.join(process.cwd(), "data", "taken_slots.json");
+const BOOKINGS_FILE = path.join(DATA_DIR, "bookings.json");
+const TAKEN_SLOTS_FILE = path.join(DATA_DIR, "taken_slots.json");
 
 interface ServerBooking {
   id: string;
@@ -192,8 +193,38 @@ function saveServerTakenSlots(slots: ServerTakenSlot[]) {
   }
 }
 
+const DELETED_BOOKINGS_FILE = path.join(DATA_DIR, "deleted_bookings.json");
+
+function getServerDeletedBookingIds(): string[] {
+  try {
+    if (fs.existsSync(DELETED_BOOKINGS_FILE)) {
+      const data = JSON.parse(fs.readFileSync(DELETED_BOOKINGS_FILE, "utf-8"));
+      return Array.isArray(data) ? data : [];
+    }
+  } catch (err) {
+    console.error("Error reading deleted_bookings file:", err);
+  }
+  return [];
+}
+
+function saveServerDeletedBookingIds(ids: string[]) {
+  try {
+    const dir = path.dirname(DELETED_BOOKINGS_FILE);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(DELETED_BOOKINGS_FILE, JSON.stringify(ids, null, 2), "utf-8");
+  } catch (err) {
+    console.error("Error saving deleted_bookings file:", err);
+  }
+}
+
 app.get("/api/bookings", (_req, res) => {
-  return res.json(getServerBookings());
+  const deletedSet = new Set(getServerDeletedBookingIds());
+  const bookings = getServerBookings().filter(b => !deletedSet.has(b.id) && !b.id.startsWith('test_'));
+  return res.json(bookings);
+});
+
+app.get("/api/bookings/deleted", (_req, res) => {
+  return res.json(getServerDeletedBookingIds());
 });
 
 app.get("/api/taken_slots", (_req, res) => {
@@ -238,25 +269,56 @@ app.post("/api/bookings", (req, res) => {
   }
   saveServerTakenSlots(takenSlots);
 
+  // If previously marked deleted, unmark it
+  const deletedIds = getServerDeletedBookingIds();
+  if (deletedIds.includes(booking.id)) {
+    saveServerDeletedBookingIds(deletedIds.filter(id => id !== booking.id));
+  }
+
   return res.json({ success: true, booking });
 });
 
 app.delete("/api/bookings/:id", (req, res) => {
   const { id } = req.params;
+  const fecha = (req.body?.fecha || req.query?.fecha) as string | undefined;
+  const hora = (req.body?.hora || req.query?.hora) as string | undefined;
+  const blockedSlots = (req.body?.blockedSlots || (req.query?.blockedSlots ? String(req.query.blockedSlots).split(',') : undefined)) as string[] | undefined;
+
+  const deletedIds = getServerDeletedBookingIds();
+  if (!deletedIds.includes(id)) {
+    deletedIds.push(id);
+    saveServerDeletedBookingIds(deletedIds);
+  }
+
   const bookings = getServerBookings();
   const target = bookings.find(b => b.id === id);
   const updatedBookings = bookings.filter(b => b.id !== id);
   saveServerBookings(updatedBookings);
 
-  if (target) {
-    const hoursToBlock = target.blockedSlots && target.blockedSlots.length > 0 ? target.blockedSlots : [target.hora];
-    const hoursSet = new Set(hoursToBlock.map(h => `${target.fecha}_${h}`));
+  const targetFecha = target?.fecha || fecha;
+  const targetHora = target?.hora || hora;
+  const targetSlots = (target?.blockedSlots && target.blockedSlots.length > 0)
+    ? target.blockedSlots
+    : (Array.isArray(blockedSlots) && blockedSlots.length > 0)
+      ? blockedSlots
+      : targetHora ? [targetHora] : [];
+
+  if (targetFecha && targetSlots.length > 0) {
+    const hoursSet = new Set(targetSlots.map(h => `${targetFecha}_${h}`));
     const takenSlots = getServerTakenSlots();
     const updatedSlots = takenSlots.filter(s => !hoursSet.has(s.id));
     saveServerTakenSlots(updatedSlots);
+
+    const overrides = getScheduleOverrides();
+    const unblockedSet = new Set(overrides.unblockedSlots || []);
+    for (const h of targetSlots) {
+      unblockedSet.add(`${targetFecha}_${h}`);
+    }
+    overrides.unblockedSlots = Array.from(unblockedSet);
+    saveScheduleOverrides(overrides);
   }
 
-  return res.json({ success: true });
+  return res.json({ success: true, deletedId: id });
 });
 
 app.get("/api/taken-slots", (_req, res) => {
