@@ -23,7 +23,7 @@ export const SERVICES: Service[] = [
       suv: 20000,
       pickup: 30000
     },
-    duration: 90
+    duration: 60
   },
   {
     id: 'detallado_interior',
@@ -43,7 +43,7 @@ export const SERVICES: Service[] = [
       suv: 25000,
       pickup: 30000
     },
-    duration: 90
+    duration: 60
   },
   {
     id: 'limpieza_techo',
@@ -62,7 +62,7 @@ export const SERVICES: Service[] = [
       suv: 12000,
       pickup: 15000
     },
-    duration: 60
+    duration: 45
   },
   {
     id: 'tapizados_tela',
@@ -81,7 +81,7 @@ export const SERVICES: Service[] = [
       suv: 45000,
       pickup: 50000
     },
-    duration: 90
+    duration: 60
   },
   {
     id: 'tapizados_cuero',
@@ -100,7 +100,7 @@ export const SERVICES: Service[] = [
       suv: 18000,
       pickup: 20000
     },
-    duration: 60
+    duration: 45
   },
   {
     id: 'tratamiento_vidrios',
@@ -119,7 +119,7 @@ export const SERVICES: Service[] = [
       suv: 12000,
       pickup: 15000
     },
-    duration: 60,
+    duration: 30,
     isHidden: true
   }
 ];

@@ -130,9 +130,19 @@ function setLocalCache<T>(key: string, value: T): void {
   } catch (e) {}
 }
 
+export function isStaticHost(): boolean {
+  if (typeof window === 'undefined') return false;
+  const host = window.location.hostname;
+  return host.includes('github.io') || host.includes('lyslavados.com');
+}
+
 export function getApiUrl(endpoint: string): string {
   if (endpoint.startsWith('http://') || endpoint.startsWith('https://')) return endpoint;
   if (typeof window !== 'undefined' && window.location && window.location.origin) {
+    // If hosted on GitHub Pages or custom domain static host without local backend, do not request /api/ locally
+    if (isStaticHost() && endpoint.startsWith('/api/')) {
+      return '';
+    }
     return `${window.location.origin}${endpoint.startsWith('/') ? '' : '/'}${endpoint}`;
   }
   return `http://localhost:3000${endpoint.startsWith('/') ? '' : '/'}${endpoint}`;
@@ -319,27 +329,26 @@ export function sanitizeImageUrl(rawUrl: string): string {
   return url;
 }
 
-export function calculateDurationFromServiceName(serviceName: string, modalidad?: string): number {
-  if (!serviceName) return modalidad === 'domicilio' ? 135 : 90;
+export function calculateDurationFromServiceName(serviceName: string, _modalidad?: string): number {
+  if (!serviceName) return 60;
   const lower = serviceName.toLowerCase();
   
-  // Check for Full / Combo / Exterior + Interior
+  // Respetar bloqueos manuales
+  if (lower.includes('bloqueado') || lower.includes('bloqueo')) return 120;
+
   let total = 0;
   if (lower.includes('full') || lower.includes('combo') || (lower.includes('exterior') && lower.includes('interior'))) {
-    total = 180; // 3 hours
+    total = 120; // 2 horas (tiempo calibrado en equipo x2)
+    if (lower.includes('tapizados de tela') || lower.includes('tapizados tela')) total += 60;
+    if (lower.includes('techo')) total += 45;
   } else {
-    if (lower.includes('exterior')) total += 90;
-    if (lower.includes('interior')) total += 90;
-    if (lower.includes('tapizados de tela') || lower.includes('tapizados tela')) total += 90;
-    if (lower.includes('tapizados de cuero') || lower.includes('cuero')) total += 60;
-    if (lower.includes('techo')) total += 60;
-    if (lower.includes('vidrios')) total += 60;
-    if (total === 0) total = 90;
-  }
-
-  // 45 min buffer logístico para viaje y armado/desarmado en domicilio
-  if (modalidad === 'domicilio' || lower.includes('domicilio')) {
-    total += 45;
+    if (lower.includes('exterior')) total += 60;
+    if (lower.includes('interior')) total += 60;
+    if (lower.includes('tapizados de tela') || lower.includes('tapizados tela')) total += 60;
+    if (lower.includes('tapizados de cuero') || lower.includes('cuero')) total += 45;
+    if (lower.includes('techo')) total += 45;
+    if (lower.includes('vidrios')) total += 30;
+    if (total === 0) total = 60;
   }
 
   return total;
@@ -352,7 +361,7 @@ export function calculateBlockedSlotsForStart(startHour: string, durationMinutes
   const endMins = startMins + (durationMinutes || 60);
   const blocked: string[] = [];
 
-  for (let mins = 7 * 60; mins <= 18 * 60; mins += 60) {
+  for (let mins = 7 * 60; mins <= 19 * 60; mins += 60) {
     if (mins >= startMins && mins < endMins) {
       const slotH = Math.floor(mins / 60);
       const slotM = mins % 60;
@@ -1038,73 +1047,76 @@ export const firestoreService = {
 
   // ------------------ 3. CAJA (MOVEMENTS) ------------------
 
-  async getMovements(): Promise<Movement[]> {
+  async getMovements(providedFacturas?: ArcaFacturaRecord[]): Promise<Movement[]> {
     const colPath = 'movements';
     const firestoreList: Movement[] = [];
 
-    // 1. Fetch remote from Firestore
-    try {
-      const snap = await withTimeout(getDocs(collection(db, colPath)), 3000);
-      snap.forEach(d => {
-        firestoreList.push(d.data() as Movement);
-      });
-    } catch (e) {
-      console.warn("Firestore getMovements notice, reading local/static fallback:", e);
-    }
+    // 1. Fetch remote sources concurrently with tight 1500ms timeout to never block UI
+    const fetchFirestoreDocs = withTimeout(
+      getDocs(collection(db, colPath)).then(snap => {
+        snap.forEach(d => {
+          firestoreList.push(d.data() as Movement);
+        });
+      }),
+      1500
+    ).catch(() => null);
 
-    // 1b. Fetch shared movements registry from settings
-    try {
-      const regSnap = await withTimeout(getDoc(doc(db, 'settings', 'movements_registry')), 3000).catch(() => null);
-      if (regSnap && regSnap.exists()) {
-        const regData = regSnap.data();
-        if (Array.isArray(regData?.movements)) {
-          firestoreList.push(...regData.movements);
+    const fetchSharedRegistry = withTimeout(
+      getDoc(doc(db, 'settings', 'movements_registry')).then(regSnap => {
+        if (regSnap && regSnap.exists()) {
+          const regData = regSnap.data();
+          if (Array.isArray(regData?.movements)) {
+            firestoreList.push(...regData.movements);
+          }
         }
-      }
-    } catch (e) {}
+      }),
+      1500
+    ).catch(() => null);
 
     // 2. Fetch bundled static movements (/movements.json)
     const staticMovements: Movement[] = Array.isArray(bundledMovementsJson) ? [...(bundledMovementsJson as Movement[])] : [];
-    try {
-      const staticRes = await fetch('/movements.json').catch(() => null);
-      if (staticRes && staticRes.ok) {
-        const json = await staticRes.json().catch(() => null);
-        if (Array.isArray(json)) {
-          staticMovements.push(...json);
+    const fetchStaticJson = fetch('/movements.json', { signal: AbortSignal.timeout(1200) })
+      .then(async res => {
+        if (res.ok) {
+          const json = await res.json().catch(() => null);
+          if (Array.isArray(json)) {
+            staticMovements.push(...json);
+          }
         }
-      }
-    } catch (e) {}
+      })
+      .catch(() => null);
 
     // 3. Local cached and unsynced
     const cached = getLocalCache<Movement[]>('lys_cache_movements', []);
     const unsynced = getLocalCache<Movement[]>('lys_unsynced_movements', []);
 
-    // 4. Synthesize movements from any ARCA facturas
+    // 4. Synthesize movements from ARCA facturas immediately using cache or provided records
     const facturasMovements: Movement[] = [];
-    try {
-      const allFacturas = await this.getArcaFacturas().catch(() => []);
-      for (const f of allFacturas) {
-        if (!f || !f.id) continue;
-        const movId = f.movementId || `mov_${f.id}`;
-        facturasMovements.push({
-          id: movId,
-          fecha: f.fechaIso || (f.fechaEmision ? f.fechaEmision.split('/').reverse().join('-') : new Date().toISOString().split('T')[0]),
-          tipo: 'Ingreso',
-          categoria: 'Lavado',
-          concepto: f.conceptoDescripcion || 'Servicio de Estética y Lavado Automotor',
-          monto_ars: Number(f.total),
-          medio: 'Efectivo',
-          estado: 'Pagado',
-          factura: `${f.tipoComprobanteNombre || 'FACTURA C'} Nº ${String(f.puntoVenta).padStart(4, '0')}-${String(f.cbteNro).padStart(8, '0')}`,
-          cliente: f.clienteNombre || 'Consumidor Final',
-          facturado: true,
-          cae: f.cae,
-          caeVto: f.caeVto,
-          facturaId: f.id,
-          notas: `Factura oficial ARCA emitida con CAE ${f.cae}`
-        });
-      }
-    } catch (e) {}
+    const facturasSource = providedFacturas || getLocalCache<ArcaFacturaRecord[]>('lys_arca_facturas', []);
+    for (const f of facturasSource) {
+      if (!f || !f.id) continue;
+      const movId = f.movementId || `mov_${f.id}`;
+      facturasMovements.push({
+        id: movId,
+        fecha: f.fechaIso || (f.fechaEmision ? f.fechaEmision.split('/').reverse().join('-') : new Date().toISOString().split('T')[0]),
+        tipo: 'Ingreso',
+        categoria: 'Lavado',
+        concepto: f.conceptoDescripcion || 'Servicio de Estética y Lavado Automotor',
+        monto_ars: Number(f.total),
+        medio: 'Efectivo',
+        estado: 'Pagado',
+        factura: `${f.tipoComprobanteNombre || 'FACTURA C'} Nº ${String(f.puntoVenta).padStart(4, '0')}-${String(f.cbteNro).padStart(8, '0')}`,
+        cliente: f.clienteNombre || 'Consumidor Final',
+        facturado: true,
+        cae: f.cae,
+        caeVto: f.caeVto,
+        facturaId: f.id,
+        notas: `Factura oficial ARCA emitida con CAE ${f.cae}`
+      });
+    }
+
+    // Await all remote fetches in parallel (max 1.5s total wait instead of cascading 15s)
+    await Promise.allSettled([fetchFirestoreDocs, fetchSharedRegistry, fetchStaticJson]);
 
     // 5. Merge all without duplicates (preferring firestore/unsynced/cached with richest details)
     const map = new Map<string, Movement>();
@@ -1897,81 +1909,74 @@ export const firestoreService = {
   async getArcaFacturas(): Promise<ArcaFacturaRecord[]> {
     // 1. Fetch bundled static facturas (/facturas_arca.json)
     const staticFacturas: ArcaFacturaRecord[] = Array.isArray(bundledFacturasJson) ? [...(bundledFacturasJson as ArcaFacturaRecord[])] : [];
-    try {
-      const staticRes = await fetch('/facturas_arca.json').catch(() => null);
-      if (staticRes && staticRes.ok) {
-        const json = await staticRes.json().catch(() => null);
-        if (Array.isArray(json)) {
-          staticFacturas.push(...json);
+    const fetchStatic = fetch('/facturas_arca.json', { signal: AbortSignal.timeout(1200) })
+      .then(async res => {
+        if (res.ok) {
+          const json = await res.json().catch(() => null);
+          if (Array.isArray(json)) staticFacturas.push(...json);
         }
-      }
-    } catch (e) {}
+      })
+      .catch(() => null);
 
-    // 2. Fetch shared registry from Firestore settings (accessible to all devices)
+    // 2. Fetch shared registry from Firestore settings
     const sharedSettingsFacturas: ArcaFacturaRecord[] = [];
-    try {
-      const settingsRef = doc(db, 'settings', 'arca_facturas');
-      const settingsSnap = await withTimeout(getDoc(settingsRef), 3000).catch(() => null);
-      if (settingsSnap && settingsSnap.exists()) {
-        const data = settingsSnap.data();
-        if (Array.isArray(data?.facturas)) {
-          sharedSettingsFacturas.push(...data.facturas);
-        }
-      }
-    } catch (e) {}
-
-    // 2b. Fetch individual factura docs from settings collection
-    try {
-      const settingsDocs = await withTimeout(getDocs(collection(db, 'settings')), 3000).catch(() => null);
-      if (settingsDocs) {
-        settingsDocs.forEach(d => {
-          if (d.id.startsWith('factura_')) {
-            const f = d.data() as ArcaFacturaRecord;
-            if (f && f.id) sharedSettingsFacturas.push(f);
+    const fetchSharedSettings = withTimeout(
+      getDoc(doc(db, 'settings', 'arca_facturas')).then(settingsSnap => {
+        if (settingsSnap && settingsSnap.exists()) {
+          const data = settingsSnap.data();
+          if (Array.isArray(data?.facturas)) {
+            sharedSettingsFacturas.push(...data.facturas);
           }
-        });
-      }
-    } catch (e) {}
+        }
+      }),
+      1500
+    ).catch(() => null);
 
     // 3. Fetch from dedicated facturas collection in Firestore
     const firestoreFacturas: ArcaFacturaRecord[] = [];
-    try {
-      const col = collection(db, 'facturas');
-      const snap = await withTimeout(getDocs(col), 2500).catch(() => null);
-      if (snap) {
+    const fetchFirestore = withTimeout(
+      getDocs(collection(db, 'facturas')).then(snap => {
         snap.forEach(d => {
           const item = d.data() as ArcaFacturaRecord;
           if (item && item.id) firestoreFacturas.push(item);
         });
-      }
-    } catch (e) {}
+      }),
+      1500
+    ).catch(() => null);
 
-    // 4. Fetch from backend server
+    // 4. Fetch from backend server with tight timeout (prevents Render sleeping server from hanging UI)
     const serverFacturas: ArcaFacturaRecord[] = [];
-    try {
-      const cfg = await this.getArcaConfig().catch(() => null);
-      let base = cfg?.apiHost?.trim().replace(/\/$/, '') || '';
-      if (typeof window !== 'undefined') {
-        const host = window.location.hostname;
-        const isLocalOrRunApp = host.includes('localhost') || host === '127.0.0.1' || host.includes('run.app');
-        if (isLocalOrRunApp) {
-          base = '';
-        } else if (!base) {
-          base = 'https://nueva-pagina.onrender.com';
-        }
-      }
-      const endpoint = base ? `${base}/api/arca/facturas` : '/api/arca/facturas';
-      const res = await fetch(endpoint).catch(() => null);
-      if (res && res.ok) {
-        const ct = res.headers.get('content-type') || '';
-        if (ct.includes('application/json')) {
-          const json = await res.json().catch(() => null);
-          if (json && json.success && Array.isArray(json.facturas)) {
-            serverFacturas.push(...json.facturas);
+    const fetchServer = (async () => {
+      try {
+        const cfg = getLocalCache<ArcaConfig | null>('lys_arca_config', null);
+        let base = cfg?.apiHost?.trim().replace(/\/$/, '') || '';
+        if (typeof window !== 'undefined') {
+          const host = window.location.hostname;
+          const isLocalOrRunApp = host.includes('localhost') || host === '127.0.0.1' || host.includes('run.app');
+          if (isLocalOrRunApp) {
+            base = '';
+          } else if (!base) {
+            // If on static host, only ping if user configured apiHost to avoid waking sleeping Render free tier
+            return;
           }
         }
-      }
-    } catch (e) {}
+        const endpoint = base ? `${base}/api/arca/facturas` : '/api/arca/facturas';
+        if (!endpoint) return;
+        const res = await fetch(endpoint, { signal: AbortSignal.timeout(1800) }).catch(() => null);
+        if (res && res.ok) {
+          const ct = res.headers.get('content-type') || '';
+          if (ct.includes('application/json')) {
+            const json = await res.json().catch(() => null);
+            if (json && json.success && Array.isArray(json.facturas)) {
+              serverFacturas.push(...json.facturas);
+            }
+          }
+        }
+      } catch (e) {}
+    })();
+
+    // Wait for all in parallel (max 1.8s)
+    await Promise.allSettled([fetchStatic, fetchSharedSettings, fetchFirestore, fetchServer]);
 
     // 5. Local cached and unsynced facturas
     const cachedFacturas = getLocalCache<ArcaFacturaRecord[]>('lys_arca_facturas', []);

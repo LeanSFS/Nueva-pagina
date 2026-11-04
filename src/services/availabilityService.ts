@@ -97,39 +97,89 @@ export async function fetchSlots(forceRefresh = false): Promise<TimeSlot[]> {
       const d = new Date(today);
       d.setDate(today.getDate() + i);
 
+      const dayOfWeek = d.getDay();
       // Skips Sundays (assuming Sunday is closed)
-      if (d.getDay() === 0) {
+      if (dayOfWeek === 0) {
         continue;
       }
-
-      // Define possible times based on the day of the week
-      // Saturday = 6, Weekdays = 1-5
-      const dTimes = d.getDay() === 6 
-        ? ['08:00', '09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00']
-        : ['07:00', '08:00', '09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00'];
 
       const year = d.getFullYear();
       const month = String(d.getMonth() + 1).padStart(2, '0');
       const day = String(d.getDate()).padStart(2, '0');
       const fechaStr = `${year}-${month}-${day}`;
+      const isToday = fechaStr === todayStr;
+
+      let dTimes: string[] = [];
+
+      // 1. SÁBADOS (dayOfWeek === 6): Dinámicos en parejas
+      // Base: 08:00, 12:00, 16:00.
+      // Desbloqueo de 10:00, 14:00, 18:00 al ocuparse sus turnos base.
+      if (dayOfWeek === 6) {
+        dTimes = ['08:00', '12:00', '16:00'];
+        if (busySlots.has(`${fechaStr}_08:00`)) {
+          dTimes.push('10:00');
+        }
+        if (busySlots.has(`${fechaStr}_12:00`)) {
+          dTimes.push('14:00');
+        }
+        if (busySlots.has(`${fechaStr}_16:00`)) {
+          dTimes.push('18:00');
+        }
+      } 
+      // 2. LUNES (dayOfWeek === 1): Disponibilidad únicamente a partir de las 12:00
+      else if (dayOfWeek === 1) {
+        dTimes = ['12:00', '15:00', '17:00'];
+      } 
+      // 3. MARTES A VIERNES (dayOfWeek 2 a 5):
+      // Grilla limpia: 07:00, 08:00, 09:00, 12:00, 15:00, 17:00
+      else {
+        dTimes = ['07:00', '08:00', '09:00', '12:00', '15:00', '17:00'];
+      }
+
+      // Copia de slots ocupados para procesar reglas exclusivas del día
+      const dayBusySlots = new Set(busySlots);
+
+      // REGLA: Martes por la tarde -> SOLO UN TURNO DE TARDE
+      // Al reservarse uno (15 o 17), el otro se bloquea automáticamente
+      if (dayOfWeek === 2) {
+        if (dayBusySlots.has(`${fechaStr}_15:00`)) {
+          dayBusySlots.add(`${fechaStr}_17:00`);
+        }
+        if (dayBusySlots.has(`${fechaStr}_17:00`)) {
+          dayBusySlots.add(`${fechaStr}_15:00`);
+        }
+      }
+
+      // REGLA: Mismo Día (isToday) -> SOLO UN TURNO DE TARDE (anticipación de 1 día para equipo)
+      if (isToday) {
+        if (dayBusySlots.has(`${fechaStr}_15:00`)) {
+          dayBusySlots.add(`${fechaStr}_17:00`);
+        }
+        if (dayBusySlots.has(`${fechaStr}_17:00`)) {
+          dayBusySlots.add(`${fechaStr}_15:00`);
+        }
+      }
+
+      // Ordenar horarios cronológicamente
+      dTimes.sort((a, b) => a.localeCompare(b));
 
       // Filter possible slots checking if they are busy or in the past
       const availableSlots = dTimes.filter(time => {
         const lookupKey = `${fechaStr}_${time}`;
         
         // If it's today in Argentina, hide slots that have already passed or are too close
-        if (fechaStr === todayStr) {
+        if (isToday) {
           const [hour, minute] = time.split(':').map(Number);
           const currentHour = today.getHours();
           const currentMinute = today.getMinutes();
           
-          // Require at least 30 minutes in advance to book today (or simple hour check)
+          // Require at least 30 minutes in advance to book today
           if (hour < currentHour || (hour === currentHour && minute <= currentMinute + 30)) {
             return false;
           }
         }
 
-        return !busySlots.has(lookupKey);
+        return !dayBusySlots.has(lookupKey);
       });
 
       slotsResult.push({

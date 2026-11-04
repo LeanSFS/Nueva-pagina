@@ -824,30 +824,49 @@ export default function App() {
 
   const totalDuration = useMemo(() => {
     if (selectedServices.length === 0) return 60;
-    const baseDur = selectedServices.reduce((total, sId) => {
+    return selectedServices.reduce((total, sId) => {
       const srv = activeServices.find(s => s.id === sId);
       const defaultDuration = SERVICES.find(st => st.id === sId)?.duration || 60;
       return total + (srv?.duration || defaultDuration);
     }, 0);
-    return bookingModalidad === 'domicilio' 
-      ? baseDur + (domicilioConfig.bufferMinutes || 45) 
-      : baseDur;
-  }, [selectedServices, activeServices, bookingModalidad, domicilioConfig.bufferMinutes]);
+  }, [selectedServices, activeServices]);
+
+  const getDayOfferedSlots = useCallback((fechaStr?: string): string[] => {
+    if (!fechaStr) {
+      return ['07:00', '08:00', '09:00', '10:00', '12:00', '14:00', '15:00', '16:00', '17:00', '18:00'];
+    }
+    const [y, m, d] = fechaStr.split('-').map(Number);
+    const dayOfWeek = new Date(y, m - 1, d).getDay();
+    if (dayOfWeek === 1) {
+      return ['12:00', '15:00', '17:00'];
+    }
+    if (dayOfWeek === 6) {
+      return ['08:00', '10:00', '12:00', '14:00', '16:00', '18:00'];
+    }
+    return ['07:00', '08:00', '09:00', '12:00', '15:00', '17:00'];
+  }, []);
 
   // Helper to check if a start time can fit the required duration given available free slots on that day
-  const isStartSlotAvailableForDuration = useCallback((startStr: string, freeSlots: string[], durationMinutes: number) => {
+  const isStartSlotAvailableForDuration = useCallback((startStr: string, freeSlots: string[], durationMinutes: number, fechaStr?: string) => {
     const startMins = timeToMins(startStr);
     const endMins = startMins + durationMinutes;
 
     // Max work end time: 19:30 (7:30 PM)
     if (endMins > 19 * 60 + 30) return false;
 
-    // Get all hourly slots that this booking will occupy
-    const neededSlots = getBlockedSlotsList(startStr, durationMinutes);
+    // Comprobar colisión únicamente contra los turnos que realmente ofrece la agenda de ese día
+    const offeredSlots = getDayOfferedSlots(fechaStr);
+    const overlappingOfferedSlots = offeredSlots.filter(slotStr => {
+      const slotMins = timeToMins(slotStr);
+      return slotMins >= startMins && slotMins < endMins;
+    });
 
-    // ALL required slots must be free (present in freeSlots)
-    return neededSlots.every(slot => freeSlots.includes(slot));
-  }, [getBlockedSlotsList]);
+    if (overlappingOfferedSlots.length === 0) {
+      return freeSlots.includes(startStr);
+    }
+
+    return overlappingOfferedSlots.every(slot => freeSlots.includes(slot));
+  }, [getDayOfferedSlots]);
 
   const availableTimes = useMemo(() => {
     if (!selectedDateStr) return [];
@@ -857,7 +876,7 @@ export default function App() {
     const allFreeSlots = dayData.slots || [];
     
     return allFreeSlots.filter((startStr: string) => 
-      isStartSlotAvailableForDuration(startStr, allFreeSlots, totalDuration)
+      isStartSlotAvailableForDuration(startStr, allFreeSlots, totalDuration, selectedDateStr)
     );
   }, [selectedDateStr, filteredSlotsData, totalDuration, isStartSlotAvailableForDuration]);
 
@@ -868,7 +887,7 @@ export default function App() {
         const [y, m, d] = s.fecha.split('-').map(Number);
         const freeSlots = s.slots || [];
         const validStartSlotsCount = freeSlots.filter(startStr => 
-          isStartSlotAvailableForDuration(startStr, freeSlots, totalDuration)
+          isStartSlotAvailableForDuration(startStr, freeSlots, totalDuration, s.fecha)
         ).length;
 
         return {
@@ -1131,7 +1150,7 @@ export default function App() {
               </div>
             </div>
             <span className="text-[9px] md:text-[10px] text-zinc-500 font-extrabold uppercase shrink-0 whitespace-nowrap bg-white/[0.02] border border-white/[0.04] px-1.5 py-0.5 rounded-md">
-              ⏱️ {formatDurationHours(s.duration || 60)}
+              Detallado
             </span>
           </div>
           
@@ -2579,8 +2598,8 @@ export default function App() {
                                 : selectedServices.map(i => activeServices.find(s => s.id === i)?.name).join(' + ')
                               }
                             </h5>
-                            <p className="text-[8px] md:text-[10px] text-zinc-400 font-bold uppercase tracking-wider text-left">
-                              ⏱️ Duración: <span className="text-white font-black">{formatDurationHours(totalDuration)}</span> • Requiere {Math.ceil(totalDuration / 60)} {Math.ceil(totalDuration / 60) === 1 ? 'módulo' : 'módulos'} de tiempo
+                            <p className="text-[8px] md:text-[10px] text-emerald-400 font-bold uppercase tracking-wider text-left">
+                              ✓ Turno garantizado • Atención dedicada y personalizada
                             </p>
                           </div>
                           <div className="flex items-center justify-between md:justify-end gap-4 border-t border-white/[0.04] md:border-0 pt-3 md:pt-0">

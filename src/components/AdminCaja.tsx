@@ -124,7 +124,18 @@ export default function AdminCaja({
   };
 
   const [activeTab, setActiveTab] = useState<'agenda' | 'caja' | 'facturacion' | 'stats' | 'metrics' | 'catalog' | 'gallery'>('agenda');
-  const [allMovements, setAllMovements] = useState<Movement[]>([]);
+  const [allMovements, setAllMovements] = useState<Movement[]>(() => {
+    try {
+      const raw = localStorage.getItem('lys_cache_movements');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed.sort((a: Movement, b: Movement) => (b.fecha || '').localeCompare(a.fecha || ''));
+        }
+      }
+    } catch {}
+    return [];
+  });
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -149,7 +160,16 @@ export default function AdminCaja({
   const [filterFacturado, setFilterFacturado] = useState<'todos' | 'facturados' | 'sin_facturar'>('todos');
 
   // Facturas y Configuración ARCA
-  const [arcaFacturas, setArcaFacturas] = useState<ArcaFacturaRecord[]>([]);
+  const [arcaFacturas, setArcaFacturas] = useState<ArcaFacturaRecord[]>(() => {
+    try {
+      const raw = localStorage.getItem('lys_arca_facturas');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch {}
+    return [];
+  });
   const [arcaConfig, setArcaConfig] = useState<ArcaConfig | null>(null);
 
   // Modal para facturar movimiento puntual
@@ -548,17 +568,22 @@ ${factura.qrUrl ? `🔗 Validar en ARCA/AFIP: ${factura.qrUrl}` : ''}
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const fetchRows = async () => {
-    setLoading(true);
+    // Only show full-screen spinner if we have no cached data to display
+    if (allMovements.length === 0) {
+      setLoading(true);
+    }
     setError(null);
     try {
-      const [data, facturasData, configData] = await Promise.all([
-        firestoreService.getMovements(),
-        firestoreService.getArcaFacturas().catch(() => []),
-        firestoreService.getArcaConfig().catch(() => null)
-      ]);
+      const facturasPromise = firestoreService.getArcaFacturas().catch(() => []);
+      const configPromise = firestoreService.getArcaConfig().catch(() => null);
+
+      const facturasData = await facturasPromise;
+      const data = await firestoreService.getMovements(facturasData);
+      const configData = await configPromise;
+
       const sorted = data.sort((a, b) => b.fecha.localeCompare(a.fecha));
       setAllMovements(sorted);
-      if (facturasData) setArcaFacturas(facturasData);
+      if (facturasData && facturasData.length > 0) setArcaFacturas(facturasData);
       if (configData) setArcaConfig(configData);
     } catch (err: any) {
       console.error('Error loading movements:', err);

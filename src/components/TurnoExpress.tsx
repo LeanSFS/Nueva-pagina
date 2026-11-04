@@ -201,14 +201,12 @@ export default function TurnoExpress({
 
   const totalDuration = useMemo(() => {
     if (selectedServices.length === 0) return 60;
-    const baseDur = selectedServices.reduce((total, sId) => {
+    return selectedServices.reduce((total, sId) => {
       const srv = activeServices.find(s => s.id === sId);
       const defaultDuration = SERVICES.find(st => st.id === sId)?.duration || 60;
       return total + (srv?.duration || defaultDuration);
     }, 0);
-    // 45 min buffer logístico cuando es a domicilio
-    return bookingModalidad === 'domicilio' ? baseDur + 45 : baseDur;
-  }, [selectedServices, activeServices, bookingModalidad]);
+  }, [selectedServices, activeServices]);
 
   const formatDurationHours = (mins: number) => {
     if (!mins || mins <= 0) return '0min';
@@ -258,15 +256,43 @@ export default function TurnoExpress({
     return blocked.length > 0 ? blocked : [startHour];
   }, []);
 
-  const isStartSlotAvailableForDuration = useCallback((startStr: string, freeSlots: string[], durationMinutes: number) => {
+  const getDayOfferedSlots = useCallback((fechaStr?: string): string[] => {
+    if (!fechaStr) {
+      return ['07:00', '08:00', '09:00', '10:00', '12:00', '14:00', '15:00', '16:00', '17:00', '18:00'];
+    }
+    const [y, m, d] = fechaStr.split('-').map(Number);
+    const dayOfWeek = new Date(y, m - 1, d).getDay();
+    if (dayOfWeek === 1) {
+      return ['12:00', '15:00', '17:00'];
+    }
+    if (dayOfWeek === 6) {
+      return ['08:00', '10:00', '12:00', '14:00', '16:00', '18:00'];
+    }
+    return ['07:00', '08:00', '09:00', '12:00', '15:00', '17:00'];
+  }, []);
+
+  const isStartSlotAvailableForDuration = useCallback((startStr: string, freeSlots: string[], durationMinutes: number, fechaStr?: string) => {
     const [h, m] = startStr.split(':').map(Number);
     const startMins = h * 60 + (m || 0);
     const endMins = startMins + durationMinutes;
 
+    // Horario límite laboral de cierre: 19:30
     if (endMins > 19 * 60 + 30) return false;
-    const neededSlots = getBlockedSlotsList(startStr, durationMinutes);
-    return neededSlots.every(slot => freeSlots.includes(slot));
-  }, [getBlockedSlotsList]);
+
+    // Comprobar colisión únicamente contra los turnos que realmente ofrece la agenda de ese día
+    const offeredSlots = getDayOfferedSlots(fechaStr);
+    const overlappingOfferedSlots = offeredSlots.filter(slotStr => {
+      const [sh, sm] = slotStr.split(':').map(Number);
+      const slotMins = sh * 60 + (sm || 0);
+      return slotMins >= startMins && slotMins < endMins;
+    });
+
+    if (overlappingOfferedSlots.length === 0) {
+      return freeSlots.includes(startStr);
+    }
+
+    return overlappingOfferedSlots.every(slot => freeSlots.includes(slot));
+  }, [getDayOfferedSlots]);
 
   // Filtered available slots & dates
   const filteredSlotsData = useMemo(() => {
@@ -289,7 +315,7 @@ export default function TurnoExpress({
         const [y, m, d] = s.fecha.split('-').map(Number);
         const freeSlots = s.slots || [];
         const validStartSlotsCount = freeSlots.filter(startStr => 
-          isStartSlotAvailableForDuration(startStr, freeSlots, totalDuration)
+          isStartSlotAvailableForDuration(startStr, freeSlots, totalDuration, s.fecha)
         ).length;
 
         return {
@@ -307,7 +333,7 @@ export default function TurnoExpress({
     if (!dayData) return [];
     const allFreeSlots = dayData.slots || [];
     return allFreeSlots.filter((startStr: string) => 
-      isStartSlotAvailableForDuration(startStr, allFreeSlots, totalDuration)
+      isStartSlotAvailableForDuration(startStr, allFreeSlots, totalDuration, selectedDateStr)
     );
   }, [selectedDateStr, filteredSlotsData, totalDuration, isStartSlotAvailableForDuration]);
 
@@ -612,11 +638,7 @@ export default function TurnoExpress({
               {selectedServices.length === 0 ? (
                 <span className="text-amber-400 font-semibold">Elegí al menos un servicio</span>
               ) : (
-                <>
-                  <span className="text-zinc-300">{selectedServices.length} {selectedServices.length === 1 ? 'servicio' : 'servicios'}</span>
-                  <span className="mx-1.5 text-zinc-600">•</span>
-                  <strong className="text-emerald-400">{formatDurationHours(totalDuration)}</strong>
-                </>
+                <span className="text-zinc-300">{selectedServices.length} {selectedServices.length === 1 ? 'servicio seleccionado' : 'servicios seleccionados'}</span>
               )}
             </span>
           </div>
@@ -659,9 +681,8 @@ export default function TurnoExpress({
                   </div>
 
                   <div className="pt-2.5 border-t border-white/5 flex items-center justify-between">
-                    <span className="text-[10px] font-bold text-zinc-400 flex items-center gap-1">
-                      <Clock3 className="w-3.5 h-3.5 text-zinc-500" />
-                      {srv.duration || 60} min
+                    <span className="text-[10px] font-bold text-zinc-400">
+                      Detallado profesional
                     </span>
                     <div className="text-right">
                       <span className="text-sm sm:text-base font-display font-black text-emerald-400">

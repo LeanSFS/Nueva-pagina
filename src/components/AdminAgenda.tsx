@@ -153,14 +153,22 @@ export default function AdminAgenda({
   useEffect(() => {
     loadBookings();
 
-    // Auto-refresh every 8 seconds to catch client bookings immediately
+    // Auto-refresh every 25s only when document is visible to prevent GitHub / network rate limits
     const interval = setInterval(() => {
-      loadBookings();
-    }, 8000);
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        loadBookings();
+      }
+    }, 25000);
 
+    let lastFocusTime = Date.now();
     const onFocus = () => {
-      loadBookings();
+      const now = Date.now();
+      if (now - lastFocusTime > 15000) {
+        lastFocusTime = now;
+        loadBookings();
+      }
     };
+
     window.addEventListener('focus', onFocus);
     window.addEventListener('lys_booking_updated', loadBookings);
     window.addEventListener('storage', loadBookings);
@@ -279,9 +287,12 @@ export default function AdminAgenda({
       return []; // Domingo cerrado
     }
     if (dayOfWeek === 6) {
-      return ['08:00', '09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00'];
+      return ['08:00', '10:00', '12:00', '14:00', '16:00', '18:00'];
     }
-    return ['07:00', '08:00', '09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00'];
+    if (dayOfWeek === 1) {
+      return ['12:00', '15:00', '17:00'];
+    }
+    return ['07:00', '08:00', '09:00', '12:00', '15:00', '17:00'];
   };
 
   const possibleTimes = useMemo(() => getPossibleTimesForDate(filterDate), [filterDate]);
@@ -1951,7 +1962,7 @@ export default function AdminAgenda({
                       onChange={(e) => setMbTime(e.target.value)}
                       className="w-full bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-emerald-500"
                     >
-                      {['07:00', '08:00', '09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00'].map(h => (
+                      {['07:00', '08:00', '09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00'].map(h => (
                         <option key={h} value={h}>{h} hs</option>
                       ))}
                     </select>
