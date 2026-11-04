@@ -342,6 +342,56 @@ app.post("/api/taken-slots", (req, res) => {
   return res.json({ success: true, count: updated.length });
 });
 
+// Persistent Server Movements Store (Movements in Caja)
+const MOVEMENTS_FILE = path.join(DATA_DIR, "movements.json");
+
+function getServerMovements(): any[] {
+  try {
+    if (fs.existsSync(MOVEMENTS_FILE)) {
+      const data = JSON.parse(fs.readFileSync(MOVEMENTS_FILE, "utf-8"));
+      return Array.isArray(data) ? data : [];
+    }
+  } catch (err) {
+    console.error("Error reading movements file:", err);
+  }
+  return [];
+}
+
+function saveServerMovements(movements: any[]) {
+  try {
+    const dir = path.dirname(MOVEMENTS_FILE);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(MOVEMENTS_FILE, JSON.stringify(movements, null, 2), "utf-8");
+  } catch (err) {
+    console.error("Error saving movements file:", err);
+  }
+}
+
+app.get("/api/movements", (_req, res) => {
+  return res.json(getServerMovements());
+});
+
+app.post("/api/movements", (req, res) => {
+  const mov = req.body;
+  if (!mov || !mov.id) {
+    return res.status(400).json({ error: "id is required for movement" });
+  }
+  const current = getServerMovements();
+  const map = new Map(current.map(m => [m.id, m]));
+  map.set(mov.id, mov);
+  const updated = Array.from(map.values()).sort((a, b) => (b.fecha || '').localeCompare(a.fecha || ''));
+  saveServerMovements(updated);
+  return res.json({ success: true, movement: mov });
+});
+
+app.delete("/api/movements/:id", (req, res) => {
+  const { id } = req.params;
+  const current = getServerMovements();
+  const updated = current.filter(m => m.id !== id);
+  saveServerMovements(updated);
+  return res.json({ success: true, deletedId: id });
+});
+
 let genAiClient: GoogleGenAI | null = null;
 function getGeminiClient(): GoogleGenAI {
   if (!genAiClient) {

@@ -116,14 +116,19 @@ export async function fetchSlots(forceRefresh = false): Promise<TimeSlot[]> {
       // Desbloqueo de 10:00, 14:00, 18:00 al ocuparse sus turnos base.
       if (dayOfWeek === 6) {
         dTimes = ['08:00', '12:00', '16:00'];
-        if (busySlots.has(`${fechaStr}_08:00`)) {
-          dTimes.push('10:00');
-        }
-        if (busySlots.has(`${fechaStr}_12:00`)) {
-          dTimes.push('14:00');
-        }
-        if (busySlots.has(`${fechaStr}_16:00`)) {
-          dTimes.push('18:00');
+        const baseBookedCount = ['08:00', '12:00', '16:00'].filter(t => busySlots.has(`${fechaStr}_${t}`)).length;
+        if (baseBookedCount >= 2) {
+          dTimes.push('10:00', '14:00', '18:00');
+        } else {
+          if (busySlots.has(`${fechaStr}_08:00`)) {
+            dTimes.push('10:00');
+          }
+          if (busySlots.has(`${fechaStr}_12:00`)) {
+            dTimes.push('14:00');
+          }
+          if (busySlots.has(`${fechaStr}_16:00`)) {
+            dTimes.push('18:00');
+          }
         }
       } 
       // 2. LUNES (dayOfWeek === 1): Disponibilidad únicamente a partir de las 12:00

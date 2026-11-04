@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { 
   ArrowLeft, 
   Search, 
@@ -961,44 +961,42 @@ ${factura.qrUrl ? `🔗 Validar en ARCA/AFIP: ${factura.qrUrl}` : ''}
     }
   };
 
+  const triggerAutoSync = useCallback(async () => {
+    try {
+      const syncedCount = await firestoreService.syncUnsyncedMovements();
+      await firestoreService.syncUnsyncedFacturas().catch(() => 0);
+      if (syncedCount > 0) {
+        updateUnsyncedCount();
+        fetchRows();
+      }
+    } catch (e) {
+      console.warn("Background auto-sync notice:", e);
+    }
+  }, []);
+
   useEffect(() => {
     if (isAuthorized) {
       updateUnsyncedCount();
+      triggerAutoSync();
       fetchRows();
       fetchBookings();
       loadCatalogAndGallery();
     }
-  }, [isAuthorized]);
+  }, [isAuthorized, triggerAutoSync]);
 
   useEffect(() => {
     updateUnsyncedCount();
+    triggerAutoSync();
+
+    const handleOnline = () => {
+      triggerAutoSync();
+    };
+    window.addEventListener('online', handleOnline);
 
     const unsubscribe = auth.onAuthStateChanged((user) => {
       setCurrentUser(user);
       setAuthChecking(false);
-      if (user && isUserAdmin(user)) {
-        // Auto-synchronize any offline/local movements and facturas upon successful login
-        Promise.all([
-          firestoreService.syncUnsyncedMovements(),
-          firestoreService.syncUnsyncedFacturas()
-        ])
-          .then(([syncedMovements, syncedFacturas]) => {
-            if (syncedMovements > 0 || syncedFacturas > 0) {
-              console.log(`Auto-sincronizados ${syncedMovements} movimientos y ${syncedFacturas} facturas.`);
-            }
-            updateUnsyncedCount();
-            fetchRows();
-            fetchBookings();
-            loadCatalogAndGallery();
-          })
-          .catch((err) => {
-            console.error("Auto-sincronización fallida:", err);
-            updateUnsyncedCount();
-            fetchRows();
-            fetchBookings();
-            loadCatalogAndGallery();
-          });
-      }
+      triggerAutoSync();
     });
 
     // Real-time listener for ARCA facturas across devices
@@ -1399,28 +1397,7 @@ ${factura.qrUrl ? `🔗 Validar en ARCA/AFIP: ${factura.qrUrl}` : ''}
         </div>
 
         {/* Banner de Sincronización para Incógnito / Dispositivos Nuevos */}
-        {!currentUser && (
-          <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-4 sm:p-5 mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 animate-fade-in">
-            <div className="space-y-1">
-              <div className="flex items-center gap-2 text-amber-400 font-bold text-xs uppercase tracking-wider">
-                <AlertTriangle className="w-4 h-4 shrink-0 text-amber-400" />
-                <span>Dispositivo Nuevo o Modo Incógnito Detectado</span>
-              </div>
-              <p className="text-zinc-300 text-xs leading-relaxed max-w-2xl">
-                Estás dentro del panel con la contraseña del taller. Para que la base de datos en la nube (Firestore) te descargue la <strong className="text-white">Caja</strong> y la <strong className="text-white">Agenda</strong> en vivo, vinculá tu cuenta de Google autorizada (<strong className="text-emerald-400 font-mono">leandro.saralegui@gmail.com</strong>).
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={loginWithGoogle}
-              disabled={submittingGoogleAuth}
-              className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-display font-black italic text-xs px-5 py-3 rounded-xl uppercase tracking-wider transition-all shadow-lg shadow-emerald-500/20 shrink-0 flex items-center justify-center gap-2 cursor-pointer active:scale-95"
-            >
-              {submittingGoogleAuth ? <Loader2 className="w-4 h-4 animate-spin text-slate-950" /> : <Sparkles className="w-4 h-4 fill-slate-950" />}
-              <span>VINCULAR GOOGLE AHORA</span>
-            </button>
-          </div>
-        )}
+
 
         {/* ASISTENTE DE IA ADMIN */}
         <AdminAssistant
@@ -2070,22 +2047,22 @@ ${factura.qrUrl ? `🔗 Validar en ARCA/AFIP: ${factura.qrUrl}` : ''}
         ) : (
           <>
             {unsyncedCount > 0 && (
-              <div className="bg-amber-500/10 border border-amber-500/20 text-amber-300 p-5 rounded-3xl text-xs flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
+              <div className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 p-4 sm:p-5 rounded-3xl text-xs flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
                 <div className="space-y-1">
-                  <p className="font-bold uppercase tracking-wider text-[10px] text-amber-400 flex items-center gap-1.5">
-                    <span className="inline-block w-2 bg-amber-500 rounded-full h-2 animate-ping" /> Sincronización Pendiente
+                  <p className="font-bold uppercase tracking-wider text-[10px] text-emerald-400 flex items-center gap-1.5">
+                    <span className="inline-block w-2 bg-emerald-400 rounded-full h-2 animate-ping" /> Sincronización Automática con la Nube
                   </p>
                   <p className="text-zinc-300 font-semibold leading-relaxed">
-                    Hay <strong className="text-white font-black font-mono">{unsyncedCount}</strong> movimientos de caja guardados localmente. Al iniciar sesión, podés subirlos todos de golpe para que se consoliden en Firestore.
+                    Hay <strong className="text-white font-black font-mono">{unsyncedCount}</strong> movimiento{unsyncedCount > 1 ? 's' : ''} sincronizándose automáticamente con Firestore y el servidor.
                   </p>
                 </div>
                 <button
                   onClick={handleManualSync}
                   disabled={syncingNow}
-                  className="bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 px-5 py-2.5 rounded-2xl font-display font-black text-[11px] uppercase tracking-widest transition-all self-start sm:self-auto cursor-pointer flex items-center gap-2"
+                  className="bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 px-4 py-2 rounded-xl font-display font-black text-[10px] uppercase tracking-widest transition-all self-start sm:self-auto cursor-pointer flex items-center gap-2"
                 >
-                  {syncingNow && <Loader2 className="w-4 h-4 animate-spin text-slate-950" />}
-                  <span>{syncingNow ? 'SINCRONIZANDO...' : 'SUBIR A LA NUBE'}</span>
+                  {syncingNow && <Loader2 className="w-3.5 h-3.5 animate-spin text-slate-950" />}
+                  <span>{syncingNow ? 'SINCRONIZANDO...' : 'SINCRONIZAR AHORA'}</span>
                 </button>
               </div>
             )}

@@ -240,28 +240,12 @@ export default function TurnoExpress({
     return false;
   };
 
-  const getBlockedSlotsList = useCallback((startHour: string, durationMinutes: number) => {
-    const [h, m] = startHour.split(':').map(Number);
-    const startMins = h * 60 + (m || 0);
-    const endMins = startMins + (durationMinutes || 60);
-    const blocked: string[] = [];
-
-    for (let mins = 7 * 60; mins <= 18 * 60; mins += 60) {
-      if (mins >= startMins && mins < endMins) {
-        const slotH = Math.floor(mins / 60);
-        const slotM = mins % 60;
-        blocked.push(`${String(slotH).padStart(2, '0')}:${String(slotM).padStart(2, '0')}`);
-      }
-    }
-    return blocked.length > 0 ? blocked : [startHour];
-  }, []);
-
   const getDayOfferedSlots = useCallback((fechaStr?: string): string[] => {
     if (!fechaStr) {
       return ['07:00', '08:00', '09:00', '10:00', '12:00', '14:00', '15:00', '16:00', '17:00', '18:00'];
     }
-    const [y, m, d] = fechaStr.split('-').map(Number);
-    const dayOfWeek = new Date(y, m - 1, d).getDay();
+    const [yr, mo, da] = fechaStr.split('-').map(Number);
+    const dayOfWeek = new Date(yr, mo - 1, da).getDay();
     if (dayOfWeek === 1) {
       return ['12:00', '15:00', '17:00'];
     }
@@ -271,15 +255,60 @@ export default function TurnoExpress({
     return ['07:00', '08:00', '09:00', '12:00', '15:00', '17:00'];
   }, []);
 
-  const isStartSlotAvailableForDuration = useCallback((startStr: string, freeSlots: string[], durationMinutes: number, fechaStr?: string) => {
-    const [h, m] = startStr.split(':').map(Number);
+  const getBlockedSlotsList = useCallback((startHour: string, durationMinutes: number, fechaStr?: string) => {
+    if (fechaStr) {
+      const [yr, mo, da] = fechaStr.split('-').map(Number);
+      const dayOfWeek = new Date(yr, mo - 1, da).getDay();
+      if (dayOfWeek === 6) {
+        // En sábado los turnos son bloques estructurados independientes (08:00, 10:00, 12:00, 14:00, 16:00, 18:00)
+        // Reservar un turno bloquea únicamente dicho turno para permitir el desbloqueo dinámico del turno complementario.
+        return [startHour];
+      }
+    }
+    const [h, m] = startHour.split(':').map(Number);
     const startMins = h * 60 + (m || 0);
+    const endMins = startMins + (durationMinutes || 60);
+    const blocked: string[] = [];
+
+    // Check overlapping offered slots for that day
+    const offered = getDayOfferedSlots(fechaStr);
+    for (const slot of offered) {
+      const [slotH, slotM] = slot.split(':').map(Number);
+      const sMins = slotH * 60 + (slotM || 0);
+      if (sMins >= startMins && sMins < endMins) {
+        blocked.push(slot);
+      }
+    }
+    return blocked.length > 0 ? blocked : [startHour];
+  }, [getDayOfferedSlots]);
+
+  const isStartSlotAvailableForDuration = useCallback((startStr: string, freeSlots: string[], durationMinutes: number, fechaStr?: string) => {
+    // 1. Debe estar presente en los turnos disponibles
+    if (!freeSlots.includes(startStr)) return false;
+
+    const [startH, startM] = startStr.split(':').map(Number);
+    const startMins = startH * 60 + (startM || 0);
     const endMins = startMins + durationMinutes;
 
-    // Horario límite laboral de cierre: 19:30
+    // 2. Horario límite laboral de cierre: 19:30
     if (endMins > 19 * 60 + 30) return false;
 
-    // Comprobar colisión únicamente contra los turnos que realmente ofrece la agenda de ese día
+    if (!fechaStr) return true;
+
+    const [yr, mo, da] = fechaStr.split('-').map(Number);
+    const dayOfWeek = new Date(yr, mo - 1, da).getDay();
+
+    // 3. SÁBADOS:
+    // Los turnos del sábado (08:00, 12:00, 16:00 o dinámicos 10:00, 14:00, 18:00)
+    // son bloques de trabajo diseñados para admitir los servicios.
+    // Si el turno está en freeSlots y finaliza antes del cierre (19:30), está 100% disponible.
+    if (dayOfWeek === 6) {
+      return true;
+    }
+
+    // 4. LUNES A VIERNES:
+    // Comprobar colisión únicamente contra los turnos que realmente ofrece la agenda de ese día.
+    // Si un servicio largo solapa otros turnos ofrecidos en la agenda, todos deben estar libres.
     const offeredSlots = getDayOfferedSlots(fechaStr);
     const overlappingOfferedSlots = offeredSlots.filter(slotStr => {
       const [sh, sm] = slotStr.split(':').map(Number);
@@ -288,7 +317,7 @@ export default function TurnoExpress({
     });
 
     if (overlappingOfferedSlots.length === 0) {
-      return freeSlots.includes(startStr);
+      return true;
     }
 
     return overlappingOfferedSlots.every(slot => freeSlots.includes(slot));
@@ -385,7 +414,7 @@ export default function TurnoExpress({
     setIsSubmitting(true);
     const serviceName = selectedServices.map(sId => activeServices.find(s => s.id === sId)?.name || sId).join(' + ');
     const vehicleName = activeVehicles.find(v => v.id === vehicle)?.name || vehicle;
-    const blocked = getBlockedSlotsList(selectedTime, totalDuration);
+    const blocked = getBlockedSlotsList(selectedTime, totalDuration, selectedDateStr);
 
     const fullAddress = bookingModalidad === 'domicilio'
       ? `${domicilioDireccion.trim()}${domicilioEntreCalles ? ` (${domicilioEntreCalles.trim()})` : ''}, Cipolletti`

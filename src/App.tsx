@@ -805,32 +805,6 @@ export default function App() {
     return h * 60 + (m || 0);
   };
 
-  const getBlockedSlotsList = useCallback((startHour: string, durationMinutes: number) => {
-    const startMins = timeToMins(startHour);
-    const endMins = startMins + (durationMinutes || 60);
-    const blocked: string[] = [];
-    
-    // Check all hourly slots between 07:00 and 18:00
-    for (let mins = 7 * 60; mins <= 18 * 60; mins += 60) {
-      if (mins >= startMins && mins < endMins) {
-        const h = Math.floor(mins / 60);
-        const m = mins % 60;
-        const slotStr = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
-        blocked.push(slotStr);
-      }
-    }
-    return blocked.length > 0 ? blocked : [startHour];
-  }, []);
-
-  const totalDuration = useMemo(() => {
-    if (selectedServices.length === 0) return 60;
-    return selectedServices.reduce((total, sId) => {
-      const srv = activeServices.find(s => s.id === sId);
-      const defaultDuration = SERVICES.find(st => st.id === sId)?.duration || 60;
-      return total + (srv?.duration || defaultDuration);
-    }, 0);
-  }, [selectedServices, activeServices]);
-
   const getDayOfferedSlots = useCallback((fechaStr?: string): string[] => {
     if (!fechaStr) {
       return ['07:00', '08:00', '09:00', '10:00', '12:00', '14:00', '15:00', '16:00', '17:00', '18:00'];
@@ -846,15 +820,67 @@ export default function App() {
     return ['07:00', '08:00', '09:00', '12:00', '15:00', '17:00'];
   }, []);
 
+  const getBlockedSlotsList = useCallback((startHour: string, durationMinutes: number, fechaStr?: string) => {
+    if (fechaStr) {
+      const [y, m, d] = fechaStr.split('-').map(Number);
+      const dayOfWeek = new Date(y, m - 1, d).getDay();
+      if (dayOfWeek === 6) {
+        // En sábado los turnos son bloques estructurados independientes (08:00, 10:00, 12:00, 14:00, 16:00, 18:00)
+        // Reservar un turno bloquea únicamente dicho turno para permitir el desbloqueo dinámico del turno complementario.
+        return [startHour];
+      }
+    }
+    const startMins = timeToMins(startHour);
+    const endMins = startMins + (durationMinutes || 60);
+    const blocked: string[] = [];
+    
+    // Check overlapping offered slots for that day
+    const offered = getDayOfferedSlots(fechaStr);
+    for (const slot of offered) {
+      const sMins = timeToMins(slot);
+      if (sMins >= startMins && sMins < endMins) {
+        blocked.push(slot);
+      }
+    }
+    return blocked.length > 0 ? blocked : [startHour];
+  }, [getDayOfferedSlots]);
+
+  const totalDuration = useMemo(() => {
+    if (selectedServices.length === 0) return 60;
+    return selectedServices.reduce((total, sId) => {
+      const srv = activeServices.find(s => s.id === sId);
+      const defaultDuration = SERVICES.find(st => st.id === sId)?.duration || 60;
+      return total + (srv?.duration || defaultDuration);
+    }, 0);
+  }, [selectedServices, activeServices]);
+
   // Helper to check if a start time can fit the required duration given available free slots on that day
   const isStartSlotAvailableForDuration = useCallback((startStr: string, freeSlots: string[], durationMinutes: number, fechaStr?: string) => {
+    // 1. Debe estar presente en los turnos disponibles
+    if (!freeSlots.includes(startStr)) return false;
+
     const startMins = timeToMins(startStr);
     const endMins = startMins + durationMinutes;
 
-    // Max work end time: 19:30 (7:30 PM)
+    // 2. Horario límite laboral de cierre: 19:30 (7:30 PM)
     if (endMins > 19 * 60 + 30) return false;
 
-    // Comprobar colisión únicamente contra los turnos que realmente ofrece la agenda de ese día
+    if (!fechaStr) return true;
+
+    const [y, m, d] = fechaStr.split('-').map(Number);
+    const dayOfWeek = new Date(y, m - 1, d).getDay();
+
+    // 3. SÁBADOS:
+    // Los turnos del sábado (08:00, 12:00, 16:00 o dinámicos 10:00, 14:00, 18:00)
+    // son bloques de trabajo diseñados para admitir los servicios.
+    // Si el turno está en freeSlots y finaliza antes del cierre (19:30), está 100% disponible.
+    if (dayOfWeek === 6) {
+      return true;
+    }
+
+    // 4. LUNES A VIERNES:
+    // Comprobar colisión únicamente contra los turnos que realmente ofrece la agenda de ese día.
+    // Si un servicio largo solapa otros turnos ofrecidos en la agenda, todos deben estar libres.
     const offeredSlots = getDayOfferedSlots(fechaStr);
     const overlappingOfferedSlots = offeredSlots.filter(slotStr => {
       const slotMins = timeToMins(slotStr);
@@ -862,7 +888,7 @@ export default function App() {
     });
 
     if (overlappingOfferedSlots.length === 0) {
-      return freeSlots.includes(startStr);
+      return true;
     }
 
     return overlappingOfferedSlots.every(slot => freeSlots.includes(slot));
@@ -985,7 +1011,7 @@ export default function App() {
 
       const freeSlots = s.slots || [];
       const valid3ModuleStartSlots = freeSlots.filter(startStr => 
-        isStartSlotAvailableForDuration(startStr, freeSlots, requiredModulesDuration)
+        isStartSlotAvailableForDuration(startStr, freeSlots, requiredModulesDuration, s.fecha)
       );
 
       if (valid3ModuleStartSlots.length > 0) {
@@ -1033,7 +1059,7 @@ export default function App() {
     const serviceName = selectedServices.map(sId => activeServices.find(s => s.id === sId)?.name || sId).join(' + ');
     const vehicleName = activeVehicles.find(v => v.id === vehicle)?.name || vehicle;
     
-    const blocked = getBlockedSlotsList(selectedTime, totalDuration);
+    const blocked = getBlockedSlotsList(selectedTime, totalDuration, selectedDateStr);
 
     const fullAddress = bookingModalidad === 'domicilio'
       ? `${domicilioDireccion.trim()}, Cipolletti${domicilioEntreCalles.trim() ? ` (${domicilioEntreCalles.trim()})` : ''}`

@@ -354,8 +354,17 @@ export function calculateDurationFromServiceName(serviceName: string, _modalidad
   return total;
 }
 
-export function calculateBlockedSlotsForStart(startHour: string, durationMinutes: number): string[] {
+export function calculateBlockedSlotsForStart(startHour: string, durationMinutes: number, fechaStr?: string): string[] {
   if (!startHour) return ['08:00'];
+  if (fechaStr) {
+    const [y, m, d] = fechaStr.split('-').map(Number);
+    const dayOfWeek = new Date(y, m - 1, d).getDay();
+    if (dayOfWeek === 6) {
+      // En sábado los turnos son bloques estructurados independientes (08:00, 10:00, 12:00, 14:00, 16:00, 18:00).
+      // Reservar un turno base como 08:00 bloquea solo 08:00, permitiendo desbloquear dinámicamente 10:00.
+      return [startHour];
+    }
+  }
   const [h, m] = startHour.split(':').map(Number);
   const startMins = h * 60 + (m || 0);
   const endMins = startMins + (durationMinutes || 60);
@@ -605,7 +614,7 @@ export const firestoreService = {
       this.unmarkBookingDeleted(booking.id);
     }
     const duration = calculateDurationFromServiceName(booking.servicio, booking.modalidad);
-    const calculatedSlots = calculateBlockedSlotsForStart(booking.hora, duration);
+    const calculatedSlots = calculateBlockedSlotsForStart(booking.hora, duration, booking.fecha);
     const hoursToBlock = (booking.blockedSlots && booking.blockedSlots.length > 0)
       ? booking.blockedSlots
       : calculatedSlots;
@@ -1073,7 +1082,7 @@ export const firestoreService = {
       1500
     ).catch(() => null);
 
-    // 2. Fetch bundled static movements (/movements.json)
+    // 2. Fetch bundled static movements (/movements.json) and server movements (/api/movements)
     const staticMovements: Movement[] = Array.isArray(bundledMovementsJson) ? [...(bundledMovementsJson as Movement[])] : [];
     const fetchStaticJson = fetch('/movements.json', { signal: AbortSignal.timeout(1200) })
       .then(async res => {
@@ -1081,6 +1090,17 @@ export const firestoreService = {
           const json = await res.json().catch(() => null);
           if (Array.isArray(json)) {
             staticMovements.push(...json);
+          }
+        }
+      })
+      .catch(() => null);
+
+    const fetchServerMovements = fetch(getApiUrl('/api/movements'), { signal: AbortSignal.timeout(1500) })
+      .then(async res => {
+        if (res.ok) {
+          const json = await res.json().catch(() => null);
+          if (Array.isArray(json)) {
+            firestoreList.push(...json);
           }
         }
       })
@@ -1116,7 +1136,7 @@ export const firestoreService = {
     }
 
     // Await all remote fetches in parallel (max 1.5s total wait instead of cascading 15s)
-    await Promise.allSettled([fetchFirestoreDocs, fetchSharedRegistry, fetchStaticJson]);
+    await Promise.allSettled([fetchFirestoreDocs, fetchSharedRegistry, fetchStaticJson, fetchServerMovements]);
 
     // 5. Merge all without duplicates (preferring firestore/unsynced/cached with richest details)
     const map = new Map<string, Movement>();
@@ -1147,61 +1167,83 @@ export const firestoreService = {
   async saveMovement(movement: Movement): Promise<void> {
     const colPath = 'movements';
     
-    // Save to local cache first
+    // 1. Save to local cache first for instant UI response
     const localMovements = getLocalCache<Movement[]>('lys_cache_movements', []);
     const filtered = localMovements.filter(m => m.id !== movement.id);
-    filtered.push(movement);
+    filtered.unshift(movement);
     setLocalCache('lys_cache_movements', filtered);
 
-    // Save to unsynced queue
-    const unsynced = getLocalCache<Movement[]>('lys_unsynced_movements', []);
-    const filteredUnsynced = unsynced.filter(m => m.id !== movement.id);
-    filteredUnsynced.push(movement);
-    setLocalCache('lys_unsynced_movements', filteredUnsynced);
+    // 2. Persist to server backend immediately
+    try {
+      fetch(getApiUrl('/api/movements'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(movement)
+      }).catch(() => null);
+    } catch (e) {}
 
+    // 3. Persist to Cloud Firestore directly
+    let cloudSaved = false;
     try {
       const cleanMov = cleanFirestoreData(movement);
       await executeWithBackoff(async () => {
-        await withTimeout(setDoc(doc(db, colPath, movement.id), cleanMov), 4000);
+        await withTimeout(setDoc(doc(db, colPath, movement.id), cleanMov), 5000);
       });
+      cloudSaved = true;
       
-      // Successfully saved to Firestore! Remove from unsynced queue
+      // Successfully saved to Firestore! Ensure removed from unsynced queue
       const updatedUnsynced = getLocalCache<Movement[]>('lys_unsynced_movements', []).filter(m => m.id !== movement.id);
       setLocalCache('lys_unsynced_movements', updatedUnsynced);
     } catch (e) {
-      console.warn(`Cloud save for movement ${movement.id} deferred, preserved locally:`, e);
+      console.warn(`Cloud save for movement ${movement.id} deferred, queued for background auto-sync:`, e);
+      // Only keep in unsynced queue if the cloud write genuinely failed
+      const unsynced = getLocalCache<Movement[]>('lys_unsynced_movements', []);
+      if (!unsynced.some(m => m.id === movement.id)) {
+        unsynced.push(movement);
+        setLocalCache('lys_unsynced_movements', unsynced);
+      }
     }
 
-    // Sync to shared settings/movements_registry
-    try {
-      const regRef = doc(db, 'settings', 'movements_registry');
-      const regSnap = await withTimeout(getDoc(regRef), 3000).catch(() => null);
-      const currentList: Movement[] = regSnap?.exists() && Array.isArray(regSnap.data()?.movements) ? regSnap.data().movements : [];
-      const updatedList = [movement, ...currentList.filter(m => m.id !== movement.id)];
-      const cleanReg = cleanFirestoreData({ movements: updatedList, lastUpdated: new Date().toISOString() });
-      await executeWithBackoff(async () => {
-        await withTimeout(setDoc(regRef, cleanReg), 4000);
-      }).catch(() => null);
-    } catch (e) {}
+    // 4. Also update shared settings/movements_registry
+    if (cloudSaved) {
+      try {
+        const regRef = doc(db, 'settings', 'movements_registry');
+        const regSnap = await withTimeout(getDoc(regRef), 3000).catch(() => null);
+        const currentList: Movement[] = regSnap?.exists() && Array.isArray(regSnap.data()?.movements) ? regSnap.data().movements : [];
+        const updatedList = [movement, ...currentList.filter(m => m.id !== movement.id)];
+        const cleanReg = cleanFirestoreData({ movements: updatedList, lastUpdated: new Date().toISOString() });
+        await executeWithBackoff(async () => {
+          await withTimeout(setDoc(regRef, cleanReg), 4000);
+        }).catch(() => null);
+      } catch (e) {}
+    }
   },
 
   async deleteMovement(id: string): Promise<void> {
     const colPath = 'movements';
 
-    // Delete locally
+    // 1. Delete locally
     const localMovements = getLocalCache<Movement[]>('lys_cache_movements', []);
     const filtered = localMovements.filter(m => m.id !== id);
     setLocalCache('lys_cache_movements', filtered);
 
-    // Remove from unsynced queue
+    // 2. Remove from unsynced queue
     const unsynced = getLocalCache<Movement[]>('lys_unsynced_movements', []);
     const filteredUnsynced = unsynced.filter(m => m.id !== id);
     setLocalCache('lys_unsynced_movements', filteredUnsynced);
 
+    // 3. Delete from backend server
     try {
-      await withTimeout(deleteDoc(doc(db, colPath, id)), 2500);
+      fetch(getApiUrl(`/api/movements/${encodeURIComponent(id)}`), {
+        method: 'DELETE'
+      }).catch(() => null);
+    } catch (e) {}
+
+    // 4. Delete from Firestore
+    try {
+      await withTimeout(deleteDoc(doc(db, colPath, id)), 3000);
     } catch (e) {
-      handleFirestoreError(e, OperationType.DELETE, `${colPath}/${id}`);
+      console.warn(`Cloud delete for movement ${id} deferred:`, e);
     }
   },
 
