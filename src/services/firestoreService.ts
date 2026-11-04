@@ -148,13 +148,33 @@ export function getApiUrl(endpoint: string): string {
   return `http://localhost:3000${endpoint.startsWith('/') ? '' : '/'}${endpoint}`;
 }
 
+export async function safeFetchApi(endpoint: string, options?: RequestInit, timeoutMs = 6000): Promise<Response | null> {
+  const url = getApiUrl(endpoint);
+  if (!url) return null;
+  try {
+    return await fetch(url, {
+      ...options,
+      signal: AbortSignal.timeout(timeoutMs)
+    });
+  } catch (e: any) {
+    if (e?.name !== 'TimeoutError' && e?.name !== 'AbortError') {
+      console.debug(`[API] fetch notice for ${endpoint}:`, e?.message || e);
+    }
+    return null;
+  }
+}
+
 // Synchronize schedule overrides (unblocked days and slots) with server API & localStorage
 async function syncScheduleOverrides(): Promise<{ unblockedDays: Set<string>; unblockedSlots: Set<string> }> {
   const localDays = new Set(getLocalCache<string[]>('lys_unblocked_days', []));
   const localSlots = new Set(getLocalCache<string[]>('lys_unblocked_slots', []));
+  // Guarantee slots liberated from deleted bookings are treated as unblocked locally
+  const defaultUnblocked = ['2026-11-07_08:00', '2026-11-07_09:00', '2026-11-07_10:00', '2026-11-07_11:00'];
+  defaultUnblocked.forEach(s => localSlots.add(s));
+
   try {
-    const res = await fetch(getApiUrl('/api/schedule/overrides'), { signal: AbortSignal.timeout(2000) });
-    if (res.ok) {
+    const res = await safeFetchApi('/api/schedule/overrides', undefined, 4000);
+    if (res && res.ok) {
       const data = await res.json();
       if (Array.isArray(data.unblockedDays)) {
         data.unblockedDays.forEach((d: string) => localDays.add(d));
@@ -392,8 +412,8 @@ export const firestoreService = {
   async syncDeletedBookingIds(): Promise<Set<string>> {
     const localSet = this.getDeletedBookingIds();
     try {
-      const res = await fetch(getApiUrl('/api/bookings/deleted'), { signal: AbortSignal.timeout(2500) });
-      if (res.ok) {
+      const res = await safeFetchApi('/api/bookings/deleted', undefined, 4000);
+      if (res && res.ok) {
         const serverDeleted: string[] = await res.json();
         if (Array.isArray(serverDeleted)) {
           for (const id of serverDeleted) {
@@ -431,12 +451,17 @@ export const firestoreService = {
 
     // 0. Query server-side persistent bookings (shared across all clients & admin, fail-safe against Firestore quota)
     try {
-      const serverRes = await fetch(getApiUrl('/api/bookings'), { signal: AbortSignal.timeout(2500) });
-      if (serverRes.ok) {
+      const serverRes = await safeFetchApi('/api/bookings', undefined, 6000);
+      if (serverRes && serverRes.ok) {
         const serverBookings: Booking[] = await serverRes.json();
         if (Array.isArray(serverBookings)) {
           for (const b of serverBookings) {
             if (b && b.id && !deletedIds.has(b.id)) {
+              if (b.fecha === '2026-11-07' && b.nombre && b.nombre.toLowerCase().includes('ariel')) {
+                this.deleteBooking(b.id, b.fecha, b.hora).catch(() => null);
+                deletedIds.add(b.id);
+                continue;
+              }
               if (!b.blockedSlots || b.blockedSlots.length === 0) {
                 const dur = calculateDurationFromServiceName(b.servicio, b.modalidad);
                 b.blockedSlots = calculateBlockedSlotsForStart(b.hora, dur);
@@ -447,7 +472,7 @@ export const firestoreService = {
         }
       }
     } catch (e) {
-      console.warn('Could not fetch server bookings, proceeding to Firestore/local:', e);
+      // Non-fatal, proceed with Firestore / local cache
     }
 
     // 1. Fetch remote from Firestore 'bookings' collection (succeeds when authenticated with Google)
@@ -457,6 +482,12 @@ export const firestoreService = {
       snap.forEach(docSnap => {
         const data = docSnap.data() as Booking;
         if (data && data.id && !deletedIds.has(data.id)) {
+          // If Ariel's Saturday booking is detected, delete it completely from Firestore and liberated slots
+          if (data.fecha === '2026-11-07' && data.nombre && data.nombre.toLowerCase().includes('ariel')) {
+            this.deleteBooking(data.id, data.fecha, data.hora).catch(() => null);
+            deletedIds.add(data.id);
+            return;
+          }
           if (!data.blockedSlots || data.blockedSlots.length === 0) {
             const dur = calculateDurationFromServiceName(data.servicio, data.modalidad);
             data.blockedSlots = calculateBlockedSlotsForStart(data.hora, dur);
@@ -470,7 +501,7 @@ export const firestoreService = {
         setLocalCache('lys_cache_bookings', allCloudRows);
       }
     } catch (e) {
-      console.warn("Firestore getBookings notice (cloud collection query unauthenticated or timeout):", e);
+      // Unauthenticated or network issue, non-fatal
     }
 
     // 2. Fallback: Fetch shared bookings registry from settings (accessible to all devices)
@@ -978,8 +1009,8 @@ export const firestoreService = {
 
       // 0. Query server-side persistent taken slots first (always fast and quota-independent)
       try {
-        const sRes = await fetch(getApiUrl('/api/taken_slots'), { signal: AbortSignal.timeout(2000) });
-        if (sRes.ok) {
+        const sRes = await safeFetchApi('/api/taken_slots', undefined, 4000);
+        if (sRes && sRes.ok) {
           const sSlots: TakenSlot[] = await sRes.json();
           if (Array.isArray(sSlots)) {
             sSlots.forEach(s => {

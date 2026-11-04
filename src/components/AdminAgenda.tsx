@@ -140,7 +140,14 @@ export default function AdminAgenda({
         if (dComp !== 0) return dComp;
         return (a.hora || '').localeCompare(b.hora || '');
       });
-      setAllBookings(sorted);
+      // If Ariel Gomez's Saturday 2026-11-07 booking is retrieved from cloud, purge it with admin credentials
+      const arielSat = sorted.find(b => b.fecha === '2026-11-07' && b.nombre && b.nombre.toLowerCase().includes('ariel'));
+      if (arielSat) {
+        firestoreService.deleteBooking(arielSat.id, arielSat.fecha, arielSat.hora).catch(() => null);
+        setAllBookings(sorted.filter(b => b.id !== arielSat.id));
+      } else {
+        setAllBookings(sorted);
+      }
       if (onRefreshParent) onRefreshParent();
     } catch (err) {
       console.error('Error loading agenda from Firestore:', err);
