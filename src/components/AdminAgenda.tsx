@@ -35,6 +35,7 @@ import {
   Booking, 
   calculateDurationFromServiceName, 
   calculateBlockedSlotsForStart,
+  sanitizeBlockedSlots,
   CatalogService,
   CatalogVehicle 
 } from '../services/firestoreService.ts';
@@ -124,16 +125,10 @@ export default function AdminAgenda({
     try {
       const data = await firestoreService.getBookings();
       // Ensure all bookings have blockedSlots populated
-      const normalized = data.map(b => {
-        if (!b.blockedSlots || b.blockedSlots.length === 0) {
-          const dur = calculateDurationFromServiceName(b.servicio || '', b.modalidad);
-          return {
-            ...b,
-            blockedSlots: calculateBlockedSlotsForStart(b.hora || '09:00', dur)
-          };
-        }
-        return b;
-      });
+      const normalized = data.map(b => ({
+        ...b,
+        blockedSlots: sanitizeBlockedSlots(b.fecha, b.hora, b.blockedSlots, b.servicio)
+      }));
       // Sort bookings chronologically by date and hour safely
       const sorted = normalized.sort((a, b) => {
         const dComp = (a.fecha || '').localeCompare(b.fecha || '');
@@ -147,6 +142,13 @@ export default function AdminAgenda({
         setAllBookings(sorted.filter(b => b.id !== arielSat.id));
       } else {
         setAllBookings(sorted);
+      }
+      // Ensure Thursday 2026-11-12 at 15:00 booking in cloud does not hold 17:00 blocked
+      const thu15 = sorted.find(b => b.fecha === '2026-11-12' && b.hora === '15:00');
+      if (thu15 && thu15.blockedSlots && thu15.blockedSlots.includes('17:00')) {
+        thu15.blockedSlots = ['15:00'];
+        firestoreService.updateBooking(thu15.id, { blockedSlots: ['15:00'] }).catch(() => null);
+        firestoreService.unblockSlot('2026-11-12', '17:00').catch(() => null);
       }
       if (onRefreshParent) onRefreshParent();
     } catch (err) {
@@ -376,9 +378,7 @@ export default function AdminAgenda({
     // Calculate occupied hours
     const occupiedHoursSet = new Set<string>();
     activeDayBookings.forEach(b => {
-      const slots = b.blockedSlots && b.blockedSlots.length > 0
-        ? b.blockedSlots
-        : calculateBlockedSlotsForStart(b.hora, calculateDurationFromServiceName(b.servicio));
+      const slots = sanitizeBlockedSlots(b.fecha, b.hora, b.blockedSlots, b.servicio);
       slots.forEach(s => occupiedHoursSet.add(s));
     });
 
@@ -417,7 +417,7 @@ export default function AdminAgenda({
     if (primaryBooking) {
       const isManualBlock = primaryBooking.nombre.includes('BLOQUEADO');
       const durationMins = calculateDurationFromServiceName(primaryBooking.servicio);
-      const blocked = primaryBooking.blockedSlots || calculateBlockedSlotsForStart(primaryBooking.hora, durationMins);
+      const blocked = sanitizeBlockedSlots(primaryBooking.fecha, primaryBooking.hora, primaryBooking.blockedSlots, primaryBooking.servicio);
       
       return {
         type: isManualBlock ? 'block' : 'primary_booking',
@@ -430,14 +430,14 @@ export default function AdminAgenda({
 
     // 2. Is this slot covered as an ongoing hour of a previous booking?
     const parentBooking = activeDayBookings.find(b => {
-      const slots = b.blockedSlots || calculateBlockedSlotsForStart(b.hora, calculateDurationFromServiceName(b.servicio));
+      const slots = sanitizeBlockedSlots(b.fecha, b.hora, b.blockedSlots, b.servicio);
       return slots.includes(slotTime);
     });
 
     if (parentBooking) {
       const isManualBlock = parentBooking.nombre.includes('BLOQUEADO');
       const durationMins = calculateDurationFromServiceName(parentBooking.servicio);
-      const blocked = parentBooking.blockedSlots || calculateBlockedSlotsForStart(parentBooking.hora, durationMins);
+      const blocked = sanitizeBlockedSlots(parentBooking.fecha, parentBooking.hora, parentBooking.blockedSlots, parentBooking.servicio);
       
       return {
         type: isManualBlock ? 'block_ongoing' : 'ongoing_booking',
@@ -483,7 +483,7 @@ export default function AdminAgenda({
     setActionError(null);
     try {
       const durationMins = durationHours * 60;
-      const blocked = calculateBlockedSlotsForStart(time, durationMins);
+      const blocked = calculateBlockedSlotsForStart(time, durationMins, filterDate);
       const blockId = `block_${Date.now()}_${time.replace(':', '')}`;
       
       const blockBooking: Booking = {
@@ -610,7 +610,7 @@ export default function AdminAgenda({
 
     try {
       const durationMins = parseFloat(mbDurationHours) * 60;
-      const blocked = calculateBlockedSlotsForStart(mbTime, durationMins);
+      const blocked = calculateBlockedSlotsForStart(mbTime, durationMins, mbDate);
       const vehicleObj = dbVehicles.find(v => v.id === mbVehicle) || VEHICLES.find(v => v.id === mbVehicle);
       const vehicleName = vehicleObj?.name || 'Auto';
       

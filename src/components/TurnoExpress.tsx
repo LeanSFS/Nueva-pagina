@@ -201,10 +201,25 @@ export default function TurnoExpress({
 
   const totalDuration = useMemo(() => {
     if (selectedServices.length === 0) return 60;
+    
+    // Calibración de equipo x2: Combo / Full (Exterior + Interior) dura exactamente 120 min (2hs)
+    const hasExterior = selectedServices.includes('lavado_exterior') || selectedServices.some(s => s.toLowerCase().includes('exterior'));
+    const hasInterior = selectedServices.includes('detallado_interior') || selectedServices.some(s => s.toLowerCase().includes('interior'));
+    const hasFull = selectedServices.some(s => s.toLowerCase().includes('full') || s.toLowerCase().includes('combo'));
+    
+    if ((hasExterior && hasInterior) || hasFull) {
+      let dur = 120;
+      if (selectedServices.includes('tapizados_tela')) dur += 60;
+      if (selectedServices.includes('limpieza_techo')) dur += 45;
+      if (selectedServices.includes('tapizados_cuero')) dur += 45;
+      return dur;
+    }
+
     return selectedServices.reduce((total, sId) => {
       const srv = activeServices.find(s => s.id === sId);
       const defaultDuration = SERVICES.find(st => st.id === sId)?.duration || 60;
-      return total + (srv?.duration || defaultDuration);
+      const srvDur = (srv?.duration && srv.duration <= 60) ? srv.duration : defaultDuration;
+      return total + srvDur;
     }, 0);
   }, [selectedServices, activeServices]);
 
@@ -264,6 +279,11 @@ export default function TurnoExpress({
         // Reservar un turno bloquea únicamente dicho turno para permitir el desbloqueo dinámico del turno complementario.
         return [startHour];
       }
+      // Días de semana (excepto martes): 15:00 y 17:00 son bloques estructurados independientes de 2 horas en equipo
+      if (dayOfWeek !== 2) {
+        if (startHour === '15:00') return ['15:00'];
+        if (startHour === '17:00') return ['17:00'];
+      }
     }
     const [h, m] = startHour.split(':').map(Number);
     const startMins = h * 60 + (m || 0);
@@ -286,29 +306,33 @@ export default function TurnoExpress({
     // 1. Debe estar presente en los turnos disponibles
     if (!freeSlots.includes(startStr)) return false;
 
-    const [startH, startM] = startStr.split(':').map(Number);
-    const startMins = startH * 60 + (startM || 0);
-    const endMins = startMins + durationMinutes;
-
-    // 2. Horario límite laboral de cierre: 19:30
-    if (endMins > 19 * 60 + 30) return false;
-
     if (!fechaStr) return true;
 
     const [yr, mo, da] = fechaStr.split('-').map(Number);
     const dayOfWeek = new Date(yr, mo - 1, da).getDay();
 
-    // 3. SÁBADOS:
+    // 2. SÁBADOS:
     // Los turnos del sábado (08:00, 12:00, 16:00 o dinámicos 10:00, 14:00, 18:00)
     // son bloques de trabajo diseñados para admitir los servicios.
-    // Si el turno está en freeSlots y finaliza antes del cierre (19:30), está 100% disponible.
     if (dayOfWeek === 6) {
       return true;
     }
 
-    // 4. LUNES A VIERNES:
-    // Comprobar colisión únicamente contra los turnos que realmente ofrece la agenda de ese día.
-    // Si un servicio largo solapa otros turnos ofrecidos en la agenda, todos deben estar libres.
+    // 3. DÍAS HÁBILES (excepto martes): 15:00 y 17:00 son bloques independientes de 2 horas de tarde en equipo
+    if (dayOfWeek !== 2) {
+      if (startStr === '15:00' && freeSlots.includes('15:00')) return true;
+      if (startStr === '17:00' && freeSlots.includes('17:00')) return true;
+    }
+
+    const [startH, startM] = startStr.split(':').map(Number);
+    const startMins = startH * 60 + (startM || 0);
+    const endMins = startMins + durationMinutes;
+
+    // 4. Horario límite laboral de cierre: 19:30 en días hábiles
+    const maxEndMins = 19 * 60 + 30;
+    if (endMins > maxEndMins) return false;
+
+    // 5. Comprobar colisión únicamente contra los turnos que realmente ofrece la agenda de ese día.
     const offeredSlots = getDayOfferedSlots(fechaStr);
     const overlappingOfferedSlots = offeredSlots.filter(slotStr => {
       const [sh, sm] = slotStr.split(':').map(Number);

@@ -169,7 +169,7 @@ async function syncScheduleOverrides(): Promise<{ unblockedDays: Set<string>; un
   const localDays = new Set(getLocalCache<string[]>('lys_unblocked_days', []));
   const localSlots = new Set(getLocalCache<string[]>('lys_unblocked_slots', []));
   // Guarantee slots liberated from deleted bookings are treated as unblocked locally
-  const defaultUnblocked = ['2026-11-07_08:00', '2026-11-07_09:00', '2026-11-07_10:00', '2026-11-07_11:00'];
+  const defaultUnblocked = ['2026-11-07_08:00', '2026-11-07_09:00', '2026-11-07_10:00', '2026-11-07_11:00', '2026-11-12_17:00'];
   defaultUnblocked.forEach(s => localSlots.add(s));
 
   try {
@@ -384,6 +384,11 @@ export function calculateBlockedSlotsForStart(startHour: string, durationMinutes
       // Reservar un turno base como 08:00 bloquea solo 08:00, permitiendo desbloquear dinámicamente 10:00.
       return [startHour];
     }
+    // Días de semana (excepto martes): 15:00 y 17:00 son bloques independientes de 2 horas de tarde en equipo
+    if (dayOfWeek !== 2) {
+      if (startHour === '15:00') return ['15:00'];
+      if (startHour === '17:00') return ['17:00'];
+    }
   }
   const [h, m] = startHour.split(':').map(Number);
   const startMins = h * 60 + (m || 0);
@@ -399,6 +404,42 @@ export function calculateBlockedSlotsForStart(startHour: string, durationMinutes
   }
 
   return blocked.length > 0 ? blocked : [startHour];
+}
+
+export function sanitizeBlockedSlots(fecha?: string, hora?: string, rawBlockedSlots?: string[], servicio?: string): string[] {
+  if (!hora) return ['08:00'];
+  if (!fecha) {
+    if (rawBlockedSlots && rawBlockedSlots.length > 0) return rawBlockedSlots;
+    const dur = calculateDurationFromServiceName(servicio || '');
+    return calculateBlockedSlotsForStart(hora, dur);
+  }
+
+  const [y, m, d] = fecha.split('-').map(Number);
+  const dayOfWeek = new Date(y, m - 1, d).getDay();
+
+  // Sábados: turnos estructurados independientes en parejas (08, 10, 12, 14, 16, 18).
+  // Cada turno es un bloque de 2hs y NUNCA propaga bloqueo a otros horarios.
+  if (dayOfWeek === 6) {
+    return [hora];
+  }
+
+  // Días de semana (excepto martes): 15:00 y 17:00 son bloques estructurados independientes de 2 horas en equipo.
+  // 15:00 NUNCA debe bloquear 17:00 bajo ninguna circunstancia.
+  if (dayOfWeek !== 2) {
+    if (hora === '15:00') return ['15:00'];
+    if (hora === '17:00') return ['17:00'];
+  }
+
+  if (rawBlockedSlots && rawBlockedSlots.length > 0) {
+    let cleaned = [...rawBlockedSlots];
+    if (dayOfWeek !== 2 && hora === '15:00') {
+      cleaned = cleaned.filter(h => h !== '16:00' && h !== '17:00' && h !== '18:00');
+    }
+    return cleaned.length > 0 ? cleaned : [hora];
+  }
+
+  const duration = calculateDurationFromServiceName(servicio || '');
+  return calculateBlockedSlotsForStart(hora, duration, fecha);
 }
 
 export const firestoreService = {
@@ -462,10 +503,7 @@ export const firestoreService = {
                 deletedIds.add(b.id);
                 continue;
               }
-              if (!b.blockedSlots || b.blockedSlots.length === 0) {
-                const dur = calculateDurationFromServiceName(b.servicio, b.modalidad);
-                b.blockedSlots = calculateBlockedSlotsForStart(b.hora, dur);
-              }
+              b.blockedSlots = sanitizeBlockedSlots(b.fecha, b.hora, b.blockedSlots, b.servicio);
               loadedMap.set(b.id, b);
             }
           }
@@ -488,10 +526,7 @@ export const firestoreService = {
             deletedIds.add(data.id);
             return;
           }
-          if (!data.blockedSlots || data.blockedSlots.length === 0) {
-            const dur = calculateDurationFromServiceName(data.servicio, data.modalidad);
-            data.blockedSlots = calculateBlockedSlotsForStart(data.hora, dur);
-          }
+          data.blockedSlots = sanitizeBlockedSlots(data.fecha, data.hora, data.blockedSlots, data.servicio);
           loadedMap.set(data.id, data);
         }
       });
@@ -512,10 +547,7 @@ export const firestoreService = {
         if (Array.isArray(regData?.bookings)) {
           for (const b of regData.bookings) {
             if (b && b.id && !deletedIds.has(b.id) && !loadedMap.has(b.id)) {
-              if (!b.blockedSlots || b.blockedSlots.length === 0) {
-                const dur = calculateDurationFromServiceName(b.servicio, b.modalidad);
-                b.blockedSlots = calculateBlockedSlotsForStart(b.hora, dur);
-              }
+              b.blockedSlots = sanitizeBlockedSlots(b.fecha, b.hora, b.blockedSlots, b.servicio);
               loadedMap.set(b.id, b);
             }
           }
@@ -527,10 +559,7 @@ export const firestoreService = {
     const cached = getLocalCache<Booking[]>('lys_cache_bookings', []);
     for (const b of cached) {
       if (b && b.id && !deletedIds.has(b.id) && !loadedMap.has(b.id)) {
-        if (!b.blockedSlots || b.blockedSlots.length === 0) {
-          const dur = calculateDurationFromServiceName(b.servicio, b.modalidad);
-          b.blockedSlots = calculateBlockedSlotsForStart(b.hora, dur);
-        }
+        b.blockedSlots = sanitizeBlockedSlots(b.fecha, b.hora, b.blockedSlots, b.servicio);
         loadedMap.set(b.id, b);
       }
     }
@@ -627,13 +656,10 @@ export const firestoreService = {
 
     const consolidated = Array.from(loadedMap.values())
       .filter(b => b && b.id && !deletedIds.has(b.id))
-      .map(b => {
-        if (!b.blockedSlots || b.blockedSlots.length === 0) {
-          const dur = calculateDurationFromServiceName(b.servicio || '', b.modalidad);
-          return { ...b, blockedSlots: calculateBlockedSlotsForStart(b.hora || '09:00', dur) };
-        }
-        return b;
-      });
+      .map(b => ({
+        ...b,
+        blockedSlots: sanitizeBlockedSlots(b.fecha, b.hora, b.blockedSlots, b.servicio)
+      }));
 
     // Update local cache
     setLocalCache('lys_cache_bookings', consolidated);
@@ -644,13 +670,7 @@ export const firestoreService = {
     if (booking && booking.id) {
       this.unmarkBookingDeleted(booking.id);
     }
-    const duration = calculateDurationFromServiceName(booking.servicio, booking.modalidad);
-    const calculatedSlots = calculateBlockedSlotsForStart(booking.hora, duration, booking.fecha);
-    const hoursToBlock = (booking.blockedSlots && booking.blockedSlots.length > 0)
-      ? booking.blockedSlots
-      : calculatedSlots;
-    
-    // Ensure blockedSlots is saved in the booking object
+    const hoursToBlock = sanitizeBlockedSlots(booking.fecha, booking.hora, booking.blockedSlots, booking.servicio);
     booking.blockedSlots = hoursToBlock;
 
     // Save to local cache first
@@ -762,11 +782,7 @@ export const firestoreService = {
     const localBookings = getLocalCache<Booking[]>('lys_cache_bookings', []);
     const bk = localBookings.find(b => b.id === bookingId);
     
-    const duration = calculateDurationFromServiceName(bk?.servicio || '', bk?.modalidad);
-    const calculatedSlots = calculateBlockedSlotsForStart(bk?.hora || hora, duration);
-    const hoursToBlock = bk && bk.blockedSlots && bk.blockedSlots.length > 0
-      ? bk.blockedSlots
-      : calculatedSlots;
+    const hoursToBlock = sanitizeBlockedSlots(bk?.fecha || fecha, bk?.hora || hora, bk?.blockedSlots, bk?.servicio);
 
     // 2. Remove from local client cache immediately
     const filteredBookings = localBookings.filter(b => b.id !== bookingId);
@@ -928,12 +944,24 @@ export const firestoreService = {
     }
   },
 
+  async updateBooking(bookingId: string, updates: Partial<Booking>): Promise<void> {
+    if (!bookingId) return;
+    const localBookings = getLocalCache<Booking[]>('lys_cache_bookings', []);
+    const updatedBookings = localBookings.map(b => b.id === bookingId ? { ...b, ...updates } : b);
+    setLocalCache('lys_cache_bookings', updatedBookings);
+
+    try {
+      await executeWithBackoff(async () => {
+        const bookingRef = doc(db, 'bookings', bookingId);
+        await updateDoc(bookingRef, cleanFirestoreData(updates));
+      });
+    } catch (e) {
+      console.warn(`Cloud update for booking ${bookingId} deferred, saved locally:`, e);
+    }
+  },
+
   async updateBookingStatus(bookingId: string, booking: Booking, newStatus: Booking['estado']): Promise<void> {
-    const duration = calculateDurationFromServiceName(booking.servicio);
-    const calculatedSlots = calculateBlockedSlotsForStart(booking.hora, duration);
-    const hoursToBlock = booking.blockedSlots && booking.blockedSlots.length > 0
-      ? booking.blockedSlots
-      : calculatedSlots;
+    const hoursToBlock = sanitizeBlockedSlots(booking.fecha, booking.hora, booking.blockedSlots, booking.servicio);
 
     // Update local cache
     const localBookings = getLocalCache<Booking[]>('lys_cache_bookings', []);
@@ -989,6 +1017,9 @@ export const firestoreService = {
 
   async getPublicTakenSlots(): Promise<TakenSlot[]> {
     const colPath = 'taken_slots';
+    let unblockedDays = new Set<string>();
+    let unblockedSlots = new Set<string>();
+
     try {
       // Calculate today's date in Argentina timezone
       let todayStr = new Date().toISOString().split('T')[0];
@@ -1005,7 +1036,9 @@ export const firestoreService = {
       }
 
       const resMap = new Map<string, TakenSlot>();
-      const { unblockedDays, unblockedSlots } = await syncScheduleOverrides();
+      const overrides = await syncScheduleOverrides();
+      unblockedDays = overrides.unblockedDays;
+      unblockedSlots = overrides.unblockedSlots;
 
       // 0. Query server-side persistent taken slots first (always fast and quota-independent)
       try {
@@ -1049,17 +1082,15 @@ export const firestoreService = {
         const activeBookings = allBookings.filter(b => b.fecha >= todayStr && b.estado !== 'cancelado');
 
         for (const bk of activeBookings) {
-          let hoursToBlock: string[] = [];
+          if (unblockedDays.has(bk.fecha)) continue;
 
-          if (bk.blockedSlots && bk.blockedSlots.length > 1) {
-            hoursToBlock = bk.blockedSlots;
-          } else {
-            const durationMins = calculateDurationFromServiceName(bk.servicio);
-            hoursToBlock = calculateBlockedSlotsForStart(bk.hora, durationMins);
-          }
+          const hoursToBlock = sanitizeBlockedSlots(bk.fecha, bk.hora, bk.blockedSlots, bk.servicio);
 
           for (const h of hoursToBlock) {
             const sId = `${bk.fecha}_${h}`;
+            if (unblockedDays.has(bk.fecha) || unblockedSlots.has(sId) || unblockedSlots.has(`${bk.fecha}_${h}`)) {
+              continue;
+            }
             if (!resMap.has(sId)) {
               resMap.set(sId, {
                 id: sId,
@@ -1074,6 +1105,14 @@ export const firestoreService = {
         console.warn('Silent warning parsing active bookings for extra blocked slots:', err);
       }
 
+      // Guarantee any override unblocked slots or days are purged from resMap
+      unblockedSlots.forEach(sId => resMap.delete(sId));
+      unblockedDays.forEach(d => {
+        for (const k of Array.from(resMap.keys())) {
+          if (k.startsWith(d)) resMap.delete(k);
+        }
+      });
+
       const resList = Array.from(resMap.values());
       setLocalCache('lys_cache_taken_slots', resList);
       return resList;
@@ -1081,7 +1120,7 @@ export const firestoreService = {
       console.warn("Firestore getPublicTakenSlots error/timeout, using local cache:", e);
       let todayStr = new Date().toISOString().split('T')[0];
       const localTaken = getLocalCache<TakenSlot[]>('lys_cache_taken_slots', []);
-      return localTaken.filter(ts => ts.fecha >= todayStr);
+      return localTaken.filter(ts => ts.fecha >= todayStr && !unblockedDays.has(ts.fecha) && !unblockedSlots.has(ts.id) && !unblockedSlots.has(`${ts.fecha}_${ts.hora}`));
     }
   },
 

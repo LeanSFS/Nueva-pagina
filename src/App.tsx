@@ -44,6 +44,7 @@ import { firestoreService, CatalogService, CatalogVehicle, GalleryPhoto, Domicil
 import { telegramService } from './services/telegramService.ts';
 import { GlowCard } from './components/GlowCard.tsx';
 import { AIKnowledgeContent } from './components/AIKnowledgeContent.tsx';
+import { GoogleReviewsCarousel } from './components/GoogleReviewsCarousel.tsx';
 
 const AdminCaja = React.lazy(() => import('./components/AdminCaja.tsx'));
 const TurnoExpress = React.lazy(() => import('./components/TurnoExpress.tsx'));
@@ -829,6 +830,11 @@ export default function App() {
         // Reservar un turno bloquea únicamente dicho turno para permitir el desbloqueo dinámico del turno complementario.
         return [startHour];
       }
+      // Días de semana (excepto martes): 15:00 y 17:00 son bloques estructurados independientes de 2 horas en equipo
+      if (dayOfWeek !== 2) {
+        if (startHour === '15:00') return ['15:00'];
+        if (startHour === '17:00') return ['17:00'];
+      }
     }
     const startMins = timeToMins(startHour);
     const endMins = startMins + (durationMinutes || 60);
@@ -847,10 +853,25 @@ export default function App() {
 
   const totalDuration = useMemo(() => {
     if (selectedServices.length === 0) return 60;
+    
+    // Calibración de equipo x2: Combo / Full (Exterior + Interior) dura exactamente 120 min (2hs)
+    const hasExterior = selectedServices.includes('lavado_exterior') || selectedServices.some(s => s.toLowerCase().includes('exterior'));
+    const hasInterior = selectedServices.includes('detallado_interior') || selectedServices.some(s => s.toLowerCase().includes('interior'));
+    const hasFull = selectedServices.some(s => s.toLowerCase().includes('full') || s.toLowerCase().includes('combo'));
+    
+    if ((hasExterior && hasInterior) || hasFull) {
+      let dur = 120;
+      if (selectedServices.includes('tapizados_tela')) dur += 60;
+      if (selectedServices.includes('limpieza_techo')) dur += 45;
+      if (selectedServices.includes('tapizados_cuero')) dur += 45;
+      return dur;
+    }
+
     return selectedServices.reduce((total, sId) => {
       const srv = activeServices.find(s => s.id === sId);
       const defaultDuration = SERVICES.find(st => st.id === sId)?.duration || 60;
-      return total + (srv?.duration || defaultDuration);
+      const srvDur = (srv?.duration && srv.duration <= 60) ? srv.duration : defaultDuration;
+      return total + srvDur;
     }, 0);
   }, [selectedServices, activeServices]);
 
@@ -859,27 +880,32 @@ export default function App() {
     // 1. Debe estar presente en los turnos disponibles
     if (!freeSlots.includes(startStr)) return false;
 
-    const startMins = timeToMins(startStr);
-    const endMins = startMins + durationMinutes;
-
-    // 2. Horario límite laboral de cierre: 19:30 (7:30 PM)
-    if (endMins > 19 * 60 + 30) return false;
-
     if (!fechaStr) return true;
 
     const [y, m, d] = fechaStr.split('-').map(Number);
     const dayOfWeek = new Date(y, m - 1, d).getDay();
 
-    // 3. SÁBADOS:
+    // 2. SÁBADOS:
     // Los turnos del sábado (08:00, 12:00, 16:00 o dinámicos 10:00, 14:00, 18:00)
     // son bloques de trabajo diseñados para admitir los servicios.
-    // Si el turno está en freeSlots y finaliza antes del cierre (19:30), está 100% disponible.
     if (dayOfWeek === 6) {
       return true;
     }
 
-    // 4. LUNES A VIERNES:
-    // Comprobar colisión únicamente contra los turnos que realmente ofrece la agenda de ese día.
+    // 3. DÍAS HÁBILES (excepto martes): 15:00 y 17:00 son bloques independientes de 2 horas de tarde en equipo
+    if (dayOfWeek !== 2) {
+      if (startStr === '15:00' && freeSlots.includes('15:00')) return true;
+      if (startStr === '17:00' && freeSlots.includes('17:00')) return true;
+    }
+
+    const startMins = timeToMins(startStr);
+    const endMins = startMins + durationMinutes;
+
+    // 4. Horario límite laboral de cierre: 19:30 en días hábiles
+    const maxEndMins = 19 * 60 + 30;
+    if (endMins > maxEndMins) return false;
+
+    // 5. Comprobar colisión únicamente contra los turnos que realmente ofrece la agenda de ese día.
     // Si un servicio largo solapa otros turnos ofrecidos en la agenda, todos deben estar libres.
     const offeredSlots = getDayOfferedSlots(fechaStr);
     const overlappingOfferedSlots = offeredSlots.filter(slotStr => {
@@ -1635,7 +1661,7 @@ export default function App() {
                     <div className="p-5 rounded-2xl bg-emerald-950/20 border border-emerald-500/30 space-y-3 relative overflow-hidden">
                       <div className="flex items-center justify-between text-white font-bold text-xs uppercase tracking-wider">
                         <span className="text-emerald-400 font-black">Con Abono Mensual LyS</span>
-                        <span className="text-emerald-400 font-black">Desde $50.000 / mes</span>
+                        <span className="text-emerald-400 font-black">Desde $55.000 / mes</span>
                       </div>
                       <ul className="space-y-2 text-xs text-zinc-200">
                         <li className="flex items-start gap-2">
@@ -1989,172 +2015,8 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Google Reviews Section */}
-              <div className="mt-20 pb-20">
-                <SectionHeader kicker="Reseñas" title="Opiniones en <span class='text-emerald-500'>Google</span>" number="06" />
-                
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
-                  
-                  {/* Summary / Rating Badge */}
-                  <div className="bg-zinc-900 border border-white/5 rounded-[3rem] p-8 md:p-10 lg:sticky lg:top-24 flex flex-col items-center text-center relative overflow-hidden group hover:border-emerald-500/10 transition-all duration-300">
-                    <div className="absolute -top-12 -left-12 w-32 h-32 bg-emerald-500/5 blur-3xl rounded-full" />
-                    
-                    {/* Google Icon Badge Custom SVG */}
-                    <div className="w-16 h-16 bg-white/5 border border-white/10 rounded-2xl flex items-center justify-center mb-6 shadow-xl relative group-hover:scale-105 transition-transform">
-                      <svg className="w-8 h-8" viewBox="0 0 24 24">
-                        <path
-                          fill="#EA4335"
-                          d="M12.24 10.285V13.4h6.887c-.275 1.565-1.88 4.604-6.887 4.604-4.33 0-7.859-3.578-7.859-8s3.53-8 7.859-8c2.46 0 4.105 1.025 5.047 1.926l2.427-2.334C18.155 1.583 15.435 1 12.24 1 5.485 1 0 6.485 0 13.2s5.485 12.2 12.24 12.2c7.055 0 11.75-4.96 11.75-11.95 0-.805-.085-1.415-.19-1.965H12.24z"
-                        />
-                      </svg>
-                    </div>
-
-                    <h3 className="font-display font-black text-2.5xl text-white mb-2 italic tracking-tight">LyS Lavados</h3>
-                    
-                    {/* Stars */}
-                    <div className="flex items-center gap-1 mb-3">
-                      {[1, 2, 3, 4, 5].map((star) => (
-                        <Star key={star} className="w-5 h-5 fill-amber-400 text-amber-400" />
-                      ))}
-                    </div>
-
-                    <div className="flex items-baseline gap-2 mb-8">
-                      <span className="text-4xl font-display font-black text-white italic">5.0</span>
-                    </div>
-
-                    <div className="flex flex-col gap-3 w-full">
-                      <a 
-                        href="https://maps.google.com/?q=LyS+Lavados+Cipolletti,+Venezuela+1659" 
-                        target="_blank" 
-                        rel="noreferrer"
-                        className="w-full flex items-center justify-center gap-2 py-4 bg-emerald-500 hover:bg-emerald-400 text-night font-display font-black italic rounded-2xl transition-all shadow-lg shadow-emerald-500/10 active:scale-[0.98]"
-                      >
-                        DEJAR RESEÑA
-                        <ArrowRight className="w-4 h-4 translate-y-[-0.5px]" />
-                      </a>
-                      
-                      <a 
-                        href="https://maps.google.com/?q=LyS+Lavados+Cipolletti,+Venezuela+1659" 
-                        target="_blank" 
-                        rel="noreferrer"
-                        className="w-full py-4 bg-white/5 hover:bg-white/10 text-white font-display font-black italic rounded-2xl border border-white/10 transition-all active:scale-[0.98] text-sm"
-                      >
-                        VER TODAS EN GOOGLE
-                      </a>
-                    </div>
-                  </div>
-
-                  {/* Individual Reviews List */}
-                  <div className="lg:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-6">
-                    {[
-                      {
-                        name: 'Maria Rosa SANSEVERINO',
-                        avatar: 'MS',
-                        role: 'Cliente verificado',
-                        time: 'Hace 1 hora',
-                        text: 'Siempre excelente servicio y atención. Soy cliente. Le llevo el auto en pésimas condiciones y lo deja como salido de la concesionaria. Muy recomendable',
-                        highlight: 'lo deja como salido de la concesionaria'
-                      },
-                      {
-                        name: 'romina riquelme',
-                        avatar: 'RR',
-                        role: 'Local Guide',
-                        time: 'Hace 2 días',
-                        text: 'Excelente trabajo, muy detallista y responsable. El auto estaba en muy malas condiciones y quedo como nuevo! Se noto la dedicación y compromiso con lo que hace....',
-                        highlight: 'quedo como nuevo!'
-                      },
-                      {
-                        name: 'miguel montenegro',
-                        avatar: 'MM',
-                        role: 'Cliente verificado',
-                        time: 'Hace 3 días',
-                        text: 'Excelente atención. Cordialidad, seriedad y compromiso. Recomendable...',
-                        highlight: 'Excelente atención'
-                      },
-                      {
-                        name: 'Mariela Retamal',
-                        avatar: 'MR',
-                        role: 'Local Guide',
-                        time: 'Hace 4 días',
-                        text: 'Impecable labor!! Lo súper recomiendo Excelentes productos, te cuidan el auto, al lavadero al cual lo llevaba antes calle Naciones Unidas frente al cementerio un desastre siempre algo me rompían del auto y los productos que utilizaban un desastre de muy mala calidad',
-                        highlight: 'Impecable labor!! Lo súper recomiendo'
-                      },
-                      {
-                        name: 'Monica Cifuentes',
-                        avatar: 'MC',
-                        role: 'Cliente verificado',
-                        time: 'Hace 3 días',
-                        text: 'Excelente trabajo!!! Prolijo, responsable LyS lLavados... Re lindo quedó mí auto... Es por ahí!!! Éxitos... 👍 👏 😍 ...',
-                        highlight: 'Re lindo quedó mí auto'
-                      },
-                      {
-                        name: 'Gabriela Figueroa',
-                        avatar: 'GF',
-                        role: 'Local Guide',
-                        time: 'Hace 1 mes',
-                        text: 'Excelente servicio, los autos quedaron impecables, muy buen trabajo Leandro. Gracias',
-                        highlight: 'los autos quedaron impecables'
-                      }
-                    ].map((review, index) => (
-                      <div 
-                        key={index} 
-                        className="bg-zinc-900 border border-white/5 rounded-3xl p-6 relative overflow-hidden group hover:border-emerald-500/20 transition-all duration-300 flex flex-col justify-between"
-                      >
-                        <div>
-                          {/* User details */}
-                          <div className="flex items-center justify-between mb-4">
-                            <div className="flex items-center gap-3">
-                              <div className="w-10 h-10 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center font-display font-black text-emerald-400 text-sm">
-                                {review.avatar}
-                              </div>
-                              <div>
-                                <h4 className="font-display font-bold text-white text-sm">{review.name}</h4>
-                                <p className="text-[10px] font-semibold text-zinc-500 flex items-center gap-1.5 uppercase tracking-wider">
-                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                                  {review.role}
-                                </p>
-                              </div>
-                            </div>
-                            
-                            {/* Star Badge */}
-                            <div className="flex items-center gap-0.5">
-                              {[1,2,3,4,5].map((s) => (
-                                <Star key={s} className="w-3 h-3 fill-amber-400 text-amber-400" />
-                              ))}
-                            </div>
-                          </div>
-
-                          <p className="text-zinc-400 text-sm leading-relaxed mb-4">
-                            "{review.text.split(review.highlight)[0]}
-                            <span className="text-white font-medium bg-emerald-500/5 px-1 py-0.5 rounded border border-emerald-500/10">
-                              {review.highlight}
-                            </span>
-                            {review.text.split(review.highlight)[1]}"
-                          </p>
-                        </div>
-
-                        <div className="flex items-center justify-between mt-2 pt-4 border-t border-white/[0.03]">
-                          <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-600">
-                            {review.time}
-                          </span>
-                          
-                          {/* Mini Google Logo G */}
-                          <div className="opacity-35 group-hover:opacity-75 transition-opacity">
-                            <svg className="w-4 h-4" viewBox="0 0 24 24">
-                              <path
-                                fill="#fff"
-                                d="M12.24 10.285V13.4h6.887c-.275 1.565-1.88 4.604-6.887 4.604-4.33 0-7.859-3.578-7.859-8s3.53-8 7.859-8c2.46 0 4.105 1.025 5.047 1.926l2.427-2.334C18.155 1.583 15.435 1 12.24 1 5.485 1 0 6.485 0 13.2s5.485 12.2 12.24 12.2c7.055 0 11.75-4.96 11.75-11.95 0-.805-.085-1.415-.19-1.965H12.24z"
-                              />
-                            </svg>
-                          </div>
-                        </div>
-
-                      </div>
-                    ))}
-                  </div>
-
-                </div>
-              </div>
+              {/* Google Reviews Carousel Section */}
+              <GoogleReviewsCarousel />
             </section>
 
 
@@ -2294,7 +2156,7 @@ export default function App() {
                               <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 text-[9px] font-black tracking-widest uppercase">Abono 2 Visitas/Mes</span>
                             </div>
                             <p className="text-zinc-400 text-[11px] md:text-xs mt-0.5 leading-snug">
-                              1 Full + 1 Exterior quincenal en tu domicilio en Cipolletti desde $50.000/mes con viáticos 100% bonificados.
+                              1 Full + 1 Exterior quincenal en tu domicilio en Cipolletti desde $55.000/mes con viáticos 100% bonificados.
                             </p>
                           </div>
                         </div>

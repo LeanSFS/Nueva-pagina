@@ -157,7 +157,7 @@ export interface AbonoPlan {
 export const ABONO_MENSUAL: Record<'auto' | 'suv' | 'pickup', AbonoPlan> = {
   auto: {
     name: 'Auto / Sedán',
-    price: 50000,
+    price: 55000,
     icon: '🚗',
     examples: 'Cronos, Gol, 208, Corolla, Etios, Focus',
     features: [
@@ -171,7 +171,7 @@ export const ABONO_MENSUAL: Record<'auto' | 'suv' | 'pickup', AbonoPlan> = {
   },
   suv: {
     name: 'SUV / Utilitario',
-    price: 60000,
+    price: 65000,
     icon: '🚙',
     examples: 'Taos, Tracker, Duster, EcoSport, Kangoo, T-Cross',
     features: [
@@ -185,7 +185,7 @@ export const ABONO_MENSUAL: Record<'auto' | 'suv' | 'pickup', AbonoPlan> = {
   },
   pickup: {
     name: 'Pick-up / Camioneta',
-    price: 70000,
+    price: 75000,
     icon: '🛻',
     examples: 'Hilux, Amarok, Ranger, RAM, Toro, Frontier',
     features: [

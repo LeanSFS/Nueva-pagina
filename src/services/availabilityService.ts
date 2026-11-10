@@ -133,12 +133,28 @@ export async function fetchSlots(forceRefresh = false): Promise<TimeSlot[]> {
       } 
       // 2. LUNES (dayOfWeek === 1): Disponibilidad únicamente a partir de las 12:00
       else if (dayOfWeek === 1) {
-        dTimes = ['12:00', '15:00', '17:00'];
+        dTimes = ['12:00', '15:00'];
+        if (busySlots.has(`${fechaStr}_15:00`) || busySlots.has(`${fechaStr}_12:00`)) {
+          dTimes.push('17:00');
+        }
       } 
-      // 3. MARTES A VIERNES (dayOfWeek 2 a 5):
-      // Grilla limpia: 07:00, 08:00, 09:00, 12:00, 15:00, 17:00
-      else {
+      // 3. MARTES (dayOfWeek === 2):
+      // Mostrar 15:00 y 17:00; al reservarse uno, se bloquea el otro
+      else if (dayOfWeek === 2) {
         dTimes = ['07:00', '08:00', '09:00', '12:00', '15:00', '17:00'];
+      }
+      // 4. MIÉRCOLES A VIERNES (dayOfWeek 3 a 5):
+      // Turnos base (3 autos al día trabajando solo): mañana (07:00/08:00/09:00), mediodía (12:00) y tarde (15:00).
+      // El 4to turno (17:00) se desbloquea dinámicamente cuando se reserva el turno de las 15:00 o los turnos base.
+      else {
+        dTimes = ['07:00', '08:00', '09:00', '12:00', '15:00'];
+        const morningBooked = busySlots.has(`${fechaStr}_07:00`) || busySlots.has(`${fechaStr}_08:00`) || busySlots.has(`${fechaStr}_09:00`);
+        const noonBooked = busySlots.has(`${fechaStr}_12:00`);
+        const afternoonBooked = busySlots.has(`${fechaStr}_15:00`);
+
+        if (afternoonBooked || (morningBooked && noonBooked)) {
+          dTimes.push('17:00');
+        }
       }
 
       // Copia de slots ocupados para procesar reglas exclusivas del día

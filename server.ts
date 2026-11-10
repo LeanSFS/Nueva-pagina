@@ -803,6 +803,114 @@ app.get("/api/knowledge", (req, res) => {
   });
 });
 
+// Google Reviews API (Google Places New API sync + Cache)
+const GOOGLE_REVIEWS_FILE = path.join(DATA_DIR, "google_reviews.json");
+
+function getStoredReviews() {
+  try {
+    if (fs.existsSync(GOOGLE_REVIEWS_FILE)) {
+      return JSON.parse(fs.readFileSync(GOOGLE_REVIEWS_FILE, "utf-8"));
+    }
+  } catch (err) {
+    console.error("Error reading stored google reviews:", err);
+  }
+  return {
+    placeName: "LyS Lavados",
+    address: "Venezuela 1659, R8324 Cipolletti, Río Negro",
+    rating: 5.0,
+    userRatingCount: 38,
+    googleMapsUri: "https://maps.google.com/?q=LyS+Lavados+Cipolletti,+Venezuela+1659",
+    writeReviewUri: "https://search.google.com/local/writereview?placeid=ChIJW2i9G92rY5YRb-OQ2vX_w8w",
+    lastSynced: new Date().toISOString(),
+    reviews: []
+  };
+}
+
+function saveStoredReviews(data: any) {
+  try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+    fs.writeFileSync(GOOGLE_REVIEWS_FILE, JSON.stringify(data, null, 2), "utf-8");
+  } catch (err) {
+    console.error("Error saving google reviews:", err);
+  }
+}
+
+async function syncGooglePlacesReviews(): Promise<any> {
+  const current = getStoredReviews();
+  const apiKey = process.env.VITE_GOOGLE_MAPS_API_KEY || process.env.GOOGLE_MAPS_API_KEY;
+  if (!apiKey) {
+    return current;
+  }
+
+  try {
+    const response = await fetch("https://places.googleapis.com/v1/places:searchText", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": apiKey,
+        "X-Goog-FieldMask": "places.id,places.displayName,places.rating,places.userRatingCount,places.reviews,places.googleMapsUri,places.googleMapsLinks",
+        "X-Goog-Maps-Solution-ID": "gmp_mcp_codeassist_v1_aistudio"
+      },
+      body: JSON.stringify({
+        textQuery: "LyS Lavados Venezuela 1659 Cipolletti",
+        maxResultCount: 1,
+        languageCode: "es"
+      })
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      const place = data.places && data.places[0];
+      if (place) {
+        if (place.rating) current.rating = place.rating;
+        if (place.userRatingCount) current.userRatingCount = place.userRatingCount;
+        if (place.googleMapsUri) current.googleMapsUri = place.googleMapsUri;
+        if (place.googleMapsLinks?.writeAReviewUri) current.writeReviewUri = place.googleMapsLinks.writeAReviewUri;
+
+        if (Array.isArray(place.reviews) && place.reviews.length > 0) {
+          const remoteReviews = place.reviews.map((r: any, idx: number) => ({
+            id: r.name || `remote-${idx}`,
+            authorName: r.authorAttribution?.displayName || "Cliente Google",
+            authorPhoto: r.authorAttribution?.photoUri || null,
+            authorInitial: (r.authorAttribution?.displayName || "C").slice(0, 2).toUpperCase(),
+            role: "Google Reviewer",
+            rating: r.rating || 5,
+            relativeTime: r.relativePublishTimeDescription || "Reciente",
+            text: r.text?.text || r.originalText?.text || "",
+            highlight: "",
+            service: "Servicio Verificado",
+            verified: true
+          }));
+
+          const existingTexts = new Set(current.reviews.map((cr: any) => cr.text));
+          for (const rr of remoteReviews) {
+            if (rr.text && !existingTexts.has(rr.text)) {
+              current.reviews.unshift(rr);
+            }
+          }
+        }
+        current.lastSynced = new Date().toISOString();
+        saveStoredReviews(current);
+      }
+    }
+  } catch (err) {
+    console.warn("Could not sync remote Google Places reviews, using cached data:", err);
+  }
+  return current;
+}
+
+app.get("/api/reviews", async (_req, res) => {
+  const reviewsData = await syncGooglePlacesReviews();
+  return res.json(reviewsData);
+});
+
+app.post("/api/reviews/sync", async (_req, res) => {
+  const reviewsData = await syncGooglePlacesReviews();
+  return res.json({ success: true, data: reviewsData });
+});
+
 // Vite middleware for dev / static for prod
 async function setupServer() {
   if (process.env.NODE_ENV !== "production") {
